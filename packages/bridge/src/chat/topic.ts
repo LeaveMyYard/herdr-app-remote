@@ -82,6 +82,7 @@ export class ChatTopicDriver {
   stop(): void {
     this.unwatch?.();
     this.unwatch = undefined;
+    this.waiting.clear();
     for (const topic of [...this.polls.keys()]) this.close(topic);
   }
 

@@ -217,6 +217,18 @@ describe("ChatTopicDriver", () => {
     expect(hub.get("chat:t9")).toBeDefined();
   });
 
+  it("stop() leaves nothing polling, even with chats waiting for a slot", async () => {
+    vi.useFakeTimers();
+    const { calls, runner } = replay({ ls: ok("[]") });
+    const hub = setup(runner);
+    for (let i = 0; i <= MAX_ACTIVE_CHATS; i++) await sub(hub, `chat:t${i}`);
+    driver?.stop();
+    expect(driver?.activeTopics).toEqual([]);
+    const n = calls.length;
+    await settle(CHAT_INTERVAL_MS * 10);
+    expect(calls.length).toBe(n);
+  });
+
   it("never sends input: only ls and read reach hc", async () => {
     vi.useFakeTimers();
     const { calls, runner } = replay();
