@@ -156,9 +156,15 @@ export class AuditLog {
   /** The newest `n` entries, oldest first (reads the current file and, if needed, `.1`). */
   tail(n: number): AuditEntry[] {
     const read = (f: string): AuditEntry[] => {
-      if (!existsSync(f)) return [];
+      let text: string;
+      try {
+        text = readFileSync(f, "utf8");
+      } catch {
+        // Missing, or unreadable (the panel flags a failing log; its view must still build).
+        return [];
+      }
       const out: AuditEntry[] = [];
-      for (const l of readFileSync(f, "utf8").split("\n")) {
+      for (const l of text.split("\n")) {
         if (!l) continue;
         try {
           out.push(JSON.parse(l) as AuditEntry);

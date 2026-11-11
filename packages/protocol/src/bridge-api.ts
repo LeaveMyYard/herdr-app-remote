@@ -545,6 +545,29 @@ export function chatTerminal(topic: string): string | null {
   return TERMINAL_ID.test(id) ? id : null;
 }
 
+/**
+ * `terminal.send` (S16, capability `terminal.input`): `hc send` pastes `text` into the terminal and presses Enter.
+ * That is all it can do (checked in the rig against hc 0.1.19): it has no special keys, so there is no key `act`.
+ * An empty `text` presses Enter alone.
+ */
+export const TERMINAL_SEND_MAX_CHARS = 4000;
+/**
+ * What `text` may not hold: C0 controls other than tab and newline (ESC above all, which could end a bracketed
+ * paste and type keys), DEL and the C1 controls. `\r` is refused too: a client sends newlines as `\n`.
+ */
+// eslint-disable-next-line no-control-regex
+export const TERMINAL_SEND_UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
+export const TerminalSendArgs = z
+  .object({
+    terminal: z.string().regex(TERMINAL_ID),
+    text: z
+      .string()
+      .refine((s) => [...s].length <= TERMINAL_SEND_MAX_CHARS, { message: `at most ${TERMINAL_SEND_MAX_CHARS} characters` })
+      .refine((s) => !TERMINAL_SEND_UNSAFE.test(s), { message: "control characters other than newline and tab are not sent" }),
+  })
+  .strict();
+export type TerminalSendArgs = z.infer<typeof TerminalSendArgs>;
+
 export const Welcome = z.object({
   type: z.literal("welcome"),
   api: z.literal(API_VERSION),

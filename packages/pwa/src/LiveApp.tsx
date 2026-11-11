@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { App, type AppData, type LiveSources } from "./App";
 import type { BridgeClient, ClientSnapshot } from "./bridge/client";
+import { fetchTerminalInput, type TerminalInputView } from "./bridge/me";
 import { useBridge, useTopics } from "./bridge/react";
 import { browserEnv } from "./push/push";
+import type { ChatInput } from "./screens/ChatComposer";
 import type { Connection } from "./model";
 
 /** Always wanted: the Agents and Swarm tabs, the plugin cards and the Inbox badge need them. */
@@ -51,8 +53,40 @@ function useHash(): string {
   return hash;
 }
 
+/** While a chat is open, `/api/v1/me` is read this often, so a desktop toggle shows without reopening it. */
+export const ME_POLL_MS = 20_000;
+
+/**
+ * This device's `terminal.input`, read from `/api/v1/me` while `active` (a chat is open) and the socket is online:
+ * at once, every {@link ME_POLL_MS}, and on `refresh()`. Off until the first answer.
+ */
+function useTerminalInput(active: boolean, online: boolean, read: () => Promise<TerminalInputView | null>) {
+  const [view, setView] = useState<TerminalInputView>({ enabled: false, until: null });
+  const refresh = useCallback(() => {
+    void read().then((v) => {
+      if (v) setView(v);
+    });
+  }, [read]);
+  useEffect(() => {
+    if (!active || !online) return;
+    refresh();
+    const t = setInterval(refresh, ME_POLL_MS);
+    return () => clearInterval(t);
+  }, [active, online, refresh]);
+  return { view, refresh };
+}
+
 /** The app over the bridge: topics in, `act`s out. Nothing changes on screen until the bridge says so. */
-export function LiveApp({ client, hostName = hostNameFrom(window.location.hostname) }: { client: BridgeClient; hostName?: string }) {
+export function LiveApp({
+  client,
+  hostName = hostNameFrom(window.location.hostname),
+  readTerminalInput = fetchTerminalInput,
+}: {
+  client: BridgeClient;
+  hostName?: string;
+  /** Test seam for `GET /api/v1/me`. */
+  readTerminalInput?: () => Promise<TerminalInputView | null>;
+}) {
   const snap = useBridge(client);
   useTopics(client, BASE_TOPICS);
   // Usage polls the desktop's CLI while subscribed, so it is asked for only once the tab has been opened.
@@ -79,6 +113,21 @@ export function LiveApp({ client, hostName = hostNameFrom(window.location.hostna
   useTopics(client, chatName ? [chatName] : [], chatName !== null);
   const chatView = chatName ? t[chatName] : undefined;
   const chatTopic = useMemo(() => parsed(bridgeApi.ChatTopic, chatView?.data), [chatView?.data]);
+  const typing = useTerminalInput(chatName !== null, snap.status === "online", readTerminalInput);
+  const input: ChatInput | undefined =
+    terminal !== undefined
+      ? {
+          ...typing.view,
+          send: async (text) => {
+            const r = await client.act("terminal.send", { terminal, text });
+            // The desktop turned it off (or it ran out): read the device again, so the composer goes.
+            if (!r.ok && r.code === "forbidden") typing.refresh();
+            // It may have typed: show the terminal as it is now. Never sent again by itself.
+            if (r.unknown_effect && chatName) client.refresh(chatName);
+            return r;
+          },
+        }
+      : undefined;
 
   const push = useMemo(() => browserEnv((kind, args) => client.act(kind, args)), [client]);
   const data: AppData | undefined = useMemo(() => (host ? { host, ...(panorama ? { panorama } : {}) } : undefined), [host, panorama]);
@@ -88,7 +137,7 @@ export function LiveApp({ client, hostName = hostNameFrom(window.location.hostna
     plugins,
     inbox,
     usage,
-    chat: chatName ? { topic: chatTopic, stale: chatView?.stale ?? null } : undefined,
+    chat: chatName && terminal !== undefined ? { topic: chatTopic, stale: chatView?.stale ?? null, terminal, input } : undefined,
     onUsageFilter: (filter) => {
       void client.act("usage.set_filter", { filter }).then((r) => {
         if (r.unknown_effect) client.refresh("usage");

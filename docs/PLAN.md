@@ -380,7 +380,7 @@ Defaults taken until the operator says otherwise:
 
 ## 8. Unverified risks
 
-- **hc:** `hc events` hasn't been tested against a live core, and it's unknown whether `hc send` can send special keys. This gates the key bar.
+- **hc:** `hc events` hasn't been tested against a live core. `hc send` was checked in the rig (S16, hc 0.1.19): it pastes text and presses Enter, and has no special keys (those are `hc keys`, not exposed), so the key bar is text-only: ⏎ and `/`. Refusals come as JSON on stderr.
 - **Tailscale serve:**
   - Identity headers: the exact set, their absence for tagged nodes, and local forgery (hence the cookie).
   - On Linux it needs `tailscale set --operator=$USER`.
@@ -401,3 +401,4 @@ Defaults taken until the operator says otherwise:
   - Peek can't show transcripts, because those need panorama's private binary.
   - Reusing plugin JS assumes it stays import-free; otherwise we pin vendored copies with a drift check.
 - **Inbox verbs** put answer text on the command line for up to 5 s, where it's visible in the local process list. This comes from app-commands v1.
+- **Terminal input** is on `hc send`'s command line for as long as the send runs (up to 15 s, while someone types at the desktop), visible in the local process list the same way. hc has no stdin form for send.

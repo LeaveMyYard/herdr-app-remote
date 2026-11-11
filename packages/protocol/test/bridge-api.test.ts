@@ -92,3 +92,20 @@ describe("bridge-api", () => {
     expect(bridgeApi.Topic.safeParse("chat:t3\n").success).toBe(false);
   });
 });
+
+describe("TerminalSendArgs (S16)", () => {
+  const ok = (a: unknown) => bridgeApi.TerminalSendArgs.safeParse(a).success;
+  it("takes a terminal id and printable text with newlines and tabs, empty included (Enter alone)", () => {
+    expect(ok({ terminal: "t3", text: "hello\n\tworld ✓" })).toBe(true);
+    expect(ok({ terminal: "vps/t7", text: "" })).toBe(true);
+    expect(ok({ terminal: "t3", text: "x".repeat(bridgeApi.TERMINAL_SEND_MAX_CHARS) })).toBe(true);
+  });
+  it("refuses control characters, \\r, overlong text, option-like ids and extra keys", () => {
+    for (const text of ["\u001b", "a\rb", "\u0000", "\u0003", "\u007f", "\u0085", "\u009b", "x".repeat(bridgeApi.TERMINAL_SEND_MAX_CHARS + 1)]) {
+      expect(ok({ terminal: "t3", text }), JSON.stringify(text).slice(0, 20)).toBe(false);
+    }
+    for (const terminal of ["-x", "--force", "", "t 3", "a/b/c"]) expect(ok({ terminal, text: "a" }), terminal).toBe(false);
+    expect(ok({ terminal: "t3", text: "a", keys: ["esc"] })).toBe(false);
+    expect(ok({ terminal: "t3" })).toBe(false);
+  });
+});

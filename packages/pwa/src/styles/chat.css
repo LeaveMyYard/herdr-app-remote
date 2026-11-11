@@ -29,7 +29,23 @@
 @media (prefers-reduced-motion: reduce){.s-wait.tile{animation:none}}
 .rel{position:relative}
 .abs{position:absolute}
-/* The slot S16 fills with the key bar and composer: same height as the board's, masked in the visual check. */
+/* The read-only footer keeps the board's 139px slot; the composer (S16) fills it and grows for a note or the
+   first-send confirmation. Masked in the visual check: the board draws keys hc send can't press (see ChatComposer). */
 .chat-foot{height:139px;padding:14px 16px 0;justify-content:flex-start}
+.chat-foot-on{height:auto;min-height:139px;padding:0}
+.chat-keys{gap:6px;padding:8px 12px;overflow:hidden}
+.hd .chat-key{min-width:44px;height:40px;padding:0 10px;border-radius:7px;border:1px solid var(--t-border);background:var(--t-raised);font-size:12.5px;color:var(--t-foreground)}
+.chat-form{align-items:flex-end;gap:8px;padding:4px 12px 34px}
+.chat-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.hd .chat-text{min-height:44px;resize:none;padding:11px 14px;border-radius:10px;border:1px solid var(--t-input);background:var(--t-background);color:var(--t-foreground);font:inherit;font-size:15px}
+.hd .chat-send{width:44px;height:44px;justify-content:center;border-radius:10px;background:var(--t-foreground);color:var(--t-background)}
+.hd .chat-send:disabled,.hd .chat-key:disabled{opacity:.45}
+.chat-note{margin:8px 12px 0;font-size:12.5px;color:var(--t-working)}
+.chat-confirm{margin:8px 12px 0;padding:10px 12px;gap:6px;border-radius:8px;border:1px solid var(--t-input);background:var(--t-raised)}
+.chat-confirm-q{margin:0;font-size:13.5px;font-weight:500;color:var(--t-foreground)}
+.chat-confirm-d{margin:0;font-size:12px;color:var(--t-dim)}
+.chat-confirm-acts{gap:8px;justify-content:flex-end}
+.hd .chat-btn{min-height:40px;padding:0 14px;border-radius:8px;background:var(--t-background);border:1px solid var(--t-input);color:var(--t-foreground);font-size:13px}
+.hd .chat-btn-go{background:var(--t-foreground);color:var(--t-background);border-color:transparent}
 .chat-ro{margin:0;font-size:12.5px;color:var(--t-dim)}
 .chat-pick{padding:8px}
