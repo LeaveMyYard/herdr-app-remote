@@ -205,7 +205,7 @@ The rig e2e needs herdr-app, hc, bwrap and mutter, so it runs locally: `pnpm rig
   - Setup: bwrap with `/run/user` and the live `~/.config/herdr-app` hidden; private pid, net and /proc; private HOME, XDG and `HERDR_APP_HOME`; a unique `HC_SESSION`; bound at `/mnt/r`; headless mutter. It never touches the live app.
   - Scenarios:
     - install;
-    - layout switch, the link starting the bridge, a host snapshot and a `tab.new` roundtrip;
+    - layout switch, the link starting the bridge, a host snapshot and a `tab.select`/`space.select` roundtrip (`tab.new` stays off the allowlist);
     - `layout_without_remote`;
     - a terminal delta;
     - fake feeds;

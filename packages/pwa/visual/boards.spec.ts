@@ -3,21 +3,21 @@ import { expect, test } from "@playwright/test";
 import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 
 /**
- * `fixture` selects the fake data behind the screen (main.tsx); `nav: false` is a full-screen sheet with no tab bar.
+ * `fixture` selects the fake data behind the screen (main.tsx; without it the app connects to the bridge); `nav: false` is a full-screen sheet with no tab bar.
  * `skip` is a region of the design render that this slice leaves out on purpose (painted out of both images).
  */
 const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[] }[] = [
-  { ref: "PhoneAgentsBasic", url: "/#/agents" },
-  { ref: "PhoneUsage", url: "/#/usage" },
-  { ref: "PhoneMissing", url: "/#/usage/missing" },
+  { ref: "PhoneAgentsBasic", url: "/?fixture=basic#/agents" },
+  { ref: "PhoneUsage", url: "/?fixture=usage#/usage" },
+  { ref: "PhoneMissing", url: "/?fixture=usage#/usage/missing" },
   { ref: "PhoneAgents", url: "/?fixture=agents#/agents" },
   { ref: "PhoneSwarm", url: "/?fixture=swarm#/swarm/sp-1" },
   { ref: "PhonePeek", url: "/?fixture=peek#/swarm/peek/t2%00a9f8e7d6", nav: false },
   // Chat's terminal text, spinner, tile and footer slot (S16's key bar and composer) are masked in the page.
-  { ref: "PhoneChat", url: "/#/chat/a-1", nav: false },
+  { ref: "PhoneChat", url: "/?fixture=chat#/chat/a-1", nav: false },
   // PhoneInbox: the board's fourth row ("delivered" placeholder) and the footer with its "Seen" button are not
   // in the read-only slice: PLAN S11 owns them.
-  { ref: "PhoneInbox", url: "/#/inbox", skip: [{ x: 0, y: 372, width: 390, height: 124 }] },
+  { ref: "PhoneInbox", url: "/?fixture=inbox#/inbox", skip: [{ x: 0, y: 372, width: 390, height: 124 }] },
 ];
 
 for (const board of BOARDS) {

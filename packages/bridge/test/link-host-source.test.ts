@@ -48,3 +48,26 @@ describe("LinkHostSource feeding the host topic", () => {
     }
   });
 });
+
+describe("LinkHostSource attached to a server it doesn't own", () => {
+  it("seeds the current link state, and stop() leaves the server listening", async () => {
+    const hub = newHub();
+    const server = new LinkServer({ token: TOKEN });
+    await server.listen();
+    try {
+      const link = await mod(server.port);
+      await tick();
+      link.send({ type: "state", seq: 1, host: fixture("typical") });
+      await tick();
+      const topic = new HostTopic({ hub, source: new LinkHostSource(server, { owned: false }), layoutGraceMs: 60_000 });
+      await topic.start();
+      expect(hub.get("host")).toEqual(fixture("typical"));
+      await topic.stop();
+      expect(server.port).toBeGreaterThan(0);
+      expect(server.connected("link")).toBe(true);
+      link.s.destroy();
+    } finally {
+      await server.close();
+    }
+  });
+});

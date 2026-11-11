@@ -35,6 +35,9 @@ export function hasCap(caps: Caps, cap: Capability, now: number): boolean {
  * `herdr-app do`. A Map, so names like `__proto__` or `constructor` can't match.
  */
 export const ACTION_CAPS: ReadonlyMap<string, Capability> = new Map<string, Capability>([
+  // Read-side requests of the usage topic: they run the same collect the subscription polls, nothing else.
+  ["usage.refresh", "view"],
+  ["usage.set_filter", "view"],
   ["inbox.draft", "inbox.answer"],
   ["inbox.answer", "inbox.answer"],
   ["inbox.dismiss", "inbox.answer"],

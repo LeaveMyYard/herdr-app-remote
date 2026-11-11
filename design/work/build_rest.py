@@ -272,7 +272,7 @@ def ph_page(title, inner, script=NOSCRIPT, css=''):
 
 
 def ph_brand():
-    return (f'<header class="row nf" style="padding:50px 8px 0 16px;gap:8px;height:94px"><img src="icons/herdr.png" alt="" style="width:24px;height:24px;border-radius:6px">'
+    return (f'<header class="row nf" style="padding:50px 8px 0 16px;gap:8px;height:94px"><img src="icons/remote.png" alt="" style="width:24px;height:24px;border-radius:6px">'
             f'<span class="f1" style="font-size:17px;font-weight:600">Herdr</span>'
             f'<button aria-label="Search" class="row" style="width:44px;height:44px;justify-content:center;color:{T["muted"]}">{icon("search", 19)}</button></header>')
 
