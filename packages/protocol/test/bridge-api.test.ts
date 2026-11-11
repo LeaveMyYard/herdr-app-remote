@@ -32,6 +32,8 @@ describe("bridge-api", () => {
     });
     expect(r).not.toHaveProperty("watchDirs");
     expect(r.providers[0]?.status).toBe("paused");
+  });
+
   it("drops a row token from the inbox topic: tokens stay on the bridge", () => {
     const row = {
       key: "alert:1",
