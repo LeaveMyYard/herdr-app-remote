@@ -45,6 +45,11 @@ Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plug
 - iOS kills background sockets, so the PWA reconnects on `visibilitychange` and `online`.
 - There is no optimistic UI: the UI changes only on `snap`, `patch` or `res`.
 
+- A `stale` is cleared by the next `snap` of that topic (the bridge never patches across a stale period). A subscriber to a topic with no state yet receives no `snap` until the first one exists (for `host`, only `stale` `reconnecting` before the first link hello).
+- `sub` always answers with the topic's current state, so re-subscribing is the recovery for a seq gap. `hello.resume` is honoured on the first `sub` of each topic: already current gets nothing, a gap within the bridge's last 64 patches is replayed, anything else gets a `snap`.
+- A client that sends anything before `hello`, a second `hello`, invalid JSON, a binary frame or a frame over 64 KiB is closed.
+- `act` answers `res {ok: false, code: "unsupported_action"}` until a slice registers a handler.
+
 ### Plugin states
 
 `ready`, `missing`, `too_old`, `broken`, `stale`, `not_running`.
