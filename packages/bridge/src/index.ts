@@ -19,3 +19,4 @@ export { loadInboxModules, resolveLauncher, type InboxModules, type Launch } fro
 export { ChatTopicDriver, CHAT_PREFIX, CHAT_INTERVAL_MS, CHAT_LINES, MAX_ACTIVE_CHATS, terminalIds, type ChatTopicOptions } from "./chat/topic.js";
 export { parseAnsi, type ParsedAnsi, type ParseOptions } from "./chat/ansi.js";
 export * from "./daemon/index.js";
+export { startApp, DEFAULT_API_PORT, FUNNEL_CHECK_MS, FUNNEL_RETRY_MS, CLOSE_FUNNEL, BRIDGE_VERSION, routeActs, navigateActor, fromRun, checkFunnel, funnelFromStatus, targetPort, SERVE_PORT, FUNNEL_TIMEOUT_MS, type App, type AppOptions, type AppLogEvent, type Actor, type FunnelVerdict } from "./app/index.js";

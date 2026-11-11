@@ -11,7 +11,7 @@ def btn26(inner, color=T['muted']):
 
 def brand():
     return (f'<div class="row nf" style="height:46px;padding:0 10px 0 14px;gap:4px;font-size:13.5px">'
-            f'<span class="row f1" style="gap:8px"><img src="icons/herdr.png" alt="" style="width:20px;height:20px;border-radius:5px;flex:none">'
+            f'<span class="row f1" style="gap:8px"><img src="icons/remote.png" alt="" style="width:20px;height:20px;border-radius:5px;flex:none">'
             f'<span style="font-weight:600;color:{T["foreground"]}">Herdr</span></span>'
             f'{btn26(icon("search", 15))}{btn26(icon("sidebar", 15))}</div>')
 
