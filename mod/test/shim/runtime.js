@@ -26,6 +26,7 @@ export class Mounted {
     return {
       notify: () => { guard(); self.render(); },
       write_to_clipboard: (text) => { guard(); self.clipboard = text; },
+      open_url: (url) => { guard(); (self.opened ??= []).push(url); },
       spawn: (task) => {
         guard();
         Promise.resolve().then(() => task(self.cx())).catch((e) => { if (!self.stopped) self.error = e; });

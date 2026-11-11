@@ -43,6 +43,7 @@
   "login": null,
   "can_start": true,
   "can_stop": false,
+  "notice": null,
   "busy": false,
   "checked_at": 1762862400000
 }

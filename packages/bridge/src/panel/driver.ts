@@ -1,6 +1,7 @@
 // The desktop Remote panel's side of the bridge (S13): builds the PanelView from the security layer, the
 // plugins topic and the link, pushes it to the `panel` copy of the mod, and runs the desktop-only operations
-// the panel asks for (approve, revoke, capability toggles, pause, pairing code).
+// the panel asks for (approve, revoke, capability toggles, pause, pairing code, and S14b's Tailscale setup:
+// check, Start serving, Stop serving).
 //
 // These operations never pass through the phone-facing `act` path: they exist only on the loopback link, for
 // the panel copy that authenticated with the runtime token. The allowlist is `modLink.PANEL_ACT_ARGS`.
@@ -9,6 +10,15 @@ import type { Hub } from "../hub.js";
 import type { LinkServer, PanelHandlers } from "../link/server.js";
 import { qrMatrix } from "../security/qr.js";
 import type { Security } from "../security/security.js";
+import type { SetupResult } from "../tailscale/setup.js";
+
+/** What the panel needs of Tailscale setup (`tailscale/setup.ts`). */
+export interface SetupControl {
+  readonly state: bridgeApi.SetupTopic;
+  check(): Promise<unknown>;
+  start(): Promise<SetupResult>;
+  stop(): Promise<SetupResult>;
+}
 
 type Outcome = { ok: true } | { ok: false; code: string };
 
@@ -18,9 +28,14 @@ export interface PanelDriverOptions {
   hub: Hub;
   /** The last Funnel verdict state (`on` blocks serving). */
   funnel: () => "on" | "off" | "unknown" | null;
-  /** More Status checks (S14: the Tailscale steps). */
+  /**
+   * Tailscale setup (S14b): drawn as the Setup view while not serving, and run by the `setup.*` acts. Null or
+   * left out when the bridge runs no setup (a fixed serve identity); those acts then answer `no_setup`.
+   */
+  setup?: () => SetupControl | null;
+  /** More Status checks (tests and rigs). */
   extraChecks?: () => modLink.PanelCheck[];
-  /** Handles the kinds this driver does not know (S14: setup.check/start/stop, once added to PANEL_ACT_ARGS). */
+  /** Handles the kinds this driver does not know. */
   extraAct?: (kind: string, args: Record<string, unknown>) => Promise<Outcome> | Outcome;
   now?: () => number;
   /** How often the view is rebuilt while a panel is linked (activity and live counts change without a security event). Default 2 s. */
@@ -48,6 +63,17 @@ export function duration(ms: number): string {
 function clockOf(ms: number): string {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** The Status tab's Tailscale lines (the DesktopRemote board), from the setup steps that are done. */
+function setupChecks(s: bridgeApi.SetupTopic | null): modLink.PanelCheck[] {
+  if (!s) return [];
+  const done = (id: bridgeApi.SetupStepId) => s.steps.find((x) => x.id === id)?.state === "done";
+  const out: modLink.PanelCheck[] = [];
+  const signedIn = s.steps.find((x) => x.id === "signed_in");
+  if (done("installed") && done("signed_in")) out.push({ id: "tailscale", label: "Tailscale connected", detail: (signedIn?.detail ?? "").slice(0, 160), state: "ok" });
+  if (done("https")) out.push({ id: "https", label: "HTTPS certificate", detail: "HTTPS certificates are on for this tailnet", state: "ok" });
+  return out;
 }
 
 export class PanelDriver {
@@ -87,7 +113,8 @@ export class PanelDriver {
     const devices = security.devices();
     const status: modLink.PanelView["status"] = paused ? "paused" : funnel === "on" ? "blocked" : serve && funnel === "off" ? "serving" : "setup";
 
-    const checks: modLink.PanelCheck[] = [...(this.o.extraChecks?.() ?? [])];
+    const setup = this.o.setup?.()?.state ?? null;
+    const checks: modLink.PanelCheck[] = [...setupChecks(setup), ...(this.o.extraChecks?.() ?? [])];
     if (funnel === "on") checks.push({ id: "funnel", label: "Funnel is on", detail: "Access is refused until Funnel is turned off", state: "bad" });
     else if (serve) checks.push({ id: "serve", label: "Serving on the tailnet", detail: serve.host, state: funnel === "off" ? "ok" : "warn" });
     else checks.push({ id: "serve", label: "Not serving yet", detail: "Set up Tailscale to let a phone connect", state: "off" });
@@ -141,6 +168,7 @@ export class PanelDriver {
       plugins,
       activity: security.activity(50).reverse().map((e) => ({ ts: e.ts, text: e.text.slice(0, 200) })),
       pairing: pairing ? { url: pairing.url, expires_at: pairing.expires_at, qr: pairing.qr } : null,
+      setup,
     };
   }
 
@@ -186,6 +214,19 @@ export class PanelDriver {
         case "pair.hide":
           this.pairing = null;
           return { ok: true };
+        case "setup.check":
+        case "setup.start":
+        case "setup.stop": {
+          // No arguments reach setup: the port, target and every command line are its own.
+          const setup = this.o.setup?.();
+          if (!setup) return { ok: false, code: "no_setup" };
+          if (kind === "setup.check") {
+            await setup.check();
+            return { ok: true };
+          }
+          const r = kind === "setup.start" ? await setup.start() : await setup.stop();
+          return r.ok ? { ok: true } : { ok: false, code: r.code };
+        }
         default:
           return (await this.o.extraAct?.(kind, args)) ?? { ok: false, code: "unsupported_action" };
       }

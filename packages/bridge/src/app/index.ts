@@ -61,6 +61,8 @@ export interface AppOptions {
   run?: Runner;
   binaries?: Binaries;
   tailscale?: string;
+  /** Test seam: how long setup's `tailscale serve` commands may run (default `SERVE_TIMEOUT_MS`). */
+  serveTimeoutMs?: number;
   /** For the usage topic's `~` abbreviation. */
   home?: string;
   funnelCheckMs?: number;
@@ -68,7 +70,7 @@ export interface AppOptions {
   actors?: readonly Actor[];
   /** A device asked to pair: the desktop panel and a toast ask "Approve a new phone?" (S13 wires it); the toast carries no device text. */
   onPending?: (d: DeviceView) => void;
-  /** Extra Status checks and panel operations (S14). */
+  /** Extra Status checks and panel operations (tests and rigs; Tailscale setup is wired in by the app itself). */
   panel?: Pick<import("../panel/driver.js").PanelDriverOptions, "extraChecks" | "extraAct">;
   log?: (e: AppLogEvent) => void;
   /** Web Push test seams (S17): the fake push service's transport and endpoint check. */
@@ -98,7 +100,7 @@ export interface App {
   setServe(serve: ServeIdentity | null): void;
   /** Tailscale setup and serve control; null when an explicit `serve` was given. Also published as topic `setup`. */
   readonly setup: Setup | null;
-  /** Stops the topics and the API listener. Leaves the link server running. */
+  /** Stops the topics and the API listener, after waiting for a setup Start or Stop in flight. Leaves the link server running. */
   stop(): Promise<void>;
 }
 
@@ -186,6 +188,8 @@ export async function startApp(o: AppOptions): Promise<App> {
     security,
     hub,
     funnel: () => funnel?.state ?? null,
+    // The Setup view and its Check now / Start serving / Stop serving (S14b); null with a fixed serve identity.
+    setup: () => setup,
     ...(o.panel ?? {}),
   }));
 
@@ -219,10 +223,14 @@ export async function startApp(o: AppOptions): Promise<App> {
           hasPhone: () => security.devices().some((d) => d.state === "approved"),
           onIdentity: (id) => security.setServe(id),
           onFunnel: () => void recheck(),
+          // Every Start and Stop serving lands in Activity, as fixed codes only.
+          onAction: (a) => security.auditServe(a),
+          ...(o.serveTimeoutMs !== undefined ? { serveTimeoutMs: o.serveTimeoutMs } : {}),
           onState: (st) => {
             const r = bridgeApi.SetupTopic.safeParse(st);
             if (r.success) hub.publish("setup", r.data as Json);
             else log({ event: "invalid_topic", topic: "setup", error: r.error.message });
+            panel.changed();
           },
         })
       : null;
@@ -263,7 +271,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     pushService.stop();
     panel.stop();
     // Each stop is safe on a driver that never started.
-    setup?.close();
+    await setup?.close();
     chat.stop();
     usage.stop();
     inbox.stop();
@@ -306,7 +314,9 @@ export async function startApp(o: AppOptions): Promise<App> {
       panel.stop();
       pushService.stop();
       if (timer) clearTimeout(timer);
-      setup?.close();
+      // A Start or Stop in flight finishes first: exiting between a serve change and its record would leave a
+      // handler herdr created but no longer knows is its own.
+      await setup?.close();
       usage?.stop();
       chat.stop();
       inbox.stop();

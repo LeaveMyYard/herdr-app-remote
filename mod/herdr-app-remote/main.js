@@ -1,9 +1,10 @@
 // herdr-app-remote: one mod, two copies.
 // - role "link": a 1 px block in an always-shown column. Mirrors host state to the
 //   bridge and runs the allowlisted commands it sends back.
-// - role "panel": the Remote panel in panel-body (panel.js: Status, Devices, Plugins, Activity). It links
-//   as copy "panel", never sends state, draws the PanelView the bridge pushes, and asks the bridge for the
-//   desktop-only operations (approve, revoke, capabilities, pause, pairing code) with `panel_act`.
+// - role "panel": the Remote panel in panel-body (panel.js: Status, Devices, Plugins, Activity, and the
+//   Setup view while not serving). It links as copy "panel", never sends state, draws the PanelView the
+//   bridge pushes, and asks the bridge for the desktop-only operations (approve, revoke, capabilities,
+//   pause, pairing code, Tailscale check / Start serving / Stop serving) with `panel_act`.
 // - Both linked copies take the `open` command (keys.json `herdr-app-remote.open`, from the
 //   installer's --key): show the panel column and select the Remote child. Local only: nothing the
 //   bridge sends can reach it.
@@ -16,7 +17,7 @@ import { agents, focused, nextCommand, panes, props, run, settings, shared, spac
 import { buildHost } from './host.js';
 import { Launcher, trustRuntime } from './install.js';
 import { Link } from './link.js';
-import { ACT_ERRORS, TABS, renderPanel, sanitize } from './panel.js';
+import { SETUP_KINDS, TABS, actError, renderPanel, sanitize } from './panel.js';
 
 /** Layout ids the derived layouts use (packages/protocol/src/install.ts). */
 export const PANEL_COLUMN = 'panel';
@@ -108,12 +109,14 @@ export default class Remote extends View {
     this.expiryFor = null; // device id being asked how long terminal input stays on
     this.copied = false;
     this.error = null;
+    this.confirmStop = false; // Stop serving asks once more before it acts
+    this.pendingSetup = null; // the setup.* act in flight, if any
     // Redraw only while a countdown is on screen or a minute boundary may have passed.
     cx.timer.every(PANEL_TICK_MS, (cx) => {
       if (this.view?.pairing || Date.now() % 60000 < PANEL_TICK_MS) cx.notify();
     });
     this.on = {
-      setTab: (cx, id) => { this.tab = id; this.error = null; cx.notify(); },
+      setTab: (cx, id) => { this.tab = id; this.error = null; this.confirmStop = false; cx.notify(); },
       expand: (cx, id) => { this.expanded = id; this.expiryFor = null; cx.notify(); },
       askExpiry: (cx, id) => { this.expiryFor = id; cx.notify(); },
       copy: (cx, text) => {
@@ -123,6 +126,11 @@ export default class Remote extends View {
         cx.notify();
       },
       act: (cx, kind, args) => this.act(cx, kind, args),
+      askStop: (cx, on) => { this.confirmStop = on; cx.notify(); },
+      // Only Tailscale admin pages reach here (panel.js sanitizeSetup); open_url refuses non-http(s) itself.
+      openUrl: (cx, url) => {
+        if (typeof url === 'string' && url.startsWith('https://login.tailscale.com/')) cx.open_url(url);
+      },
       // Turning terminal input on asks for an expiry first; every other switch flips at once.
       toggleCap: (cx, d, cap) => {
         if (cap === 'terminal.input' && !d.caps[cap]) return this.on.askExpiry(cx, d.id);
@@ -138,9 +146,14 @@ export default class Remote extends View {
   /** Sends one desktop-only operation to the bridge; the new view arrives as a `panel` message. */
   act(cx, kind, args) {
     this.error = null;
+    const setup = SETUP_KINDS.includes(kind);
+    // One setup operation at a time from this panel (the bridge serializes them anyway).
+    if (setup && this.pendingSetup) return;
+    if (setup) this.pendingSetup = kind;
     cx.spawn(async (cx) => {
       const r = await this.link.act(cx, kind, args);
-      this.error = r.ok ? null : (ACT_ERRORS[r.code] ?? `That didn't work (${r.code}).`);
+      if (setup) this.pendingSetup = null;
+      this.error = r.ok ? null : actError(kind, r.code);
       cx.notify();
     });
     cx.notify();
@@ -173,6 +186,7 @@ export default class Remote extends View {
       return renderPanel({
         view: this.view, tab: this.tab, expanded: this.expanded, expiryFor: this.expiryFor, copied: this.copied,
         error: this.error, connected: this.connected, now: Date.now(), theme: theme(),
+        confirmStop: this.confirmStop, pendingSetup: this.pendingSetup,
       }, this.on);
     }
     return div().id('remote-inert').size_full();

@@ -23,6 +23,7 @@
     ],
     "plugins": [{ "id": "usage", "name": "agent-usage", "state": "too_old", "powers": "Usage", "detail": "update it" }],
     "activity": [{ "ts": 1700000001000, "text": "Phone 1 asked to pair" }],
-    "pairing": { "url": "https://desk-1.example-tailnet.ts.net/pair#c=AAAAAAAAAAAAAAAAAAAAAA", "expires_at": 1700000300000, "qr": ["0000", "0110", "0110", "0000"] }
+    "pairing": { "url": "https://desk-1.example-tailnet.ts.net/pair#c=AAAAAAAAAAAAAAAAAAAAAA", "expires_at": 1700000300000, "qr": ["0000", "0110", "0110", "0000"] },
+    "setup": null
   }
 }
