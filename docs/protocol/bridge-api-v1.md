@@ -8,6 +8,12 @@ The API between the PWA (and other clients) and the bridge. Source of truth: `pa
 
 `GET /healthz` returns `ok`. It is the only path exempt from the guards below, and it reveals nothing.
 
+### Listener and Funnel
+
+- The API listens on `127.0.0.1:47391` only (`DEFAULT_API_PORT`, fixed so that `tailscale serve --https=8443` can forward to it). The bridge never binds another address.
+- **Funnel refusal.** The bridge reads `tailscale serve status --json` (read-only) at start and every 30 s. While Funnel is on for the serve port `:8443`, or for any `host:port` whose web or TCP handler forwards to the API port (foreground sessions included), every request, `/healthz` included, answers `503 funnel`, and live sockets are closed with `4004`. Until the first check has run, requests answer `503 starting`.
+  - Tailscale not installed counts as off: nothing can be funneled. A check that fails or prints something unreadable keeps the last verdict, so once Funnel was seen on, only a clean "off" serves again. Funnel traffic carries no `Tailscale-User-Login`, so the identity guard below would refuse it anyway; the Funnel check is the outer wall.
+
 ### Request guards
 
 The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`. Every request except `GET /healthz` must pass these checks, in this order:
@@ -52,7 +58,7 @@ Checked by the bridge for every `act`:
 
 | capability | default after approval | `act` kinds |
 |---|---|---|
-| `view` | on | none: needed for the WebSocket itself (all read topics) |
+| `view` | on | needed for the WebSocket itself (all read topics), plus `usage.refresh` and `usage.set_filter`, which only re-run the collect the subscription polls |
 | `inbox.answer` | on | `inbox.draft`, `inbox.answer`, `inbox.dismiss`, `inbox.ack` |
 | `navigate` | off | `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
 | `terminal.input` | off; turned on from the desktop only, can expire | `terminal.send` |
@@ -131,6 +137,14 @@ Source: while at least one client is subscribed, the bridge runs `hc read <t> --
 - A connection may hold at most 64 topic subscriptions. A `sub` that would exceed this closes it with code 1008 ("too many topics").
 - Frames from one connection are handled strictly in order. A slow `act` delays that connection's later `ping` and `sub` until its `res` is sent.
 
+### The PWA's client (`packages/pwa/src/bridge/client.ts`)
+
+- Before each connect it asks `GET /api/v1/me`, because a browser can't see why an upgrade was refused: `401` shows "not paired" and retries every 10 s, `403` stops ("no longer accepts this phone"), `503` retries every 10 s, a network error retries with backoff.
+- It sends `hello` (with `resume` once it knows an epoch), then one `sub` for every topic the screens want. `usage` is asked for only once the Usage tab has been opened (it polls the desktop's CLI while subscribed), and `chat:<terminal>` only while that chat is open. There is no `unsub`: a subscription lasts the socket.
+- Reconnects use backoff from 0.5 s, doubling, to 10 s. `visibilitychange` (to visible) and `online` reconnect at once; with a socket still open they send a `ping` and reconnect if no frame arrives within 5 s. A socket silent for 45 s is replaced.
+- An `act` in flight when the socket goes resolves `connection_lost` with `unknown_effect`, and is never resent. An `act` while not connected resolves `offline` and sends nothing.
+- `navigate` kinds (`agent.focus`, `tab.select`, `space.select`, `pane.focus`) are sent to the link copy as an allowlisted `run`; its outcome maps to `res` (`no_link`, `timeout`, `link_lost`, ... with `unknown_effect` where the command may have run).
+
 ### Action results and close codes
 
 `res` codes from the security layer:
@@ -145,7 +159,7 @@ Source: while at least one client is subscribed, the bridge runs `hc read <t> --
 
 The device is re-checked before every `act`, so a revoke or pause refuses the next one. An `act` that is already running when it lands still completes.
 
-WebSocket close codes: `4001` the device was revoked (or the serve name or owner login changed), `4002` remote access was paused, `4003` `view` was turned off. A client that gets one of these should not reconnect on its own. From the moment the bridge sends the close, that connection's `act`s are refused. The transport is terminated 1 s later, whether or not the peer answered the close.
+WebSocket close codes: `4001` the device was revoked (or the serve name or owner login changed), `4002` remote access was paused, `4003` `view` was turned off. A client that gets one of these should not reconnect on its own. `4004`: the bridge stopped serving because Funnel is on; the client may retry slowly (the PWA retries every 10 s). From the moment the bridge sends the close, that connection's `act`s are refused. The transport is terminated 1 s later, whether or not the peer answered the close.
 
 ### Plugin states
 

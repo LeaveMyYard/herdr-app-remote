@@ -58,7 +58,7 @@ export interface PluginRow {
 /** Tab-bar badges: the label is rendered as-is (for example "?2"). */
 export type TabBadges = Partial<Record<TabId, string>>;
 
-export type ConnectionStatus = "online" | "connecting" | "offline" | "stale";
+export type ConnectionStatus = "online" | "connecting" | "offline" | "stale" | "unpaired" | "refused" | "paused" | "unavailable";
 
 export interface Connection {
   status: ConnectionStatus;

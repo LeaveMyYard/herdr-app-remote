@@ -1,4 +1,4 @@
-import herdrIcon from "../assets/herdr.png";
+import appIcon from "../assets/remote.svg";
 import type { Space } from "../model";
 import { Icon } from "./Icon";
 import { Tile } from "./StateMarks";
@@ -6,7 +6,7 @@ import { Tile } from "./StateMarks";
 export function AppHeader() {
   return (
     <header className="row nf app-header">
-      <img src={herdrIcon} alt="" className="app-logo" />
+      <img src={appIcon} alt="" className="app-logo" />
       <span className="f1 app-title">Herdr</span>
       <button type="button" aria-label="Search" className="row icon-btn">
         <Icon name="search" size={19} />

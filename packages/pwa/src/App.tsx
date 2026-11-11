@@ -4,7 +4,7 @@ import { TabBar } from "./components/TabBar";
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { chats } from "./chat-fixtures";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
-import { TABS, type Connection, type Space, type TabBadges, type TabId } from "./model";
+import { TABS, type Connection, type PluginRow, type Space, type TabBadges, type TabId } from "./model";
 import { age } from "./panorama/format";
 import { nodeUid, selectAgents, selectBasic, selectSpaces, swarmScope, type SwarmUi } from "./panorama/select";
 import { AgentsBasic } from "./screens/AgentsBasic";
@@ -60,10 +60,37 @@ export interface AppData {
   transcript?: TranscriptPage | undefined;
 }
 
+/** What only the bridge provides. Without it (tests, the visual harness) the screens show fake demo data. */
+export interface LiveSources {
+  /** The desktop's name (the serve host's first label). */
+  hostName: string;
+  /** The `plugins` topic; undefined until its first snap. */
+  plugins: bridgeApi.PluginsTopic | undefined;
+  /** The `inbox` topic; undefined until its first snap. */
+  inbox: bridgeApi.InboxTopic | undefined;
+  /** The `usage` topic; undefined until its first snap. */
+  usage: bridgeApi.UsageTopic | undefined;
+  onUsageFilter: (filter: bridgeApi.UsageTopic["filter"]) => void;
+  onUsageRefresh: () => Promise<unknown>;
+  /** The open chat's `chat:<t>` topic (LiveApp subscribes it from the route). */
+  chat?: { topic: bridgeApi.ChatTopic | undefined; stale: string | null } | undefined;
+}
+
 export interface AppProps {
-  connection?: Connection;
+  connection?: Connection | undefined;
   tabBadges?: TabBadges;
   data?: AppData | undefined;
+  live?: LiveSources | undefined;
+}
+
+/** The plugin card rows from the `plugins` topic (it carries no versions). */
+export function pluginRows(p: bridgeApi.PluginsTopic | undefined): PluginRow[] {
+  if (!p) return [];
+  return [
+    { name: "herdr-panorama", state: p.panorama.state },
+    { name: "herdr-inbox", state: p.inbox.state },
+    { name: "agent-usage", state: p.usage.state },
+  ];
 }
 
 function parts(hash: string): string[] {
@@ -89,7 +116,9 @@ function useNowSeconds(fixed?: number): number {
   return fixed ?? now;
 }
 
-export function App({ connection, tabBadges, data }: AppProps) {
+export function App({ connection, tabBadges, data, live }: AppProps) {
+  const hostInfo = live ? { name: live.hostName } : host;
+  const rows = live ? pluginRows(live.plugins) : plugins;
   const [tab, setTab] = useState<TabId>(() => tabFromHash(window.location.hash));
   const [hash, setHash] = useState(() => window.location.hash);
   const [swarmUi, setSwarmUi] = useState<SwarmUi | null>(data?.swarmUi ?? null);
@@ -118,7 +147,7 @@ export function App({ connection, tabBadges, data }: AppProps) {
   }, []);
   const scenario = usageScenario(scenarioName);
   const inbox = inboxScenario(scenarioName);
-  const inboxBadgeNow = inboxBadge(inbox.topic);
+  const inboxBadgeNow = inboxBadge(live ? live.inbox : inbox.topic);
   const tabBadgesNow: TabBadges = { ...(tabBadges ?? badges) };
   if (!tabBadges) {
     // The inbox badge comes from the topic, not from the fixture.
@@ -161,7 +190,8 @@ export function App({ connection, tabBadges, data }: AppProps) {
       <div className="hd ph">
         <Chat
           agent={demo?.agent ?? { name: chatAgent.name, folder: chatAgent.tab, harness: chatAgent.harness === "codex" ? "codex" : "claude", status: chatAgent.status }}
-          topic={demo?.topic}
+          topic={live ? live.chat?.topic : demo?.topic}
+          stale={live?.chat?.stale ?? undefined}
           question={demo?.question}
         />
       </div>
@@ -176,7 +206,9 @@ export function App({ connection, tabBadges, data }: AppProps) {
       data && rich ? (
         <AgentsRich view={selectAgents(data.host, topic, data.spaceExtra)} />
       ) : data ? (
-        <AgentsBasic host={host} spaces={selectSpaces(data.host)} agents={selectBasic(data.host)} />
+        <AgentsBasic host={hostInfo} spaces={selectSpaces(data.host)} agents={selectBasic(data.host)} />
+      ) : live ? (
+        <AgentsBasic host={hostInfo} spaces={[]} agents={[]} />
       ) : (
         <AgentsBasic host={host} spaces={spaces} agents={agents} />
       );
@@ -192,7 +224,22 @@ export function App({ connection, tabBadges, data }: AppProps) {
         : undefined;
     screen = <Swarm scope={scope} ui={ui} onUi={setSwarmUi} now={now} transcript={data.transcript !== undefined} notice={notice} />;
   } else if (tab === "swarm") {
-    screen = <SwarmUnavailable host={host} error={topic?.error ?? null} plugins={plugins} />;
+    screen = <SwarmUnavailable host={hostInfo} error={topic?.error ?? null} plugins={rows} />;
+  } else if (tab === "usage" && live) {
+    screen = (
+      <UsageTab
+        host={hostInfo}
+        // Until the first plugins snap, show the panel (loading) rather than a Missing screen that may be wrong.
+        state={live.plugins?.usage.state ?? "ready"}
+        topic={live.usage}
+        plugins={rows}
+        installCommand={usageInstallCommand}
+        onFilter={live.onUsageFilter}
+        onRefresh={live.onUsageRefresh}
+      />
+    );
+  } else if (tab === "inbox" && live) {
+    screen = live.inbox ? <Inbox topic={live.inbox} host={data?.host} now={now} /> : <Soon title="Inbox" />;
   } else if (tab === "inbox") {
     screen = <Inbox topic={inbox.topic} host={demoHost} now={DEMO_NOW} />;
   } else if (tab === "usage") {

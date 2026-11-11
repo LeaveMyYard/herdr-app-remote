@@ -3,6 +3,10 @@ import type { Connection } from "../model";
 const COPY: Record<Exclude<Connection["status"], "online">, { cls: string; text: (c: Connection) => string }> = {
   connecting: { cls: "s-q", text: () => "Connecting to your computer…" },
   offline: { cls: "s-fail", text: () => "No connection. Retrying…" },
+  unpaired: { cls: "s-wait", text: () => "This phone isn't paired yet. Pair it from Remote on your computer." },
+  refused: { cls: "s-fail", text: () => "Your computer no longer accepts this phone." },
+  paused: { cls: "s-wait", text: () => "Remote access is paused on your computer." },
+  unavailable: { cls: "s-wait", text: () => "Your computer isn't serving right now. Retrying…" },
   stale: {
     cls: "s-wait",
     text: (c) =>
