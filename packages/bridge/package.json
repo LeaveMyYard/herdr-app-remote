@@ -5,8 +5,16 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run"
   },
-  "dependencies": { "@herdr-remote/protocol": "workspace:*" }
+  "dependencies": {
+    "@herdr-remote/protocol": "workspace:*",
+    "es-module-lexer": "1.7.0",
+    "ws": "^8.22.2"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  },
+  "main": "dist/index.js"
 }
