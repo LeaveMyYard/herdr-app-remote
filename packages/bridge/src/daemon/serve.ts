@@ -7,8 +7,10 @@
 // - `app_gone`: no link copy has been connected for `graceMs` and the app's socket is gone;
 // - `signal`: SIGTERM/SIGINT (wired by the CLI).
 //
-// S12 runs the link listener only. The API listener (P1) needs S5's guards and lands with them.
+// After runtime.json it starts the API side (S4b `startApp`: hub, topics, S5 guards, Funnel refusal) on
+// 127.0.0.1:47391, and stops it before the link server.
 import { install } from "@herdr-remote/protocol";
+import { startApp, type App, type AppOptions } from "../app/index.js";
 import { LinkServer } from "../link/server.js";
 import { newLinkToken, removeRuntime, runtimePath, writeRuntime } from "../link/runtime.js";
 import { appRuns, liveBridge, readReceipt, readRuntimeFile } from "./self.js";
@@ -27,10 +29,14 @@ export interface ServeOptions {
   pid?: number;
   now?: () => number;
   linkOptions?: { pingIntervalMs?: number; helloTimeoutMs?: number };
+  /** Options for the API side (the PWA's static dir; test seams), or false for none (link-only tests). */
+  app?: Omit<AppOptions, "appHome" | "link"> | false;
 }
 
 export interface Bridge {
   readonly link: LinkServer;
+  /** The API side; null when started with `app: false`. */
+  readonly app: App | null;
   readonly port: number;
   /** Resolves once the bridge stopped and cleaned up. */
   readonly stopped: Promise<StopReason>;
@@ -54,10 +60,13 @@ export async function serve(o: ServeOptions): Promise<Bridge | null> {
   const link = new LinkServer({ token, ...o.linkOptions });
   const port = await link.listen();
   const path = runtimePath(o.appHome);
+  let app: App | null = null;
   try {
     await writeRuntime(path, { v: 1, port, token, pid, bundle_sha256: o.bundleSha256 });
+    if (o.app !== false) app = await startApp({ ...(o.app ?? {}), appHome: o.appHome, link });
   } catch (e) {
-    await link.close();
+    await link.close().catch(() => {});
+    await removeRuntime(path, pid).catch(() => {});
     throw e;
   }
 
@@ -72,6 +81,7 @@ export async function serve(o: ServeOptions): Promise<Bridge | null> {
     stopping = (async () => {
       if (timer) clearTimeout(timer);
       timer = null;
+      await app?.stop().catch(() => {}); // before the link: the app's topics are attached to it
       await link.close().catch(() => {});
       await removeRuntime(path, pid).catch(() => {});
       resolveStopped(reason);
@@ -116,5 +126,5 @@ export async function serve(o: ServeOptions): Promise<Bridge | null> {
   link.on("link", () => (lastLink = now()));
   link.on("unlink", () => (lastLink = now()));
   tick();
-  return { link, port, stopped, stop };
+  return { link, app, port, stopped, stop };
 }

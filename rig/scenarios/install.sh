@@ -21,6 +21,8 @@ linked() { # an established TCP connection on the bridge's link port
   port=$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).port))' "$HERDR_APP_HOME/data/herdr-app-remote/runtime.json" 2>/dev/null)
   [ -n "$port" ] && ss -Htn state established "( sport = :$port )" | grep -q .
 }
+api_listens() { node -e 'const s=require("net").connect(47391,"127.0.0.1");s.on("connect",()=>process.exit(0));s.on("error",()=>process.exit(1))'; }
+healthz() { node -e 'fetch("http://127.0.0.1:47391/healthz").then(async r=>{console.log(r.status+" "+(await r.text()).slice(0,200))},e=>{console.log("error "+e.message)})'; }
 install_cmd() { node "$REPO/scripts/app-install" "$@" --app-home "$HERDR_APP_HOME" >>"$RIG/install.log" 2>&1; }
 
 scenario_main() {
@@ -47,6 +49,9 @@ scenario_main() {
   app_do layout.switch --name herdr-remote
   wait_for 30 "the link copy launched a trusted bridge" runtime_trusted
   wait_for 20 "the link copy is connected" linked
+  wait_for 20 "the API side listens on 127.0.0.1:47391" api_listens
+  say "healthz: $(healthz)"
+  [ -f "$HERDR_APP_HOME/data/herdr-app-remote/pwa/index.html" ] && pass "PWA installed for the static server" || fail "no PWA in the install"
   pid=$(bridge_pid)
   say "bridge pid: $pid"
   sleep 3
@@ -70,6 +75,7 @@ scenario_main() {
   if install_cmd uninstall; then pass "uninstall after switching away"; else fail "uninstall after switching away"; fi
   wait_for 20 "bridge stops after uninstall" gone "$pid"
   assert_eq "$(serving)" "0" "no bridge left after uninstall"
+  if api_listens; then fail "API port still open after uninstall"; else pass "API port closed after uninstall"; fi
   # Install again and let the app go: the bridge idles out (30 s grace, 5 s checks).
   # shellcheck disable=SC2086
   if install_cmd install $key; then pass "install again"; else fail "install again"; fi

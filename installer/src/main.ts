@@ -91,6 +91,15 @@ export function loadPayload(source: string): Payload {
     throw new Error("The bridge bundle is not built: run pnpm install && pnpm build first. Nothing changed");
   }
   payload.set(P.BUNDLE_PATH, { data: bundle, mode: 0o644 });
+  const pwa = join(source, "packages", "pwa", "dist");
+  let pwaFiles: string[];
+  try {
+    pwaFiles = filesUnder(pwa);
+  } catch {
+    throw new Error("The PWA is not built: run pnpm install && pnpm build first. Nothing changed");
+  }
+  if (!pwaFiles.some((f) => relative(pwa, f) === "index.html")) throw new Error(`${pwa} has no index.html: run pnpm build first. Nothing changed`);
+  for (const f of pwaFiles) payload.set(`${P.PWA_DIR}/${relative(pwa, f)}`, { data: readFileSync(f), mode: 0o644 });
   return payload;
 }
 
@@ -166,6 +175,26 @@ function preflight(home: Home, payload: Payload, old: P.InstallReceipt | null, c
   }
 }
 
+/** Makes the folders above a data-folder file (the bundle's bin is 0700, the PWA's folders 0755). */
+function ensureParents(home: Home, path: string): void {
+  const segs = path.split("/");
+  for (let d = 3; d < segs.length; d++) {
+    const dir = segs.slice(0, d).join("/");
+    home.mkdir(dir, dir === `${P.DATA_DIR}/bin` ? 0o700 : 0o755);
+  }
+}
+
+/** Removes the now-empty folders above these data-folder paths, deepest first. */
+function pruneParents(home: Home, paths: Iterable<string>): void {
+  const dirs = new Set<string>();
+  for (const p of paths) {
+    if (!p.startsWith(`${P.DATA_DIR}/`)) continue;
+    const segs = p.split("/");
+    for (let d = 3; d < segs.length; d++) dirs.add(segs.slice(0, d).join("/"));
+  }
+  for (const d of [...dirs].sort((a, b) => b.length - a.length)) home.rmdir(d);
+}
+
 // ---- erase ----
 
 /** Removes everything the record owns, the record last, so a crash can be run again. Returns what stayed. */
@@ -191,6 +220,7 @@ function erase(home: Home, record: P.InstallReceipt): string[] {
     if (isOurs(home, p, k)) home.remove(p);
     else leftovers.push(p);
   }
+  pruneParents(home, k.keys());
   if (record.keys) {
     // Never let keys.json (a link, unreadable, not JSON) stop the uninstall halfway: report it instead.
     try {
@@ -295,10 +325,14 @@ export async function install(o: Options): Promise<void> {
     home.mkdir("mods");
     publishMod(home, payload);
     home.mkdir(`${P.DATA_DIR}/bin`, 0o700);
-    for (const [p, { data, mode }] of payload) if (!p.startsWith(`${P.MOD_DIR}/`)) home.write(p, data, mode);
-    for (const p of Object.keys(old?.files ?? {})) {
-      if (!files[p] && !p.startsWith(`${P.MOD_DIR}/`) && isOurs(home, p, known(old))) home.remove(p);
+    for (const [p, { data, mode }] of payload) {
+      if (p.startsWith(`${P.MOD_DIR}/`)) continue;
+      ensureParents(home, p);
+      home.write(p, data, mode);
     }
+    const dropped = Object.keys(old?.files ?? {}).filter((p) => !files[p] && !p.startsWith(`${P.MOD_DIR}/`));
+    for (const p of dropped) if (isOurs(home, p, known(old))) home.remove(p);
+    pruneParents(home, dropped);
     if (keysText) home.write(KEYS, keysText.text, keysText.mode);
     record.previous = {};
     saveReceipt(home, record);

@@ -11,7 +11,7 @@ export const DATA_DIR = 'data/herdr-app-remote';
 export const RECEIPT_PATH = `${DATA_DIR}/install.json`;
 export const BUNDLE_PATH = `${DATA_DIR}/bin/bridge.mjs`;
 export const RECEIPT_LIMIT = 1024 * 1024;
-/** The bundle is about 160 KiB; refuse to hash anything absurd. */
+/** The bundle is about 450 KiB; refuse to hash anything absurd. */
 export const BUNDLE_LIMIT = 64 * 1024 * 1024;
 export const LAUNCH_INTERVAL_MS = 10000;
 export const LAUNCH_TIMEOUT_MS = 10000;

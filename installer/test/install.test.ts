@@ -120,6 +120,7 @@ describe("install", () => {
     for (const f of readdirSync(join(REPO, "mod/herdr-app-remote"))) {
       expect(t[`mods/herdr-app-remote/${f}`]).toBe(`${sha(readFileSync(join(REPO, "mod/herdr-app-remote", f)))} 644`);
     }
+    expect(t[`${P.PWA_DIR}/index.html`]).toBe(`${sha(readFileSync(join(REPO, "packages/pwa/dist/index.html")))} 644`);
     expect(t[P.BUNDLE_PATH]).toBe(`${sha(readFileSync(join(REPO, "packages/bridge/dist/bridge.mjs")))} 644`);
     expect(t[P.DATA_DIR]).toBe("dir 700");
     expect(t[P.RECEIPT_PATH]).toMatch(/ 600$/);
@@ -129,7 +130,7 @@ describe("install", () => {
     expect(record.keys).toBeNull();
     // the record names exactly what was written, with each file's hash and mode
     for (const [p, f] of Object.entries(record.files)) expect(t[p]).toBe(`${f.sha256} ${f.mode.toString(8)}`);
-    expect(Object.keys(record.files).sort()).toEqual(Object.keys(t).filter((p) => t[p] !== undefined && !t[p]!.startsWith("dir") && (p.startsWith("mods/") || p.startsWith(`${P.DATA_DIR}/bin`) || p.endsWith("-remote.json"))).sort());
+    expect(Object.keys(record.files).sort()).toEqual(Object.keys(t).filter((p) => t[p] !== undefined && !t[p]!.startsWith("dir") && (p.startsWith("mods/") || p.startsWith(`${P.DATA_DIR}/bin`) || p.startsWith(`${P.PWA_DIR}/`) || p.endsWith("-remote.json"))).sort());
     // the bridge accepts the installed bundle
     expect(await checkBundle(w.home, join(w.home, P.BUNDLE_PATH))).toMatchObject({ ok: true });
   });
@@ -226,6 +227,20 @@ describe("install", () => {
     expect(await cli(w, "uninstall")).toBe(0);
     expect(out.filter((l) => l.startsWith("Kept"))).toEqual([]);
     expect(tree(w.home)).toEqual(before);
+  });
+
+  it("an upgrade drops PWA files the new build no longer has, and their empty folders", async () => {
+    const w = world();
+    expect(await cli(w, "install")).toBe(0);
+    const good = tree(w.home);
+    const old = `${P.PWA_DIR}/assets/old-chunk/index-abc123.js`;
+    mkdirSync(join(w.home, dirname(old)), { recursive: true });
+    writeFileSync(join(w.home, old), "// last build\n");
+    const rec = json(w, P.RECEIPT_PATH);
+    rec.files[old] = { sha256: sha("// last build\n"), mode: 0o644 };
+    writeFileSync(join(w.home, P.RECEIPT_PATH), JSON.stringify(rec), { mode: 0o600 });
+    expect(await cli(w, "install")).toBe(0);
+    expect(tree(w.home)).toEqual(good);
   });
 
   it("finishes after a crash between the two folder renames", async () => {

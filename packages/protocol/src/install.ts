@@ -9,6 +9,8 @@ export const MOD_DIR = "mods/herdr-app-remote";
 export const RECEIPT_PATH = `${DATA_DIR}/install.json`;
 /** The esbuild bundle of the bridge. Run with the recorded `node`; it needs no exec bit. */
 export const BUNDLE_PATH = `${DATA_DIR}/bin/bridge.mjs`;
+/** The built PWA, served by the bridge's API listener. */
+export const PWA_DIR = `${DATA_DIR}/pwa`;
 /** Held by `flock -n` for the bridge's whole life: one bridge per app home. */
 export const LOCK_PATH = `${DATA_DIR}/bridge.lock`;
 export const STAGE_PATH = `${DATA_DIR}/stage`;
@@ -34,7 +36,7 @@ export const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 export function ownedPath(path: string): boolean {
   if (path === LAYOUT_REMOTE || path === LAYOUT_PANORAMA_REMOTE) return true;
   if (!/^[A-Za-z0-9._/-]+$/.test(path) || path.split("/").some((p) => p === "" || p === "." || p === "..")) return false;
-  return path.startsWith(`${MOD_DIR}/`) || path.startsWith(`${DATA_DIR}/bin/`);
+  return path.startsWith(`${MOD_DIR}/`) || path.startsWith(`${DATA_DIR}/bin/`) || path.startsWith(`${PWA_DIR}/`);
 }
 
 const OwnedPath = z.string().refine(ownedPath, "not a path this install owns");

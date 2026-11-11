@@ -1,13 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { install } from "@herdr-remote/protocol";
-import { appRuns, checkBundle, launch, liveBridge, main, parseArgs, readRuntimeFile, serve, serveArgv, type Bridge } from "../src/index.js";
+import { appRuns, checkBundle, launch, liveBridge, main, parseArgs, portAnswers, readRuntimeFile, serve, serveArgv, type Bridge } from "../src/index.js";
 
 const dirs: string[] = [];
 const bridges: Bridge[] = [];
@@ -109,7 +109,7 @@ describe("appRuns", () => {
 
 describe("serve", () => {
   async function start(h: string, s: string, over: Partial<Parameters<typeof serve>[0]> = {}) {
-    const b = await serve({ appHome: h, bundleSha256: s, checkMs: 20, graceMs: 100, appAlive: async () => true, ...over });
+    const b = await serve({ appHome: h, bundleSha256: s, checkMs: 20, graceMs: 100, appAlive: async () => true, app: false, ...over });
     if (b) bridges.push(b);
     return b;
   }
@@ -122,6 +122,28 @@ describe("serve", () => {
     expect(statSync(join(h, install.DATA_DIR, "runtime.json")).mode & 0o777).toBe(0o600);
     expect(await b.stop("signal")).toBe("signal");
     expect(await readRuntimeFile(h)).toBeNull();
+  });
+
+  it("starts the API side after runtime.json, on 127.0.0.1, and stops it before the link", async () => {
+    const { home: h, sha: s } = installed();
+    const calls: string[] = [];
+    // A fake runner: nothing is spawned; tailscale reports no serve config, so Funnel is off.
+    const run = async (cmd: string, args: string[]) => {
+      calls.push(`${cmd} ${args.join(" ")}`);
+      if (cmd === "fake-tailscale") return { code: 0, stdout: "{}", stderr: "" };
+      return { code: null, stdout: "", stderr: "", error: "ENOENT" as const };
+    };
+    const b = (await start(h, s, { app: { port: 0, run, tailscale: "fake-tailscale", binaries: { hc: "fake-hc", inbox: "fake-inbox", usagebar: "fake-usagebar" } } }))!;
+    expect(b.app).not.toBeNull();
+    const port = b.app!.port;
+    expect(b.app!.server.server.address()).toMatchObject({ address: "127.0.0.1", port });
+    await waitFor(() => calls.some((c) => c.startsWith("fake-tailscale serve status")));
+    const health = await fetch(`http://127.0.0.1:${port}/healthz`);
+    expect(health.status).toBeLessThan(600); // answers (the S5 guard decides what)
+    await b.stop("signal");
+    expect(b.app!.server.server.listening).toBe(false);
+    expect(await portAnswers(port)).toBe(false);
+    expect(calls.every((c) => c.startsWith("fake-"))).toBe(true);
   });
 
   it("does not start while another live bridge serves the home", async () => {
@@ -199,7 +221,7 @@ describe("launch", () => {
 
   it("does nothing while a live bridge runs this same bundle", async () => {
     const { home: h, bundle, sha: s } = installed();
-    bridges.push((await serve({ appHome: h, bundleSha256: s, appAlive: async () => true }))!);
+    bridges.push((await serve({ appHome: h, bundleSha256: s, appAlive: async () => true, app: false }))!);
     const spawned: unknown[] = [];
     const r = await launch({ appHome: h, bundle, node: "/n", flock: null, spawn: (...a) => (spawned.push(a), { unref() {}, on() {} }) });
     expect(r).toEqual({ ok: true, started: false });
@@ -208,7 +230,7 @@ describe("launch", () => {
 
   it("starts a new bridge when the live one runs another bundle (an upgrade it has not noticed yet)", async () => {
     const { home: h, bundle } = installed();
-    bridges.push((await serve({ appHome: h, bundleSha256: "cd".repeat(32), appAlive: async () => true }))!);
+    bridges.push((await serve({ appHome: h, bundleSha256: "cd".repeat(32), appAlive: async () => true, app: false }))!);
     const spawned: unknown[] = [];
     const r = await launch({ appHome: h, bundle, node: "/n", flock: null, spawn: (...a) => (spawned.push(a), { unref() {}, on() {} }) });
     expect(r).toEqual({ ok: true, started: true });
@@ -257,10 +279,21 @@ describe("cli", () => {
 const BUNDLE = fileURLToPath(new URL("../dist/bridge.mjs", import.meta.url));
 const flock = ["/usr/bin/flock", "/bin/flock"].find((p) => existsSync(p));
 
+/**
+ * The spawned bridge starts its API side, which probes plugins and reads `tailscale serve status`. Its PATH
+ * holds only flock, so none of hc, herdr-app, herdr-inbox, usagebar or tailscale can run in a test.
+ */
+function bareEnv(): NodeJS.ProcessEnv {
+  const bin = home();
+  if (flock) symlinkSync(flock, join(bin, "flock"));
+  return { PATH: bin, HOME: bin };
+}
+
 describe.skipIf(!existsSync(BUNDLE))("the built bundle, end to end", () => {
   it("launch starts one detached bridge, a second launch adds none, and it stops on uninstall", async () => {
     const { home: h, bundle } = installed(readFileSync(BUNDLE));
-    const run = () => spawnSync(process.execPath, [bundle, "launch", "--app-home", h], { encoding: "utf8", timeout: 10_000 });
+    const env = bareEnv();
+    const run = () => spawnSync(process.execPath, [bundle, "launch", "--app-home", h], { encoding: "utf8", timeout: 10_000, env });
     const first = run();
     expect(first.status).toBe(0);
     await waitFor(async () => (await liveBridge(h, -1)) !== null, 8000);
@@ -271,6 +304,7 @@ describe.skipIf(!existsSync(BUNDLE))("the built bundle, end to end", () => {
     await new Promise((r) => setTimeout(r, 500));
     expect((await readRuntimeFile(h))!.pid).toBe(rt.pid);
     if (flock) expect(existsSync(join(h, install.LOCK_PATH))).toBe(true);
+    expect(await portAnswers(47391)).toBe(true); // the API side listens on its fixed port
     rmSync(join(h, install.RECEIPT_PATH));
     await waitFor(() => !existsSync(join(h, install.DATA_DIR, "runtime.json")), 9000);
     await waitFor(() => {
@@ -285,8 +319,9 @@ describe.skipIf(!existsSync(BUNDLE))("the built bundle, end to end", () => {
 
   it("two racing launches leave one bridge", async () => {
     const { home: h, bundle } = installed(readFileSync(BUNDLE));
-    const a = spawnSync(process.execPath, [bundle, "launch", "--app-home", h], { timeout: 10_000 });
-    const b = spawnSync(process.execPath, [bundle, "launch", "--app-home", h], { timeout: 10_000 });
+    const env = bareEnv();
+    const a = spawnSync(process.execPath, [bundle, "launch", "--app-home", h], { timeout: 10_000, env });
+    const b = spawnSync(process.execPath, [bundle, "launch", "--app-home", h], { timeout: 10_000, env });
     expect([a.status, b.status]).toEqual([0, 0]);
     await waitFor(async () => (await liveBridge(h, -1)) !== null, 8000);
     const rt = (await readRuntimeFile(h))!;
