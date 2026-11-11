@@ -93,7 +93,7 @@ function panelAct(kind, args) {
             resolve({
               res: { ok: m.ok, ...(m.code ? { code: m.code } : {}) },
               status: view?.status,
-              setup: st ? { step: st.step, serving: st.serving, can_start: st.can_start, can_stop: st.can_stop, problem: st.steps.find((x) => x.problem)?.problem ?? null } : null,
+              setup: st ? { step: st.step, serving: st.serving, can_start: st.can_start, can_stop: st.can_stop, problem: st.steps.find((x) => x.problem)?.problem ?? null, notice: st.notice ?? null } : null,
             });
           }, 300);
         }

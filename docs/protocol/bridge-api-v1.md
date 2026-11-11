@@ -154,7 +154,7 @@ Source: `usagebar collect --format v1 [--all] --panes <JSON>` (agent-usage `docs
 
 Source: `packages/bridge/src/tailscale/` (`Setup`). Schema: `SetupTopic` in `packages/protocol/src/bridge-api.ts`; fixtures in `fixtures/bridge-api/setup/`. The desktop panel shows it (DesktopSetup board); phones may subscribe, read-only.
 
-`{step, steps[5], serving, port, url, login, can_start, can_stop, busy, checked_at}`. Each step is `{id, state, title, detail, problem?}` with `state` `done`, `current` (the first not done) or `todo`; only the current step carries a `problem` `{code, message, fix?, url?}`. `message` is a fixed sentence, never CLI output. `fix` is a command for the person to run (the bridge never runs it); `url` is always a `https://login.tailscale.com/` page. `step` is 6 when all five are done.
+`{step, steps[5], serving, port, url, login, can_start, can_stop, notice, busy, checked_at}`. Each step is `{id, state, title, detail, problem?}` with `state` `done`, `current` (the first not done) or `todo`; only the current step carries a `problem` `{code, message, fix?, url?}`. `message` is a fixed sentence, never CLI output. `fix` is a command for the person to run (the bridge never runs it); `url` is always a `https://login.tailscale.com/` page. `step` is 6 when all five are done. `notice` is a problem from the last Start or Stop that the steps can't show because step 4 reads done: Stop failing while the handler is still ours (e.g. `operator`), or Start that served but could not record the handler as ours (`failed`, with `fix: "tailscale serve --https=8443 off"`: herdr will never remove an unrecorded handler). It is cleared by the next Start or Stop, or once the port no longer holds the handler. `can_start` and `can_stop` do not drop while `busy`: a Start or Stop queues behind a running check and reads everything again before it changes anything.
 
 | step | done when | problems |
 |---|---|---|
@@ -183,7 +183,7 @@ Checks only read: `tailscale version`, `status --json` and `serve status --json`
 
 **Serve identity.** While the port is `ours` or `identical` on a signed-in, untagged node, the bridge's serve identity (`Security.setServe`) is `{host: "<DNS name>:8443", login: <owner login>}`: the `Host` every request must carry and the `Tailscale-User-Login` it must match. It changes only when the value changes; a change drops every live socket (`4001`) and the current pairing code, and while it is unset `/api/v1/me` answers 403, which the PWA treats as final. So it is cleared only on proof that access is gone for good: the port is empty or someone else's, or the node is tagged; an owner change replaces it. States in which serve can't deliver a request anyway keep it: tailscaled down or stopped, signed out, MagicDNS or HTTPS off, a read that can't tell, and Funnel (Setup seeing Funnel makes the bridge re-read its Funnel verdict at once, so phones get `503 funnel` and close `4004`, and serve again once it is off). A bridge started with an explicit `serve` (tests, rigs) runs no setup, and `App.setServe` throws while setup runs.
 
-The desktop panel reaches `check`, `start` and `stop` through the mod link (S13's panel channel); until that is wired they are methods on the bridge's `App.setup`.
+The desktop panel reaches `check`, `start` and `stop` through the mod link: the argument-free `setup.check`, `setup.start` and `setup.stop` panel acts (mod-link v1, S14b). Every finished Start and Stop is written to Activity from its outcome code only. `App.stop` waits for a Start or Stop in flight.
 
 ### `chat:<t>` (read-only)
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { modLink } from '@herdr-remote/protocol';
+import { bridgeApi, modLink } from '@herdr-remote/protocol';
 import Remote from '../herdr-app-remote/main.js';
-import { sanitize } from '../herdr-app-remote/panel.js';
+import { SETUP_PROBLEM_CODES, SETUP_SERVING, SETUP_STEP_IDS, sanitize } from '../herdr-app-remote/panel.js';
 import { Mounted, settle } from './shim/runtime.js';
 import { resetWorld, world } from './shim/herdr.js';
 import { FakeBridge } from './fake-bridge.js';
@@ -267,8 +267,59 @@ describe('setup view (DesktopSetup)', () => {
   it('Start serving is disabled (no click handler) until the bridge offers it', async () => {
     await pushSetup(setupView(HTTPS_OFF));
     expect(find(m.tree, 'setup-start').handlers.on_click).toBeUndefined();
-    await pushSetup(setupView({ busy: true }), 'Checking…');
-    expect(find(m.tree, 'setup-start').handlers.on_click).toBeUndefined();
+  });
+
+  it('a periodic check (busy) does not flicker the buttons', async () => {
+    await pushSetup(setupView({ busy: true }));
+    expect(find(m.tree, 'setup-start').handlers.on_click).toBeTypeOf('function');
+    expect(text(m)).toContain('Check now');
+    expect(text(m)).not.toContain('Checking…');
+  });
+
+  it('the protocol enums the mod copies match bridgeApi', () => {
+    expect([...SETUP_PROBLEM_CODES]).toEqual([...bridgeApi.SETUP_PROBLEMS]);
+    expect([...SETUP_STEP_IDS]).toEqual([...bridgeApi.SETUP_STEPS]);
+    expect([...SETUP_SERVING]).toEqual(bridgeApi.SetupServing.options);
+  });
+
+  it('"herdr never runs this" only under a fix command; a fix-less failure says nothing of the kind', async () => {
+    const steps = setupView().setup.steps;
+    steps[3].problem = { code: 'failed', message: 'Tailscale did not serve herdr as expected. Nothing of yours was changed.' };
+    await pushSetup(setupView({ steps }));
+    expect(text(m)).toContain('Tailscale did not serve herdr as expected.');
+    expect(text(m)).not.toContain('herdr never runs this for you.');
+    expect(find(m.tree, 'fix')).toBeNull();
+    steps[3].problem = { code: 'funnel_on', message: 'Funnel is on for port 8443.' };
+    await pushSetup(setupView({ steps }), 'Funnel is on');
+    expect(text(m)).not.toContain('herdr never runs this for you.');
+  });
+
+  it('MagicDNS off: the admin link, and its message is not repeated', async () => {
+    const v = setupView(HTTPS_OFF);
+    v.setup.steps[2].problem = { code: 'magicdns_off', message: 'MagicDNS is off for this tailnet. Turn on MagicDNS and HTTPS Certificates there.', url: 'https://login.tailscale.com/admin/dns' };
+    await pushSetup(v);
+    expect(text(m).split('Turn on MagicDNS and HTTPS Certificates there.').length).toBe(2);
+  });
+
+  it('a failed Check now is reported', async () => {
+    await pushSetup(setupView());
+    click('setup-check');
+    const a = await FakeBridge.next(conn, (x) => x.type === 'panel_act');
+    FakeBridge.send(conn, { type: 'panel_res', id: a.id, ok: false, code: 'failed' });
+    for (let i = 0; i < 100 && !find(m.tree, 'error'); i += 1) await settle(10);
+    expect(text(m)).toContain("That didn't work (failed).");
+  });
+
+  it('with phones known, not serving keeps the tabs: the steps sit in Status, Devices stays reachable', async () => {
+    const v = view({ status: 'setup', url: null, setup: setupView().setup });
+    await push(v);
+    expect(find(m.tree, 'tabs')).not.toBeNull();
+    expect(find(m.tree, 'setup-steps')).not.toBeNull();
+    expect(text(m)).toContain('Share herdr on the tailnet');
+    click('setup-start');
+    expect(await FakeBridge.next(conn, (x) => x.type === 'panel_act')).toMatchObject({ kind: 'setup.start', args: {} });
+    click('tab-devices');
+    expect(find(m.tree, `revoke-${P2}`)).not.toBeNull();
   });
 
   it('Check now and Start serving send exactly the argument-free acts', async () => {
@@ -328,9 +379,28 @@ describe('setup view (DesktopSetup)', () => {
     click('stop-yes');
     const a = await FakeBridge.next(conn, (x) => x.type === 'panel_act');
     expect(a).toMatchObject({ kind: 'setup.stop', args: {} });
-    FakeBridge.send(conn, { type: 'panel_res', id: a.id, ok: false, code: 'not_ours' });
-    for (let i = 0; i < 100 && !find(m.tree, 'error'); i += 1) await settle(10);
-    expect(text(m)).toContain('herdr did not set up this serve handler');
+    await settle(20);
+    expect(text(m)).toContain('Stopping…');
+    FakeBridge.send(conn, { type: 'panel_res', id: a.id, ok: false, code: 'operator' });
+    await settle(50);
+    // The bridge's view explains it (the notice); no second message in the footer.
+    expect(find(m.tree, 'error')).toBeNull();
+  });
+
+  it('the notice (a Stop refused by the operator rule, or a Start herdr could not record) is drawn with its fix to copy', async () => {
+    const notice = { code: 'operator', message: 'Tailscale lets only its operator change serve settings. Run this once in a terminal, then try again.', fix: 'sudo tailscale set --operator=$USER' };
+    await push(view({ setup: { ...setupView().setup, step: 6, serving: 'ours', can_start: false, can_stop: true, notice } }));
+    expect(find(m.tree, 'setup-notice')).not.toBeNull();
+    expect(texts(find(m.tree, 'fix-command'))).toEqual(['sudo tailscale set --operator=$USER']);
+    click('fix-copy');
+    expect(m.clipboard).toBe('sudo tailscale set --operator=$USER');
+    const unrecorded = { code: 'failed', message: 'herdr is served on the tailnet, but could not record that it set this up, so it will not stop serving by itself. To stop, run this in a terminal.', fix: 'tailscale serve --https=8443 off' };
+    await push(view({ setup: { ...setupView().setup, step: 5, serving: 'identical', can_start: false, can_stop: false, notice: unrecorded } }));
+    for (let i = 0; i < 100 && !text(m).includes('could not record'); i += 1) await settle(10);
+    expect(texts(find(m.tree, 'fix-command'))).toEqual(['tailscale serve --https=8443 off']);
+    expect(find(m.tree, 'stop-serving')).toBeNull();
+    await settle(30);
+    expect(acts()).toEqual([]);
   });
 
   it('no Stop serving for a handler herdr did not create', async () => {

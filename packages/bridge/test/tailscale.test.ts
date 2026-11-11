@@ -317,6 +317,12 @@ describe("Start serving", () => {
     expect(r.setup.state.serving).toBe("identical");
     expect(r.setup.state.can_stop).toBe(false);
     expect(r.ids).toEqual([{ host: HOST, login: "user-1@example" }]);
+    // Step 4 reads done (it is served), so the panel shows the problem as the notice, and keeps it.
+    expect(step(r.setup.state, "serving").state).toBe("done");
+    expect(r.setup.state.notice).toMatchObject({ code: "failed", fix: "tailscale serve --https=8443 off" });
+    await r.setup.check();
+    expect(r.setup.state.notice?.code).toBe("failed");
+    expect(bridgeApi.SetupTopic.safeParse(r.setup.state).success).toBe(true);
     expect(await r.setup.stop()).toMatchObject({ ok: false, code: "not_ours" });
     expect(mutating(r.calls())).toEqual([START]);
     expect(r.actions).toEqual([
@@ -416,6 +422,32 @@ describe("Stop serving", () => {
     expect(await r.setup.stop()).toMatchObject({ ok: false, code: "operator", problem: { fix: OPERATOR_FIX } });
     expect(r.setup.state.serving).toBe("ours");
     expect(r.ids).toEqual([{ host: HOST, login: "user-1@example" }]);
+    // Still served (step 4 done): the fix stays on screen as the notice through periodic checks.
+    expect(r.setup.state.notice).toMatchObject({ code: "operator", fix: OPERATOR_FIX });
+    await r.setup.check();
+    expect(r.setup.state.notice?.code).toBe("operator");
+    // Gone once the handler is (removed by hand here), and with the next Stop or Start.
+    r.serve({});
+    await r.setup.check();
+    expect(r.setup.state.notice).toBeNull();
+  });
+
+  it("the notice is cleared by the next Start or Stop", async () => {
+    const r = rig();
+    expect((await r.setup.start()).ok).toBe(true);
+    r.conf({ off: "operator" });
+    await r.setup.stop();
+    expect(r.setup.state.notice?.code).toBe("operator");
+    r.conf({});
+    expect(await r.setup.stop()).toEqual({ ok: true });
+    expect(r.setup.state.notice).toBeNull();
+  });
+
+  it("no notice before serving: Start's problems stay on step 4", async () => {
+    const r = rig({ conf: { set: "operator" } });
+    await r.setup.start();
+    expect(r.setup.state.notice).toBeNull();
+    expect(step(r.setup.state, "serving").problem?.code).toBe("operator");
   });
 });
 
@@ -539,6 +571,15 @@ describe("serve identity", () => {
     }
     expect(seen).toEqual([]);
     expect(r.calls().length).toBeGreaterThan(0);
+  });
+
+  it("can_start does not drop while a periodic check runs (no flicker); Start re-reads before acting", async () => {
+    const r = rig();
+    await r.setup.check();
+    const p = r.setup.check();
+    expect(r.setup.state.busy).toBe(true);
+    expect(r.setup.state.can_start).toBe(true);
+    await p;
   });
 
   it("every published state matches the protocol schema", async () => {

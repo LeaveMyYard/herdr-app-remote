@@ -90,13 +90,19 @@ s.appearance = "dark"; fs.writeFileSync(p, JSON.stringify(s, null, 1));' "$HERDR
   case "$out" in *'"res":{"ok":true}'*'"status":"serving"'*'"serving":"ours"'*'"can_stop":true'*) pass "Start serving from the panel: serving, ours, Stop offered";; *) fail "start: $out";; esac
   assert_eq "$(mutating_calls)" '["serve","--bg","--https=8443","http://127.0.0.1:47391"]' "the only change: tailscale serve --bg --https=8443 http://127.0.0.1:47391"
   shot setup-serving
+  # Stop refused by the operator rule while still served: the fix stays on the Status tab as the notice.
+  echo '{"off":"operator"}' >"$TS/conf.json"
+  op '{"op":"panel","kind":"setup.stop","args":{}}'
+  case "$out" in *'"res":{"ok":false,"code":"operator"}'*'"status":"serving"'*'"notice":{"code":"operator"'*'"fix":"sudo tailscale set --operator=$USER"'*) pass "Stop serving refused (operator): still serving, fix shown as the notice";; *) fail "stop operator: $out";; esac
+  shot setup-stop-operator
+  echo '{}' >"$TS/conf.json"
   op '{"op":"panel","kind":"setup.stop","args":{}}'
   case "$out" in *'"res":{"ok":true}'*'"status":"setup"'*'"serving":"off"'*) pass "Stop serving from the panel: back to setup";; *) fail "stop: $out";; esac
   assert_eq "$(cat "$TS/serve.json" | tr -d ' \n')" '{}' "our handler removed"
 
   # 5. Activity: every Start and Stop, codes only.
   op '{"op":"activity"}'
-  case "$out" in *'"Start serving failed (operator)"'*'"Started serving on the tailnet"'*'"Stopped serving on the tailnet"'*) pass "Start and Stop audited";; *) fail "activity: $out";; esac
+  case "$out" in *'"Start serving failed (operator)"'*'"Started serving on the tailnet"'*'"Stop serving failed (operator)"'*'"Stopped serving on the tailnet"'*) pass "Start and Stop audited";; *) fail "activity: $out";; esac
   case "$out" in *ts.net*|*127.0.0.1*|*sudo*) fail "activity carries free text: $out";; *) pass "activity has no host, target or command";; esac
 
   assert_absent "$RIG/harness.log" '"reason":"invalid"' "bridge dropped no invalid line from the panel"

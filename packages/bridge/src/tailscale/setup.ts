@@ -128,6 +128,8 @@ export class Setup {
   private identity: ServeIdentity | null = null;
   private current: SetupTopic;
   private actionProblem: SetupProblem | null = null;
+  /** See `SetupTopic.notice`: what the last Start or Stop left to say while step 4 reads done. */
+  private notice: SetupProblem | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   /** Start, Stop and Check calls not yet answered (with their audit report): `close` waits for them. */
   private readonly ops = new Set<Promise<unknown>>();
@@ -170,6 +172,7 @@ export class Setup {
     this.poked = this.now();
     return this.audited("start", async () => {
       this.actionProblem = null;
+      this.notice = null;
       const r = await this.read();
       if (r.blocker) return this.fail(r.blocker.problem, false);
       if (r.serving === "ours" || r.serving === "identical") return { ok: true };
@@ -186,13 +189,13 @@ export class Setup {
       // Served exactly as ours by our own command, but the record could not be written: it works, yet herdr
       // will never remove it (only a recorded handler is ours). Reported as `failed`, with the command that
       // stops it, so nobody is left with a serve config they think herdr will clean up.
-      if (after.serving === "identical" && after.recordFailed)
-        return this.fail(
-          problem("failed", "herdr is served on the tailnet, but could not record that it set this up, so it will not stop serving by itself. To stop, run this in a terminal.", {
-            fix: `tailscale serve --https=${this.o.port} off`,
-          }),
-          false,
-        );
+      if (after.serving === "identical" && after.recordFailed) {
+        // Step 4 reads done (it is served): the problem stays on screen as the notice, not as a step problem.
+        this.notice = problem("failed", "herdr is served on the tailnet, but could not record that it set this up, so it will not stop serving by itself. To stop, run this in a terminal.", {
+          fix: `tailscale serve --https=${this.o.port} off`,
+        });
+        return this.fail(this.notice, false);
+      }
       return this.fail(this.trouble(res, "Tailscale did not serve herdr as expected. Nothing of yours was changed."), true);
     });
   }
@@ -202,15 +205,21 @@ export class Setup {
     this.poked = this.now();
     return this.audited("stop", async () => {
       this.actionProblem = null;
+      this.notice = null;
+      // A Stop that fails while the port still reads served (step 4 done) is explained by the notice.
+      const failStop = (p: SetupProblem, keep: boolean) => {
+        this.notice = p;
+        return this.fail(p, keep);
+      };
       const r = await this.read();
       if (r.serving === "off") {
         await this.forget();
         return { ok: true };
       }
       if (r.serving !== "ours") {
-        if (r.serving === "unknown") return this.fail(problem("unknown", "Could not read Tailscale's serve settings. Nothing was changed."), false);
+        if (r.serving === "unknown") return failStop(problem("unknown", "Could not read Tailscale's serve settings. Nothing was changed."), false);
         // Funnel on the port means the config was changed outside herdr: it is no longer ours to remove.
-        return this.fail(r.serving === "funnel" ? this.funnelChanged() : this.notOurs(), false);
+        return failStop(r.serving === "funnel" ? this.funnelChanged() : this.notOurs(), false);
       }
       const res = await this.ts(["serve", `--https=${this.o.port}`, "off"], this.o.serveTimeoutMs ?? SERVE_TIMEOUT_MS);
       const after = await this.read();
@@ -219,7 +228,7 @@ export class Setup {
         this.publish();
         return { ok: true };
       }
-      return this.fail(this.trouble(res, "Tailscale did not stop serving herdr."), true);
+      return failStop(this.trouble(res, "Tailscale did not stop serving herdr."), true);
     });
   }
 
@@ -379,7 +388,11 @@ export class Setup {
     }
     // Our record means "created by us, unchanged since". Once the port reads empty or different, it means nothing:
     // a handler that later reads exact again was put there by someone else, and is never removed by us.
-    if (r.serving === "off" || r.serving === "foreign" || r.serving === "funnel") await this.forget().catch(() => {});
+    if (r.serving === "off" || r.serving === "foreign" || r.serving === "funnel") {
+      await this.forget().catch(() => {});
+      this.notice = null; // the handler it was about is gone
+    }
+    if (this.notice?.code === "unknown" && !r.unsure) this.notice = null; // a clean read answers "could not read"
     this.last = r;
     if (r.serving === "ours" || r.serving === "identical") this.actionProblem = null;
     if (r.serving === "funnel") this.o.onFunnel?.();
@@ -568,8 +581,11 @@ export class Setup {
       port: this.o.port,
       url: this.identity ? `https://${this.identity.host}/` : null,
       login: this.identity?.login ?? null,
-      can_start: !busy && r !== null && !r.blocker && r.serving === "off",
-      can_stop: !busy && r !== null && r.serving === "ours",
+      // Not gated on `busy`: a Start or Stop queues behind a running check and reads everything again before it
+      // changes anything, and the buttons don't flicker with every periodic check (`busy` says one is running).
+      can_start: r !== null && !r.blocker && r.serving === "off",
+      can_stop: r !== null && r.serving === "ours",
+      notice: done[3] ? this.notice : null,
       busy,
       checked_at: r ? this.now() : null,
     };
