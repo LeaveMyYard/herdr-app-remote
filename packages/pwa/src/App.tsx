@@ -3,11 +3,11 @@ import type { bridgeApi } from "@herdr-remote/protocol";
 import { Banner } from "./components/Banner";
 import { TabBar } from "./components/TabBar";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
-import { DEMO_NOW, demoHost, inboxInstallCommand, inboxScenario } from "./inbox-fixtures";
+import { DEMO_NOW, demoHost, inboxScenario } from "./inbox-fixtures";
 import { inboxBadge } from "./inbox/model";
 import { TABS, type Connection, type TabBadges, type TabId } from "./model";
 import { AgentsBasic } from "./screens/AgentsBasic";
-import { InboxTab } from "./screens/InboxTab";
+import { Inbox } from "./screens/Inbox";
 import { Soon } from "./screens/Soon";
 import { UsageTab } from "./screens/UsageTab";
 import { demoUsageNow, usageScenario } from "./usage-fixtures";
@@ -90,7 +90,7 @@ export function App({ connection, tabBadges }: AppProps) {
           onRefresh={() => undefined}
         />
       ) : tab === "inbox" ? (
-        <InboxTab host={host} topic={inbox.topic} hostState={demoHost} plugins={plugins} installCommand={inboxInstallCommand} now={DEMO_NOW} />
+        <Inbox topic={inbox.topic} host={demoHost} now={DEMO_NOW} />
       ) : (
         <Soon title={TABS.find((t) => t.id === tab)?.label ?? ""} />
       )}

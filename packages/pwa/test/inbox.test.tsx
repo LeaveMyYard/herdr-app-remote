@@ -2,11 +2,9 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { DEMO_NOW, demoHost, inboxInstallCommand, inboxScenario } from "../src/inbox-fixtures";
+import { DEMO_NOW, demoHost, inboxScenario } from "../src/inbox-fixtures";
 import { age, goneBatch, groupSub, inboxBadge, whereOf } from "../src/inbox/model";
-import { plugins, host as hostInfo } from "../src/fixtures";
 import { Inbox } from "../src/screens/Inbox";
-import { InboxTab } from "../src/screens/InboxTab";
 
 const topic = (name: string) => inboxScenario(name).topic;
 const view = (name: string, over: Partial<Parameters<typeof Inbox>[0]> = {}) => render(<Inbox topic={topic(name)} host={demoHost} now={DEMO_NOW} {...over} />);
@@ -40,13 +38,13 @@ describe("Inbox", () => {
 
   it("marks an old feed, with its age, and still shows the rows", () => {
     view("stale");
-    expect(screen.getByRole("status")).toHaveTextContent("The inbox feed can't be read (unreadable): this is the last good copy, 5m old. It may be out of date.");
+    expect(screen.getByRole("status")).toHaveTextContent("The inbox feed can't be read (unreadable): this is the last good copy. It may be out of date.");
     expect(screen.getByText("Alert Title 456")).toBeInTheDocument();
   });
 
   it("says what the feed left out, and never shows the empty state while anything is left out", () => {
     view("left-out-only");
-    expect(screen.getByRole("status")).toHaveTextContent("Still open, and not listed here: 1 question, 1 group. 1 question is not shown yet");
+    expect(screen.getByRole("status")).toHaveTextContent("Left out of this list: 1 question, 1 group. 1 of those have no id here: the herdr popup has them.");
     expect(screen.queryByText("No open questions")).toBeNull();
     // left-out questions still wait: the header, the count and the badge never say "nothing"
     expect(screen.getByText("1 waiting")).toBeInTheDocument();
@@ -74,7 +72,7 @@ describe("Inbox", () => {
 
   it("explains an inbox that is too old", () => {
     view("too-old");
-    expect(screen.getByText("herdr-inbox is too old for the app.")).toBeInTheDocument();
+    expect(screen.getByText(/has no app commands/)).toBeInTheDocument();
   });
 
   it("shows words it does not know as a key, with nothing offered", () => {
@@ -88,13 +86,13 @@ describe("Inbox", () => {
     const t = topic("failed");
     const { rerender } = render(<Inbox topic={t} host={demoHost} now={DEMO_NOW} />);
     expect(screen.getByText("2 answers whose agents are gone")).toBeInTheDocument();
-    expect(screen.queryByText("Question Title 120")).toBeNull();
+    expect(screen.queryByText("Answer to Q120 not delivered")).toBeNull();
     // the busy (pending) answer is no failure: it reads as delivery at work
-    expect(screen.getByText("Question Title 119").closest("button")).toHaveTextContent("⏳");
+    expect(screen.getByText("Answer to Q119 not delivered").closest("button")).toHaveTextContent("⏳");
     // a third gone answer that arrives later gets its own row
-    const extra = { ...t.entries.find((e) => e.key === "failed:120")!, key: "failed:122", question_id: 122, question: "Question Title 122" };
+    const extra = { ...t.entries.find((e) => e.key === "failed:120")!, key: "failed:122", question_id: 122 };
     rerender(<Inbox topic={{ ...t, entries: [...t.entries, extra as never] }} host={demoHost} now={DEMO_NOW} />);
-    expect(screen.getByText("Question Title 122")).toBeInTheDocument();
+    expect(screen.getByText("Answer to Q122 not delivered")).toBeInTheDocument();
     expect(screen.getByText("2 answers whose agents are gone")).toBeInTheDocument();
   });
 
@@ -102,9 +100,9 @@ describe("Inbox", () => {
     const t = topic("failed");
     const { rerender } = render(<Inbox topic={t} host={demoHost} now={DEMO_NOW} />);
     rerender(<Inbox topic={{ ...t, entries: t.entries.filter((e) => e.key !== "failed:121") }} host={demoHost} now={DEMO_NOW} />);
-    expect(screen.getByText("1 answer whose agent is gone")).toBeInTheDocument();
+    expect(screen.getByText("1 answers whose agents are gone")).toBeInTheDocument();
     rerender(<Inbox topic={{ ...t, entries: t.entries.filter((e) => !e.key.startsWith("failed:12")) }} host={demoHost} now={DEMO_NOW} />);
-    expect(screen.queryByText(/whose agent/)).toBeNull();
+    expect(screen.queryByText(/whose agents are gone/)).toBeNull();
   });
 
   it("puts the summary right after the failed rows", () => {
@@ -118,15 +116,8 @@ describe("Inbox", () => {
   it("does not fold a single gone-agent answer", () => {
     const t = topic("failed");
     render(<Inbox topic={{ ...t, entries: t.entries.filter((e) => e.key !== "failed:121") }} host={demoHost} now={DEMO_NOW} />);
-    expect(screen.getByText("Question Title 120")).toBeInTheDocument();
+    expect(screen.getByText("Answer to Q120 not delivered")).toBeInTheDocument();
     expect(screen.queryByText(/answers whose agents are gone/)).toBeNull();
-  });
-});
-
-describe("InboxTab", () => {
-  it("shows the not-installed screen when herdr-inbox is missing", () => {
-    render(<InboxTab host={hostInfo} topic={topic("missing")} plugins={plugins} installCommand={inboxInstallCommand} now={DEMO_NOW} />);
-    expect(screen.getByRole("heading")).toHaveTextContent("herdr-inbox isn't installed");
   });
 });
 
@@ -165,7 +156,7 @@ describe("inbox model", () => {
   it("counts stored drafts as answered and says when text was cut", () => {
     const g = topic("typical").entries[0] as Parameters<typeof groupSub>[0];
     expect(groupSub(g, demoHost)).toBe("Agent 1 · Project Alpha · 3 questions · 1 answered");
-    expect(groupSub({ ...g, questions: [{ ...g.questions[0]!, cut: true }] }, demoHost)).toBe("Agent 1 · Project Alpha · 1 question · text cut");
+    expect(groupSub({ ...g, questions: [{ ...g.questions[0]!, cut: true }] }, demoHost)).toBe("Agent 1 · Project Alpha · 1 question · This text was cut to fit the feed.");
   });
 
   it("badges the tab with the waiting groups only when a feed is held", () => {

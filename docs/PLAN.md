@@ -314,7 +314,7 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - the inbox's own arm delays for touch;
   - unknown effect handled as the protocol says;
   - every action audited.
-- Screens: PhoneQuestion, PhoneReview.
+- Screens: PhoneQuestion, PhoneReview, plus the two PhoneInbox parts S10 leaves out: the closed-row "delivered" placeholder (row 4) and the footer line with its "Seen" button (operator via conductor, S10 review).
 
 **S12 Installer + derived layouts**
 - Goal:

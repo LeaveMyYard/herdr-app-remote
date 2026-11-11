@@ -1,4 +1,5 @@
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
+import { CUT, EMPTY, leftOut, noId } from "./words";
 
 export type Row = bridgeApi.InboxRow;
 type KnownKind = (typeof bridgeApi.INBOX_KINDS)[number];
@@ -17,11 +18,6 @@ export function age(time: string | null, now: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
-}
-
-/** The feed's age in seconds, or null when it has none. */
-export function feedAge(generatedAt: number | null, now: number): string {
-  return generatedAt === null ? "" : age(new Date(generatedAt * 1000).toISOString(), now);
 }
 
 const base = (path: string): string => path.replace(/\/+$/, "").split("/").pop() ?? "";
@@ -63,7 +59,7 @@ export function groupSub(row: Of<"group">, host: HostState | undefined): string 
     w.space,
     plural(row.questions.length, "question", "questions"),
     drafts > 0 ? `${drafts} answered` : null,
-    row.questions.some((q) => q.cut) ? "text cut" : null,
+    row.questions.some((q) => q.cut) ? CUT : null,
   ]
     .filter((x): x is string => x !== null)
     .join(" · ");
@@ -76,7 +72,7 @@ export function alertSub(row: Of<"alert">, host: HostState | undefined): string 
 
 export function failedSub(row: Of<"failed">, host: HostState | undefined): string {
   const w = whereOf(row.asker, host);
-  return [row.delivery.line, w.agent, row.cut ? "text cut" : null].filter((x): x is string => !!x).join(" · ");
+  return [row.delivery.line, w.agent, row.cut ? CUT : null].filter((x): x is string => !!x).join(" · ");
 }
 
 /**
@@ -95,13 +91,10 @@ export function inboxBadge(topic: bridgeApi.InboxTopic | undefined): string | un
 
 export const headerSub = (topic: bridgeApi.InboxTopic): string => {
   const parts = [topic.waiting > 0 ? `${topic.waiting} waiting` : null, topic.alerts > 0 ? plural(topic.alerts, "alert", "alerts") : null].filter((x): x is string => x !== null);
-  return parts.length > 0 ? parts.join(" · ") : "No open questions";
+  return parts.length > 0 ? parts.join(" · ") : EMPTY;
 };
 
-/** What the feed left out, in words (the required "incomplete feed" notice). */
+/** What the feed left out, in the overlay's own words (the required "incomplete feed" notice). */
 export function incompleteWords(inc: NonNullable<bridgeApi.InboxTopic["incomplete"]>): string {
-  // `leftOutWords` of the inbox's own overlay when something is still unopened; otherwise say where the rows came from.
-  const counts = inc.counts.length === 0 ? "" : inc.unlisted > 0 ? `Still open, and not listed here: ${inc.counts.join(", ")}.` : `Left out of the feed, shown here: ${inc.counts.join(", ")}.`;
-  const unlisted = inc.unlisted > 0 ? ` ${plural(inc.unlisted, "question is", "questions are")} not shown yet.` : "";
-  return `${counts}${unlisted}`.trim();
+  return [inc.counts.length > 0 ? leftOut(inc.counts) : "", inc.unlisted > 0 ? noId(inc.unlisted) : ""].filter((x) => x !== "").join(" ");
 }

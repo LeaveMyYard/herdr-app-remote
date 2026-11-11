@@ -193,4 +193,3 @@ export function inboxScenario(name: string | undefined): InboxScenario {
   return { name: key, topic: SCENARIOS[key] as bridgeApi.InboxTopic };
 }
 
-export const inboxInstallCommand = "[HERDR-INBOX INSTALL COMMAND]";
