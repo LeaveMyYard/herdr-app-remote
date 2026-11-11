@@ -35,6 +35,7 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 - GETs have no side effects.
 - **The WS upgrade uses a subprotocol, not a header.** A browser can't add headers to a WebSocket upgrade, so the client opens `new WebSocket(url, ["herdr-remote.v1"])`, and the bridge requires that subprotocol where PLAN §2 first said `X-Remote-Api: 1`. Like the header, a cross-site page can't make a simple request carry it, and the exact `Origin` and the `SameSite=Strict` cookie are required as well.
 
+<!-- PENDING-MERGE S5b (PR #24): this section describes pairing as merged on main. S5b adds /pair in Safari, the Home Screen transfer code and POST /api/v1/pair/transfer; update when it lands. -->
 ### Pairing
 
 1. The desktop shows a QR code for `https://<serve>/pair#c=<code>`. The code is 128-bit (22 base64url characters), valid for 5 minutes and single use. Showing a new code invalidates the previous one.
@@ -193,6 +194,7 @@ Payload: `{terminal, lines, truncated?}`. `lines` is an array of lines, each an 
 
 Source: while at least one client is subscribed, the bridge runs `hc read <t> --lines 200` once a second (never overlapping, backing off to 5 s while it fails) and `hc ls --json` on the first read and every tenth one after, to notice a terminal that has closed (`stale` `terminal_not_found`). Nothing runs with no subscriber, and at most 6 chats are read at once (`too_many_chats`). `hc events` is not used: it has not been tested against a live core (PLAN section 8). The `hc ls --json` shape is likewise unverified, so its output is read tolerantly and an unrecognised shape is ignored. The topic needs the `view` capability and sends nothing to the terminal; input is `terminal.send` (S16, below).
 
+<!-- PENDING-MERGE S16b (PR #22): special keys (hc keys, capability terminal.keys, the keys topic) are not on main yet; the key bar note below is true only until it lands. -->
 ### `terminal.send` (S16)
 
 `act terminal.send {terminal, text}` types into a terminal. It needs `terminal.input`. The bridge runs exactly `hc send --json -- <terminal> <text>`, with no shell: hc pastes the text and presses Enter. The `--` matters: without it a text such as `--force` would be read as hc's own flag. `--force` itself is never passed, so hc still refuses to type into a program that is blocked on a dialog.
@@ -309,7 +311,7 @@ A non-zero exit outside the contract, or bad stdout, is reported as `res {ok: fa
 - **New.** The toast marks of the feed protocol: the first good feed announces nothing; after that a row above the marks is `new` for 60 s.
 - **Unknown words.** An unknown row kind is published as `{key, kind, actions: [], new}`; an unknown delivery state as `known: false` with no actions; unknown severity, alert kind and asker host read as `warning`, `agent` and `unknown`. Remote rows are read-only (`actions: []`).
 
-The driver is not started by `createBridgeServer` yet (nor is `PluginsTopicDriver`); whichever slice wires startup constructs it with `{hub, appHome, run}` and calls `start()`.
+`startApp` (`packages/bridge/src/app/index.ts`) constructs the driver with `{hub, appHome, run, binaries}` and starts it, along with `PluginsTopicDriver`, `PanoramaTopicDriver`, `UsageTopicDriver` and `ChatTopicDriver`; `createBridgeServer` alone starts none of them.
 
 ## Inbox acts (S11)
 
