@@ -272,3 +272,57 @@ describe("watchSubscribers", () => {
     expect(counts).toEqual([1, 2, 1, 0]);
   });
 });
+
+describe("watchPrefix and discard", () => {
+  it("reports each matching topic's count, including topics already subscribed, and ignores others", async () => {
+    const hub = newHub();
+    const early = await join(hub);
+    await early.send({ type: "sub", topics: ["chat:t1"] });
+    const seen: [string, number][] = [];
+    const off = hub.watchPrefix("chat:", (t, n) => seen.push([t, n]));
+    expect(seen).toEqual([["chat:t1", 1]]);
+    const c = await join(hub);
+    await c.send({ type: "sub", topics: ["chat:t2", "usage"] });
+    hub.disconnect(c.conn);
+    expect(seen).toEqual([["chat:t1", 1], ["chat:t2", 1], ["chat:t2", 0]]);
+    off();
+    await early.send({ type: "sub", topics: ["chat:t3"] });
+    expect(seen).toHaveLength(3);
+  });
+
+  it("discard forgets an unwatched, unsubscribed topic and keeps a subscribed one", async () => {
+    const hub = newHub();
+    const c = await join(hub);
+    await c.send({ type: "sub", topics: ["chat:t1"] });
+    hub.publish("chat:t1", { n: 1 });
+    hub.discard("chat:t1");
+    expect(hub.get("chat:t1")).toEqual({ n: 1 });
+    hub.disconnect(c.conn);
+    expect(hub.get("chat:t1")).toEqual({ n: 1 });
+    hub.discard("chat:t1");
+    expect(hub.get("chat:t1")).toBeUndefined();
+    expect(hub.topicCount).toBe(0);
+  });
+});
+
+describe("discard keeps seq monotonic", () => {
+  it("a topic that comes back never reuses a seq, so an old resume gets a snap", async () => {
+    const hub = newHub();
+    const a = await join(hub);
+    await a.send({ type: "sub", topics: ["chat:t1"] });
+    hub.publish("chat:t1", { n: 0 });
+    for (let n = 1; n <= 5; n++) hub.publish("chat:t1", { n });
+    const seen = hub.seqOf("chat:t1");
+    hub.disconnect(a.conn);
+    hub.discard("chat:t1");
+    const b = await join(hub);
+    await b.send({ type: "sub", topics: ["chat:t1"] });
+    hub.publish("chat:t1", { other: true });
+    for (let n = 1; n <= 8; n++) hub.publish("chat:t1", { other: n });
+    expect(hub.seqOf("chat:t1")).toBeGreaterThan(seen);
+    const a2 = await join(hub, { epoch: "epoch-1", seqs: { "chat:t1": seen } });
+    await a2.send({ type: "sub", topics: ["chat:t1"] });
+    expect(a2.client.ofType("snap")).toHaveLength(1);
+    expect(a2.client.ofType("patch")).toHaveLength(0);
+  });
+});

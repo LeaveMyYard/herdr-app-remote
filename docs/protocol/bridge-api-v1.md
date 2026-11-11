@@ -84,7 +84,7 @@ One JSON object per text frame, each with a `type`.
 | `welcome` | `api`, `bridge`, `epoch` | `epoch` is random per bridge start. |
 | `snap` | `topic`, `epoch`, `seq`, `data` | Full state of a topic. |
 | `patch` | `topic`, `seq`, `ops` | RFC 6902 operations (`add remove replace move copy test`); paths are RFC 6901 JSON Pointers. |
-| `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`. The field is open. |
+| `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`, and for `chat:<t>` `terminal_not_found`, `bad_terminal`, `too_many_chats`. The field is open. |
 | `res` | `id`, `ok`, `code?`, `unknown_effect?` | Result of an `act`. `code` is required when `ok` is false; `unknown_effect` is only valid when `ok` is false. |
 | `event` | `topic`, `name`, `data` | Fire-and-forget notification. |
 | `pong` | | Reply to `ping` (not in the plan's list; added so clients can detect dead sockets). |
@@ -108,6 +108,14 @@ Source: `usagebar collect --format v1 [--all] --panes <JSON>` (agent-usage `docs
 - `error` is one of `unavailable` (not installed or cannot run), `timeout`, `failed` (non-zero exit), `bad_output` (invalid JSON or shape) and `unsupported` (another `version`). The last good `report` stays while `error` is set; no CLI output is forwarded.
 - `act`: `usage.refresh {}` collects now and answers when it is done; `usage.set_filter {filter}` switches between Open panes and All (shared by every client), clears `report` at once and collects again. Both acts collect even with no subscriber (they are explicit requests; the polling is what is subscription-gated). A failed collect answers `ok: false` with the error as `code`. Any other `act` kind is not the usage topic's.
 - Plugin states: `plugins.usage` decides what the Usage tab shows. `missing`, `too_old` and `broken` show the Missing screen; `ready`, `stale` and `not_running` show the panel.
+
+### `chat:<t>` (read-only)
+
+`<t>` is a terminal id (`t3`, or `vps/t7` on another machine): it must match `TERMINAL_ID` in the protocol package (no leading dash, no spaces, at most 64 characters per part), or the topic goes `stale` with `bad_terminal` and `hc` is never run.
+
+Payload: `{terminal, lines, truncated?}`. `lines` is an array of lines, each an array of spans `{t, fg?, bg?, b?, d?, i?, u?, r?}`. `t` is printable text only; the bridge has already turned ANSI into these fields and dropped every other escape sequence and control character. `fg` and `bg` are a palette index 0 to 15 (the theme's ANSI colours) or `#rrggbb`. `r` is reverse video. A client renders `t` as text, never as HTML. At most 500 lines are kept (`truncated` says older ones were dropped).
+
+Source: while at least one client is subscribed, the bridge runs `hc read <t> --lines 200` once a second (never overlapping, backing off to 5 s while it fails) and `hc ls --json` on the first read and every tenth one after, to notice a terminal that has closed (`stale` `terminal_not_found`). Nothing runs with no subscriber, and at most 6 chats are read at once (`too_many_chats`). `hc events` is not used: it has not been tested against a live core (PLAN section 8). The `hc ls --json` shape is likewise unverified, so its output is read tolerantly and an unrecognised shape is ignored. The topic needs the `view` capability and sends nothing to the terminal; input is `terminal.send` (S16).
 
 ### Resume and consistency
 

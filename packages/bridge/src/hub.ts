@@ -77,7 +77,10 @@ export class Hub {
   readonly epoch: string;
   readonly bridgeVersion: string;
   private readonly topics = new Map<string, TopicState>();
+  /** Last `seq` of discarded topics, so a topic that comes back never reuses a number a client may have applied. */
+  private readonly retired = new Map<string, number>();
   private readonly conns = new Set<ConnState>();
+  private readonly prefixWatchers = new Set<{ prefix: string; fn: (topic: string, count: number) => void }>();
   private readonly onAct: ActHandler | undefined;
 
   constructor(opts: HubOptions) {
@@ -89,7 +92,7 @@ export class Hub {
   private topic(name: string): TopicState {
     let t = this.topics.get(name);
     if (!t) {
-      t = { seq: 0, data: undefined, stale: null, log: [], subscribers: new Set(), watchers: new Set() };
+      t = { seq: this.retired.get(name) ?? 0, data: undefined, stale: null, log: [], subscribers: new Set(), watchers: new Set() };
       this.topics.set(name, t);
     }
     return t;
@@ -121,8 +124,33 @@ export class Hub {
     };
   }
 
-  private notifyWatchers(t: TopicState): void {
+  /**
+   * Like {@link watchSubscribers} for every topic whose name starts with `prefix` (`chat:`): `fn` hears each topic's count
+   * whenever it changes, and gets a call at once for each such topic that already has subscribers.
+   */
+  watchPrefix(prefix: string, fn: (topic: string, count: number) => void): () => void {
+    const entry = { prefix, fn };
+    this.prefixWatchers.add(entry);
+    for (const [name, t] of [...this.topics]) if (name.startsWith(prefix) && t.subscribers.size > 0) fn(name, t.subscribers.size);
+    return () => {
+      this.prefixWatchers.delete(entry);
+    };
+  }
+
+  /** Forgets a topic nobody subscribes to, so an open-ended family (`chat:<t>`) does not keep its last value forever. */
+  discard(name: string): void {
+    const t = this.topics.get(name);
+    if (t && t.subscribers.size === 0 && t.watchers.size === 0) {
+      this.topics.delete(name);
+      this.retired.delete(name);
+      this.retired.set(name, t.seq);
+      if (this.retired.size > 1024) this.retired.delete(this.retired.keys().next().value as string);
+    }
+  }
+
+  private notifyWatchers(name: string, t: TopicState): void {
     for (const w of [...t.watchers]) w(t.subscribers.size);
+    for (const { prefix, fn } of [...this.prefixWatchers]) if (name.startsWith(prefix)) fn(name, t.subscribers.size);
   }
 
   /** Publishes the new full value of a topic. Clears staleness (with a fresh snap) and patches otherwise. */
@@ -177,7 +205,7 @@ export class Hub {
     for (const name of c.topics) {
       const t = this.topics.get(name);
       if (!t) continue;
-      if (t.subscribers.delete(c)) this.notifyWatchers(t);
+      if (t.subscribers.delete(c)) this.notifyWatchers(name, t);
       // Don't let subscriptions to arbitrary topic names (`chat:<anything>`) leak state.
       if (t.subscribers.size === 0 && t.data === undefined && t.stale === null && t.watchers.size === 0) this.topics.delete(name);
     }
@@ -279,7 +307,7 @@ export class Hub {
       else for (const p of replay) c.client.send({ type: "patch", topic: name, seq: p.seq, ops: p.ops });
     }
     if (t.stale !== null) c.client.send({ type: "stale", topic: name, reason: t.stale });
-    if (added) this.notifyWatchers(t);
+    if (added) this.notifyWatchers(name, t);
   }
 
   /** Patches after `seq`, [] if already current, or null if the log can't cover it. */

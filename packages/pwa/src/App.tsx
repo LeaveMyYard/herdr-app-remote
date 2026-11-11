@@ -2,12 +2,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Banner } from "./components/Banner";
 import { TabBar } from "./components/TabBar";
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
+import { chats } from "./chat-fixtures";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
 import { TABS, type Connection, type Space, type TabBadges, type TabId } from "./model";
 import { age } from "./panorama/format";
 import { nodeUid, selectAgents, selectBasic, selectSpaces, swarmScope, type SwarmUi } from "./panorama/select";
 import { AgentsBasic } from "./screens/AgentsBasic";
 import { AgentsRich } from "./screens/AgentsRich";
+import { Chat, ChatPicker } from "./screens/Chat";
 import { Peek, type TranscriptPage } from "./screens/Peek";
 import { Soon } from "./screens/Soon";
 import { Swarm } from "./screens/Swarm";
@@ -139,8 +141,26 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
     );
   }
 
+  // An open chat is a full screen with no tab bar, as on the board.
+  const chatList = data ? selectBasic(data.host) : agents;
+  const chatAgent = tab === "chat" && route[1] ? chatList.find((a) => a.id === decode(route[1] ?? "")) : undefined;
+  if (chatAgent) {
+    const demo = data ? undefined : chats[chatAgent.id];
+    return (
+      <div className="hd ph">
+        <Chat
+          agent={demo?.agent ?? { name: chatAgent.name, folder: chatAgent.tab, harness: chatAgent.harness === "codex" ? "codex" : "claude", status: chatAgent.status }}
+          topic={demo?.topic}
+          question={demo?.question}
+        />
+      </div>
+    );
+  }
+
   let screen: ReactNode;
-  if (tab === "agents") {
+  if (tab === "chat") {
+    screen = <ChatPicker agents={chatList} />;
+  } else if (tab === "agents") {
     screen =
       data && rich ? (
         <AgentsRich view={selectAgents(data.host, topic, data.spaceExtra)} />

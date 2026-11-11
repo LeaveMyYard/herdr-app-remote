@@ -236,6 +236,50 @@ export type UsageTopic = z.infer<typeof UsageTopic>;
 /** `act` kinds the usage topic handles. `usage.refresh` takes no args; `usage.set_filter` takes `{filter}`. */
 export const USAGE_ACTS = ["usage.refresh", "usage.set_filter"] as const;
 
+/**
+ * `chat:<t>` topic: the text of terminal `<t>` (an `hc read`), ANSI already turned into spans.
+ * Spans carry text only: the PWA renders them as text nodes, never as HTML. Colours are a palette index
+ * 0 to 15 (the theme's ANSI colours) or `#rrggbb`; nothing else is accepted.
+ */
+export const ChatColor = z.union([z.number().int().min(0).max(15), z.string().regex(/^#[0-9a-f]{6}$/)]);
+export type ChatColor = z.infer<typeof ChatColor>;
+
+export const ChatSpan = z.object({
+  /** Printable text; the bridge strips every control character and escape sequence. */
+  t: z.string(),
+  fg: ChatColor.optional(),
+  bg: ChatColor.optional(),
+  b: z.literal(true).optional(),
+  d: z.literal(true).optional(),
+  i: z.literal(true).optional(),
+  u: z.literal(true).optional(),
+  /** Reverse video: the PWA swaps foreground and background. */
+  r: z.literal(true).optional(),
+});
+export type ChatSpan = z.infer<typeof ChatSpan>;
+
+export const ChatLine = z.array(ChatSpan);
+export type ChatLine = z.infer<typeof ChatLine>;
+
+export const ChatTopic = z.object({
+  /** The terminal id from the topic name. */
+  terminal: z.string().min(1),
+  lines: z.array(ChatLine),
+  /** True when older lines were dropped to fit the bridge's cap. */
+  truncated: z.boolean().optional(),
+});
+export type ChatTopic = z.infer<typeof ChatTopic>;
+
+/** Terminal ids the bridge will pass to `hc` (`t3`, `vps/t7`): no leading dash, no spaces, no control characters. */
+export const TERMINAL_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(\/[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?$/;
+
+/** The terminal id of a `chat:<t>` topic, or null for any other topic or an id that fails {@link TERMINAL_ID}. */
+export function chatTerminal(topic: string): string | null {
+  if (!topic.startsWith("chat:")) return null;
+  const id = topic.slice(5);
+  return TERMINAL_ID.test(id) ? id : null;
+}
+
 export const Welcome = z.object({
   type: z.literal("welcome"),
   api: z.literal(API_VERSION),
@@ -262,7 +306,7 @@ export const Snap = z
     data: z.unknown(),
   })
   .superRefine((m, ctx) => {
-    const payload = TOPIC_PAYLOADS[m.topic];
+    const payload = m.topic.startsWith("chat:") ? ChatTopic : TOPIC_PAYLOADS[m.topic];
     if (!payload) return;
     const r = payload.safeParse(m.data);
     if (!r.success) {
@@ -292,7 +336,7 @@ export const Patch = z.object({
 });
 
 /** Known reasons; the field stays open so the bridge can add more without a version bump. */
-export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable"] as const;
+export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable", "terminal_not_found", "bad_terminal", "too_many_chats"] as const;
 export const Stale = z.object({
   type: z.literal("stale"),
   topic: Topic,

@@ -13,3 +13,5 @@ export { buildPanoramaTopic, normalizeParents } from "./panorama/join.js";
 export { FeedReader, loadContract, type Contract, type Feed, type FeedView } from "./panorama/feed.js";
 export { UsageTopicDriver, USAGE_TOPIC, USAGE_INTERVAL_MS, USAGE_TIMEOUT_MS, panesArg, normalizeReport, tilde, type UsageTopicOptions } from "./usage.js";
 export * from "./link/index.js";
+export { ChatTopicDriver, CHAT_PREFIX, CHAT_INTERVAL_MS, CHAT_LINES, MAX_ACTIVE_CHATS, terminalIds, type ChatTopicOptions } from "./chat/topic.js";
+export { parseAnsi, type ParsedAnsi, type ParseOptions } from "./chat/ansi.js";

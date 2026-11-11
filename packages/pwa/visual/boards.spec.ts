@@ -10,6 +10,8 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean }[] = [
   { ref: "PhoneAgents", url: "/?fixture=agents#/agents" },
   { ref: "PhoneSwarm", url: "/?fixture=swarm#/swarm/sp-1" },
   { ref: "PhonePeek", url: "/?fixture=peek#/swarm/peek/t2%00a9f8e7d6", nav: false },
+  // Chat's terminal text, spinner, tile and footer slot (S16's key bar and composer) are masked in the page.
+  { ref: "PhoneChat", url: "/#/chat/a-1", nav: false },
 ];
 
 for (const board of BOARDS) {
@@ -17,7 +19,7 @@ for (const board of BOARDS) {
     const nav = board.nav !== false;
     await page.goto(board.url);
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek]");
+    await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek], .chat-head");
     const masks: Rect[] = await page.$$eval("[data-vis-mask]", (els) =>
       els.map((e) => {
         const r = e.getBoundingClientRect();

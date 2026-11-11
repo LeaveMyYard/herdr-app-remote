@@ -1,0 +1,9 @@
+[1m●[0m I split the parser into three passes and kept the old entry point as a thin wrapper.
+
+  [2m⎿[0m src/parse/mod.rs      [32m+84[0m [31m-212[0m
+
+[1;38;5;208m●[0m Tests pass: 212 passed, 0 failed.
+
+[33m● I asked it in the inbox: Q123 · Question Title 123[0m
+[90m✻ Waiting for your answer · 3 shells running[0m
+
