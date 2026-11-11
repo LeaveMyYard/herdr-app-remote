@@ -96,6 +96,81 @@ describe("http", () => {
   });
 });
 
+describe("hardening", () => {
+  function raw(payload: string, afterWrite?: (s: import("node:net").Socket) => void): Promise<string> {
+    return import("node:net").then(
+      ({ connect }) =>
+        new Promise<string>((resolve) => {
+          const [h, p] = base.split(":");
+          const sock = connect(Number(p), h);
+          let out = "";
+          sock.on("data", (d) => (out += d.toString()));
+          sock.on("error", () => undefined);
+          sock.on("close", () => resolve(out));
+          sock.write(payload, () => afterWrite?.(sock));
+        }),
+    );
+  }
+
+  it("a malformed upgrade URL gets 400 and the server survives", async () => {
+    await start();
+    const out = await raw("GET http://[ HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+    expect(out).toMatch(/^HTTP\/1.1 400/);
+    expect((await fetch(`http://${base}/healthz`)).status).toBe(200);
+  });
+
+  it("a client reset while an async guard is pending does not crash the process", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    await start(async () => (await gate, true));
+    const uncaught: unknown[] = [];
+    const onErr = (e: unknown) => uncaught.push(e);
+    process.on("uncaughtException", onErr);
+    try {
+      await raw(
+        "GET /api/v1/ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+        (s) => setTimeout(() => s.resetAndDestroy(), 20),
+      );
+      release();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      process.off("uncaughtException", onErr);
+    }
+    expect(uncaught).toEqual([]);
+    expect((await fetch(`http://${base}/healthz`)).status).toBe(200);
+  });
+
+  it("a throwing guard on upgrade answers 403", async () => {
+    await start(() => {
+      throw new Error("boom");
+    });
+    await expect(open()).rejects.toThrow(/403/);
+  });
+
+  it("a staticDir with a trailing slash still serves files", async () => {
+    hub = newHub();
+    srv = createBridgeServer({ hub, staticDir: dir + "/" });
+    const { port } = await srv.listen();
+    base = `127.0.0.1:${port}`;
+    expect(await (await fetch(`http://${base}/index.html`)).text()).toBe("<html>app</html>");
+    expect((await fetch(`http://${base}/assets/a.js`)).status).toBe(200);
+  });
+
+  it("handles frames in order: a sub sent after a slow act is answered after its res", async () => {
+    hub = newHub({ onAct: async () => (await new Promise((r) => setTimeout(r, 50)), { ok: true }) });
+    srv = createBridgeServer({ hub });
+    base = `127.0.0.1:${(await srv.listen()).port}`;
+    hub.publish("host", fixture("typical"));
+    const { ws, msgs, next } = await open();
+    ws.send(JSON.stringify({ type: "hello", api: 1 }));
+    ws.send(JSON.stringify({ type: "act", id: "a", kind: "k", args: {} }));
+    ws.send(JSON.stringify({ type: "sub", topics: ["host"] }));
+    await next(3);
+    expect(msgs.map((m) => m.type)).toEqual(["welcome", "res", "snap"]);
+    ws.close();
+  });
+});
+
 describe("websocket", () => {
   it("hello, sub, snap, patch end to end over a real socket", async () => {
     await start();

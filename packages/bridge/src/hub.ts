@@ -7,6 +7,8 @@ type PatchOp = bridgeApi.PatchOp;
 
 /** How many patches per topic are kept for `hello.resume` replay. */
 const LOG_SIZE = 64;
+/** Subscriptions one connection may hold; the real topic set is small (`chat:<t>` is the open-ended one). */
+const MAX_TOPICS_PER_CONN = 64;
 
 /** One connected client, transport-agnostic. */
 export interface HubClient {
@@ -40,6 +42,8 @@ interface ConnState {
   /** Resume info from `hello`, consumed per topic on first `sub`. */
   resume: { epoch: string; seqs: Record<string, number> } | undefined;
   topics: Set<string>;
+  /** Set once the connection was closed for a protocol error: later frames are dropped. */
+  dead: boolean;
 }
 
 export interface HubOptions {
@@ -130,15 +134,25 @@ export class Hub {
   }
 
   connect(client: HubClient): ConnState {
-    const c: ConnState = { client, greeted: false, resume: undefined, topics: new Set() };
+    const c: ConnState = { client, greeted: false, resume: undefined, topics: new Set(), dead: false };
     this.conns.add(c);
     return c;
   }
 
   disconnect(c: ConnState): void {
     this.conns.delete(c);
-    for (const name of c.topics) this.topics.get(name)?.subscribers.delete(c);
+    for (const name of c.topics) {
+      const t = this.topics.get(name);
+      if (!t) continue;
+      t.subscribers.delete(c);
+      // Don't let subscriptions to arbitrary topic names (`chat:<anything>`) leak state.
+      if (t.subscribers.size === 0 && t.data === undefined && t.stale === null) this.topics.delete(name);
+    }
     c.topics.clear();
+  }
+
+  get topicCount(): number {
+    return this.topics.size;
   }
 
   get connectionCount(): number {
@@ -150,18 +164,24 @@ export class Hub {
     for (const c of [...this.conns]) c.client.close(code, reason);
   }
 
+  private kill(c: ConnState, code: number, reason: string): void {
+    c.dead = true;
+    c.client.close(code, reason);
+  }
+
   /** Handles one raw text frame from a client. */
   async handleRaw(c: ConnState, raw: string): Promise<void> {
+    if (c.dead) return;
     let json: unknown;
     try {
       json = JSON.parse(raw);
     } catch {
-      c.client.close(1003, "bad json");
+      this.kill(c, 1003, "bad json");
       return;
     }
     const parsed = bridgeApi.ClientMessage.safeParse(json);
     if (!parsed.success) {
-      c.client.close(1003, "bad message");
+      this.kill(c, 1003, "bad message");
       return;
     }
     await this.handle(c, parsed.data);
@@ -170,7 +190,7 @@ export class Hub {
   private async handle(c: ConnState, msg: bridgeApi.ClientMessage): Promise<void> {
     if (msg.type === "hello") {
       if (c.greeted) {
-        c.client.close(1002, "duplicate hello");
+        this.kill(c, 1002, "duplicate hello");
         return;
       }
       c.greeted = true;
@@ -179,7 +199,7 @@ export class Hub {
       return;
     }
     if (!c.greeted) {
-      c.client.close(1002, "hello first");
+      this.kill(c, 1002, "hello first");
       return;
     }
     switch (msg.type) {
@@ -187,7 +207,13 @@ export class Hub {
         c.client.send({ type: "pong" });
         return;
       case "sub":
-        for (const name of new Set(msg.topics)) this.subscribe(c, name);
+        for (const name of new Set(msg.topics)) {
+          if (!c.topics.has(name) && c.topics.size >= MAX_TOPICS_PER_CONN) {
+            this.kill(c, 1008, "too many topics");
+            return;
+          }
+          this.subscribe(c, name);
+        }
         return;
       case "act": {
         let res: ActResult;

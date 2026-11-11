@@ -225,3 +225,30 @@ describe("hub protocol discipline", () => {
     expect(hub.connectionCount).toBe(0);
   });
 });
+
+describe("hub robustness", () => {
+  it("drops frames after a protocol close, so a pipelined act never runs", async () => {
+    let ran = 0;
+    const hub = newHub({ onAct: () => (ran++, { ok: true }) });
+    const { conn } = await join(hub);
+    await hub.handleRaw(conn, "{bad");
+    await hub.handleRaw(conn, JSON.stringify({ type: "act", id: "1", kind: "x", args: {} }));
+    expect(ran).toBe(0);
+  });
+
+  it("does not leak topic state for subscriptions to unknown topics", async () => {
+    const hub = newHub();
+    const { conn, send } = await join(hub);
+    await send({ type: "sub", topics: ["chat:a", "chat:b", "host"] });
+    hub.setStale("host", "reconnecting");
+    hub.disconnect(conn);
+    expect(hub.topicCount).toBe(1); // only "host", which carries stale state
+  });
+
+  it("closes a connection that subscribes to too many topics", async () => {
+    const hub = newHub();
+    const { client, send } = await join(hub);
+    await send({ type: "sub", topics: Array.from({ length: 65 }, (_, i) => `chat:${i}`) });
+    expect(client.closed?.code).toBe(1008);
+  });
+});

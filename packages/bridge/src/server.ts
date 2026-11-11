@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { extname, join, normalize, sep } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 import { bridgeApi } from "@herdr-remote/protocol";
@@ -36,7 +36,6 @@ export interface ServerOptions {
   hub: Hub;
   /** Directory with the built PWA; omitted means no static files. */
   staticDir?: string;
-  host?: string;
   port?: number;
   /**
    * Request guard, the seam S5 fills in (Host, Origin, identity, cookie, pause).
@@ -58,7 +57,7 @@ const BIND_HOST = "127.0.0.1";
 export function createBridgeServer(opts: ServerOptions): BridgeServer {
   const { hub } = opts;
   const guard = opts.guard ?? (() => true);
-  const staticRoot = opts.staticDir ? normalize(opts.staticDir) : undefined;
+  const staticRoot = opts.staticDir ? resolve(opts.staticDir) : undefined;
 
   const server = createServer((req, res) => {
     void (async () => {
@@ -88,21 +87,35 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME });
 
   server.on("upgrade", (req, socket, head) => {
+    // Node removes its own socket error handler on upgrade; without one, a client reset
+    // while the guard is pending would be an uncaught exception.
+    const onSocketError = () => socket.destroy();
+    socket.on("error", onSocketError);
+    const reject = (status: string) => {
+      socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+      socket.destroy();
+    };
     void (async () => {
-      const path = new URL(req.url ?? "/", "http://x").pathname;
+      let path: string;
+      try {
+        path = new URL(req.url ?? "/", "http://x").pathname;
+      } catch {
+        return reject("400 Bad Request");
+      }
+      if (path !== "/api/v1/ws") return reject("404 Not Found");
       let ok = false;
       try {
-        ok = path === "/api/v1/ws" && (await guard(req, "ws"));
+        ok = await guard(req, "ws");
       } catch {
         ok = false;
       }
-      if (!ok) {
-        socket.write(`HTTP/1.1 ${path === "/api/v1/ws" ? "403 Forbidden" : "404 Not Found"}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
-        socket.destroy();
-        return;
-      }
-      wss.handleUpgrade(req, socket, head, (ws) => attach(ws));
-    })();
+      if (!ok) return reject("403 Forbidden");
+      if (socket.destroyed) return;
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        socket.off("error", onSocketError);
+        attach(ws);
+      });
+    })().catch(() => socket.destroy());
   });
 
   function attach(ws: WebSocket): void {

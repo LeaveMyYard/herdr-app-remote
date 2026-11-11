@@ -31,3 +31,12 @@ describe("diff/applyPatch", () => {
     expect(() => applyPatch({ a: [1] }, [{ op: "add", path: "/a/5", value: 1 }])).toThrow(PatchError);
   });
 });
+
+describe("applyPatch prototype safety", () => {
+  it("ignores inherited properties and never writes the prototype", () => {
+    expect(() => applyPatch({}, [{ op: "test", path: "/constructor", value: 1 }])).toThrow(PatchError);
+    const out = applyPatch({}, [{ op: "add", path: "/__proto__", value: { x: 1 } }]) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.keys(out)).toEqual(["__proto__"]);
+  });
+});

@@ -80,7 +80,7 @@ function locate(doc: Json, tokens: string[]): { parent: Json; key: string } {
   let cur: Json = doc;
   for (let i = 0; i < tokens.length - 1; i++) {
     const t = tokens[i] as string;
-    const next: Json | undefined = Array.isArray(cur) ? cur[Number(t)] : isObj(cur) ? cur[t] : undefined;
+    const next: Json | undefined = Array.isArray(cur) ? cur[Number(t)] : isObj(cur) && Object.hasOwn(cur, t) ? cur[t] : undefined;
     if (next === undefined) throw new PatchError(`missing ${t}`);
     cur = next;
   }
@@ -91,7 +91,7 @@ function getAt(doc: Json, path: string): Json {
   const tokens = parse(path);
   if (tokens.length === 0) return doc;
   const { parent, key } = locate(doc, tokens);
-  const v = Array.isArray(parent) ? parent[Number(key)] : isObj(parent) ? parent[key] : undefined;
+  const v = Array.isArray(parent) ? parent[Number(key)] : isObj(parent) && Object.hasOwn(parent, key) ? parent[key] : undefined;
   if (v === undefined) throw new PatchError(`missing ${path}`);
   return v;
 }
@@ -109,7 +109,7 @@ function addAt(doc: Json, path: string, value: Json): Json {
   if (tokens.length === 0) return value;
   const { parent, key } = locate(doc, tokens);
   if (Array.isArray(parent)) parent.splice(arrayIndex(key, parent.length, true), 0, value);
-  else if (isObj(parent)) parent[key] = value;
+  else if (isObj(parent)) Object.defineProperty(parent, key, { value, writable: true, enumerable: true, configurable: true });
   else throw new PatchError(`cannot add at ${path}`);
   return doc;
 }
