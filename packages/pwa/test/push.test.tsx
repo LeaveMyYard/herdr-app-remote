@@ -2,6 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { bridgeApi } from "@herdr-remote/protocol";
+import { HostNameProvider } from "../src/bridge/host-name";
 import { PUSH_WORDS, PushRow } from "../src/push/PushRow";
 import { readState, turnOff, turnOn, type PushEnv, type PushManagerLike, type SubscriptionLike } from "../src/push/push";
 
@@ -132,8 +133,12 @@ describe("PushRow", () => {
   });
 
   it("says where to turn push on when the desktop has not", async () => {
-    render(<PushRow env={env({}, { info: { key: KEY, allowed: false, subscribed: false } }).e} />);
-    expect(await screen.findByText(PUSH_WORDS.notAllowed)).toBeInTheDocument();
+    render(
+      <HostNameProvider name="desk-1">
+        <PushRow env={env({}, { info: { key: KEY, allowed: false, subscribed: false } }).e} />
+      </HostNameProvider>,
+    );
+    expect(await screen.findByText("Notifications are off for this phone. Turn them on in Remote on desk-1.")).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
   });
 });

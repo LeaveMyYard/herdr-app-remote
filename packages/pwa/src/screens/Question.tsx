@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { closedReason, resultWords, type ActFn, type ActResult, type ClosedRows } from "../inbox/act";
 import { GRACE_MS, useArmed, VIEW_ARM_MS } from "../inbox/arm";
 import { age, groupTitle, whereOf, type Of } from "../inbox/model";
-import { ANSWER, CUT } from "../inbox/words";
+import { ANSWER, CUT, dismissWhat } from "../inbox/words";
 
 type Group = Of<"group">;
 type Q = bridgeApi.InboxQuestion;
@@ -205,14 +205,9 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
   const armed = useArmed(VIEW_ARM_MS, `${row.rev}|${misses}`, GRACE_MS);
   // The confirming tap is armed on its own, so a double tap can't dismiss the whole group.
   const confirmArmed = useArmed(VIEW_ARM_MS, dismissing);
-  useEffect(() => {
-    if (!dismissing) return;
-    const t = setTimeout(() => setDismissing(false), 4_000);
-    return () => clearTimeout(t);
-  }, [dismissing]);
   const guard = (fn: () => void) => () => {
     if (busy || !armed()) return;
-    if (fn !== dismiss) setDismissing(false);
+    if (fn !== dismiss && fn !== confirmDismiss) setDismissing(false);
     fn();
   };
   const idx = row.questions.findIndex((x) => x.id === q.id);
@@ -252,7 +247,9 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
     });
   };
   function dismiss() {
-    if (!dismissing) return setDismissing(true);
+    setDismissing(true);
+  }
+  function confirmDismiss() {
     if (!confirmArmed()) return;
     setDismissing(false);
     void send("inbox.dismiss", {}, (r) => {
@@ -266,8 +263,8 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
   })();
   const pickedOne = pick.picked.length === 1 ? pick.picked[0] : undefined;
   const dismissButton = (
-    <button type="button" className="nf qn-dismiss" onClick={guard(dismiss)} disabled={busy} aria-label={dismissing ? ANSWER.DISMISS_LABEL : ANSWER.DISMISS}>
-      {dismissing ? ANSWER.DISMISS_CONFIRM : ANSWER.DISMISS}
+    <button type="button" className="nf qn-dismiss" onClick={guard(dismiss)} disabled={busy}>
+      {ANSWER.DISMISS}
     </button>
   );
   return (
@@ -321,14 +318,30 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
           </p>
         ) : null}
       </main>
-      <div className="row nf qn-foot">
-        <a href="#/inbox" className="row f1 qn-later">
-          {ANSWER.later}
-        </a>
-        <button type="button" className="row qn-next" onClick={guard(primary)} disabled={busy}>
-          {busy ? ANSWER.sending : lone ? ANSWER.send : ANSWER.next}
-        </button>
-      </div>
+      {dismissing ? (
+        <div role="alertdialog" aria-labelledby="qn-dismiss-q" className="col nf qn-dismissbar">
+          <p id="qn-dismiss-q" className="qn-dismissq">
+            {ANSWER.dismissConfirm(dismissWhat(row.questions.map((x) => x.id)))}
+          </p>
+          <div className="row qn-dismissacts">
+            <button type="button" className="f1 qn-keep" onClick={() => setDismissing(false)} disabled={busy}>
+              {ANSWER.keep}
+            </button>
+            <button type="button" className="f1 qn-dismissgo" onClick={guard(confirmDismiss)} disabled={busy}>
+              {ANSWER.DISMISS}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="row nf qn-foot">
+          <a href="#/inbox" className="row f1 qn-later">
+            {ANSWER.later}
+          </a>
+          <button type="button" className="row qn-next" onClick={guard(primary)} disabled={busy}>
+            {busy ? ANSWER.sending : lone ? ANSWER.send : ANSWER.next}
+          </button>
+        </div>
+      )}
     </>
   );
 }

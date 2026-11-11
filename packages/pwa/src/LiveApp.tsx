@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { App, type AppData, type LiveSources } from "./App";
 import type { BridgeClient, ClientSnapshot } from "./bridge/client";
+import { fetchHostName, HostNameProvider } from "./bridge/host-name";
 import { fetchTerminalInput, type TerminalInputView } from "./bridge/me";
 import { useBridge, useTopics } from "./bridge/react";
 import { browserEnv } from "./push/push";
@@ -81,13 +82,30 @@ export function LiveApp({
   client,
   hostName = hostNameFrom(window.location.hostname),
   readTerminalInput = fetchTerminalInput,
+  readHostName = fetchHostName,
 }: {
   client: BridgeClient;
   hostName?: string;
   /** Test seam for `GET /api/v1/me`. */
   readTerminalInput?: () => Promise<TerminalInputView | null>;
+  /** Test seam for `GET /api/v1/meta`'s `host_name`. */
+  readHostName?: () => Promise<string | null>;
 }) {
   const snap = useBridge(client);
+  // The bridge's own name for the computer (serve identity, else its hostname); the page's host name until it answers.
+  const [bridgeHostName, setBridgeHostName] = useState<string | null>(null);
+  const online = snap.status === "online";
+  useEffect(() => {
+    if (!online) return;
+    let live = true;
+    void readHostName().then((n) => {
+      if (live && n) setBridgeHostName(n);
+    });
+    return () => {
+      live = false;
+    };
+  }, [online, readHostName]);
+  const name = bridgeHostName ?? hostName;
   useTopics(client, BASE_TOPICS);
   // Usage polls the desktop's CLI while subscribed, so it is asked for only once the tab has been opened.
   const hash = useHash();
@@ -132,7 +150,7 @@ export function LiveApp({
   const push = useMemo(() => browserEnv((kind, args) => client.act(kind, args)), [client]);
   const data: AppData | undefined = useMemo(() => (host ? { host, ...(panorama ? { panorama } : {}) } : undefined), [host, panorama]);
   const live: LiveSources = {
-    hostName,
+    hostName: name,
     push,
     plugins,
     inbox,
@@ -155,5 +173,9 @@ export function LiveApp({
       return r;
     },
   };
-  return <App connection={liveConnection(snap)} data={data} live={live} />;
+  return (
+    <HostNameProvider name={name}>
+      <App connection={liveConnection(snap)} data={data} live={live} />
+    </HostNameProvider>
+  );
 }

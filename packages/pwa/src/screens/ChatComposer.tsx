@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { bridgeApi } from "@herdr-remote/protocol";
+import { useHostName } from "../bridge/host-name";
 
 /** The bridge's answer to `terminal.send`. */
 export interface SendOutcome {
@@ -27,12 +28,15 @@ export function forgetConfirmations(): void {
   confirmed.clear();
 }
 
+/** The second line of the first-send question about text (PhoneCopy, design/COPY.md). */
+export const CONFIRM_NOTE = "Asked once for each terminal while the app is open.";
+
 /** What a refused or uncertain send means here. Nothing is ever retried by itself. */
-export function sendWords(r: SendOutcome): string {
+export function sendWords(r: SendOutcome, host: string): string {
   if (r.unknown_effect) return "It may have been sent. Check the terminal before you send it again.";
   switch (r.code) {
     case "forbidden":
-      return "Typing to the terminal is off for this device. Turn it on in the desktop's Remote panel.";
+      return `Typing to the terminal is off for this phone. Turn it on in Remote on ${host}.`;
     case "rate_limited":
       return "Sending too fast. Wait a few seconds, then send again.";
     case "busy":
@@ -71,6 +75,7 @@ export function textProblem(text: string): string | null {
  * Tab, ⇧Tab, Ctrl-C and the arrows on the board need special keys and are left out.
  */
 export function ChatComposer({ terminal, agentName, input }: { terminal: string; agentName: string; input: ChatInput }) {
+  const host = useHostName();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   /** The text waiting on the first-send confirmation (`""` is Enter alone). */
@@ -100,7 +105,7 @@ export function ChatComposer({ terminal, agentName, input }: { terminal: string;
       if (value !== "") setText((t) => (t === value ? "" : t));
       return;
     }
-    setNote(sendWords(r));
+    setNote(sendWords(r, host));
   };
 
   const submit = (value: string) => {
@@ -146,6 +151,7 @@ export function ChatComposer({ terminal, agentName, input }: { terminal: string;
           <p id="chat-confirm-q" className="chat-confirm-q">
             {asking === "" ? `Press Enter in ${agentName}'s terminal?` : `Type this into ${agentName}'s terminal?`}
           </p>
+          {asking === "" ? null : <p className="chat-confirm-d">{CONFIRM_NOTE}</p>}
           <div className="row nf chat-confirm-acts">
             <button type="button" className="chat-btn" onClick={() => setAsking(null)}>
               Cancel

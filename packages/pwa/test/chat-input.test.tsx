@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatAgent, chatTopic } from "../src/chat-fixtures";
 import { fetchTerminalInput, terminalInputOf } from "../src/bridge/me";
+import { HostNameProvider } from "../src/bridge/host-name";
 import { Chat } from "../src/screens/Chat";
 import { forgetConfirmations, sendWords, textProblem, type ChatInput, type SendOutcome } from "../src/screens/ChatComposer";
 
@@ -47,6 +48,7 @@ describe("Chat composer (terminal.input)", () => {
     await userEvent.type(box(), "hello agent");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(confirm()).toHaveTextContent("Type this into Agent 1 · Parser rewrite's terminal?");
+    expect(confirm()).toHaveTextContent("Asked once for each terminal while the app is open.");
     expect(sent).toEqual([]);
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -104,6 +106,7 @@ describe("Chat composer (terminal.input)", () => {
     await userEvent.type(box(), "draft");
     await userEvent.click(screen.getByRole("button", { name: "Enter" }));
     expect(confirm()).toHaveTextContent("Press Enter in");
+    expect(confirm()).not.toHaveTextContent("Asked once");
     await userEvent.click(confirmSend());
     expect(sent).toEqual([""]);
     expect(box()).toHaveValue("draft");
@@ -118,7 +121,7 @@ describe("Chat composer (terminal.input)", () => {
   });
 
   it.each([
-    [{ ok: false, code: "forbidden" }, /off for this device/],
+    [{ ok: false, code: "forbidden" }, /^Typing to the terminal is off for this phone\. Turn it on in Remote on desk-1\.$/],
     [{ ok: false, code: "rate_limited" }, /too fast/],
     [{ ok: false, code: "busy" }, /Still sending/],
     [{ ok: false, code: "terminal_finished" }, /has closed/],
@@ -128,7 +131,11 @@ describe("Chat composer (terminal.input)", () => {
     [{ ok: false, code: "timeout", unknown_effect: true }, /may have been sent/],
   ] as [SendOutcome, RegExp][])("says what %j means and keeps the text, never resending", async (reply, words) => {
     const { sent, input: i } = input({}, reply);
-    render(<Chat {...props} input={i} />);
+    render(
+      <HostNameProvider name="desk-1">
+        <Chat {...props} input={i} />
+      </HostNameProvider>,
+    );
     await userEvent.type(box(), "hello");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     await userEvent.click(confirmSend());
@@ -141,7 +148,7 @@ describe("Chat composer (terminal.input)", () => {
     expect(textProblem("ok\n\ttab")).toBeNull();
     expect(textProblem("esc \u001b[A")).toMatch(/control characters/);
     expect(textProblem("x".repeat(4001))).toMatch(/Too long/);
-    expect(sendWords({ ok: false, code: "something_new" })).toBe("Not sent.");
+    expect(sendWords({ ok: false, code: "something_new" }, "desk-1")).toBe("Not sent.");
   });
 
   it("goes read-only by itself when the expiry passes", () => {

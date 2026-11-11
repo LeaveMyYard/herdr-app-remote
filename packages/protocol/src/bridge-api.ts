@@ -30,6 +30,8 @@ export type Topic = z.infer<typeof Topic>;
 export const Meta = z.object({
   api: z.literal(API_VERSION),
   bridge: z.string().min(1),
+  /** The computer's name in the phone's copy ("desk-1"): the serve name's first label, else the hostname's. */
+  host_name: z.string().min(1).max(63).optional(),
 });
 export type Meta = z.infer<typeof Meta>;
 

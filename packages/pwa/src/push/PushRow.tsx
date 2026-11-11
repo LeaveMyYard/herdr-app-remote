@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useHostName } from "../bridge/host-name";
 import { readState, turnOff, turnOn, type PushEnv, type PushState } from "./push";
 
 /** The row's words. Provisional: no board draws this row yet (S17). */
@@ -8,13 +9,14 @@ export const PUSH_WORDS = {
   on: "Notifications are on for this phone.",
   turnOff: "Turn off",
   busy: "One moment…",
-  notAllowed: "Notifications are off for this phone. Turn them on in the Remote panel on the desktop.",
+  notAllowed: (host: string): string => `Notifications are off for this phone. Turn them on in Remote on ${host}.`,
   denied: "Notifications are blocked for this app. Allow them in Settings, then come back.",
   failed: "Notifications couldn't be turned on. Try again.",
 } as const;
 
 /** Notifications on or off for this phone, shown at the top of the Inbox. Hidden outside the Home Screen app. */
 export function PushRow({ env }: { env: PushEnv }) {
+  const host = useHostName();
   const [state, setState] = useState<PushState>({ s: "loading" });
   const key = useRef<string | null>(null);
   useEffect(() => {
@@ -37,7 +39,7 @@ export function PushRow({ env }: { env: PushEnv }) {
   // The tap handler calls `turnOn` synchronously, so the permission request stays inside the user gesture.
   const on = () => key.current !== null && run(() => turnOn(env, key.current!));
   const text =
-    state.s === "on" ? PUSH_WORDS.on : state.s === "busy" ? PUSH_WORDS.busy : state.s === "not_allowed" ? PUSH_WORDS.notAllowed : state.s === "denied" ? PUSH_WORDS.denied : state.s === "failed" ? PUSH_WORDS.failed : PUSH_WORDS.off;
+    state.s === "on" ? PUSH_WORDS.on : state.s === "busy" ? PUSH_WORDS.busy : state.s === "not_allowed" ? PUSH_WORDS.notAllowed(host) : state.s === "denied" ? PUSH_WORDS.denied : state.s === "failed" ? PUSH_WORDS.failed : PUSH_WORDS.off;
   return (
     <div className="ib-notice row push-row" data-tone={state.s === "failed" ? "warn" : "info"} role="status">
       <span className="f1">{text}</span>
