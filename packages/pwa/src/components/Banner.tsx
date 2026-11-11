@@ -1,17 +1,44 @@
 import type { Connection } from "../model";
 
-const COPY: Record<Exclude<Connection["status"], "online">, { cls: string; text: (c: Connection) => string }> = {
-  connecting: { cls: "s-q", text: () => "Connecting to your computer…" },
-  offline: { cls: "s-fail", text: () => "No connection. Retrying…" },
-  // Provisional (conductor decision on PR #13): the design draws no banner for these four states. Kept here so a
-  // later design pass changes them in one place. Funnel is deliberately not named on the phone.
-  unpaired: { cls: "s-wait", text: () => "This phone isn't paired yet. Pair it from Remote on your computer." },
-  refused: { cls: "s-fail", text: () => "Your computer no longer accepts this phone." },
-  paused: { cls: "s-wait", text: () => "Remote access is paused on your computer." },
-  unavailable: { cls: "s-wait", text: () => "Your computer isn't serving right now. Retrying…" },
+interface Copy {
+  /** The state hue (`s-wait` amber, `s-fail` red, `s-q` grey). */
+  cls: string;
+  title: (c: Connection, host: string) => string;
+  /** The second line, muted. */
+  sub?: (host: string) => string;
+  /** A button on the right. */
+  action?: "retry";
+}
+
+// Board PhoneBanners and design/COPY.md (approved 2026-11-11). `host` is the computer's Tailscale machine name
+// ("desk-1"). Funnel is deliberately not named on the phone.
+const COPY: Record<Exclude<Connection["status"], "online">, Copy> = {
+  connecting: { cls: "s-q", title: (_c, host) => `Connecting to ${host}…` },
+  offline: { cls: "s-fail", title: () => "No connection. Retrying…" },
+  unpaired: {
+    cls: "s-wait",
+    title: () => "This phone isn't paired yet.",
+    sub: (host) => `Scan a fresh code from Remote › Devices on ${host} with the iPhone Camera.`,
+  },
+  refused: {
+    cls: "s-fail",
+    title: (_c, host) => `${host} no longer accepts this phone.`,
+    sub: () => "It was removed, or this phone uses another account. Scan a fresh code from Remote › Devices with the iPhone Camera.",
+  },
+  paused: {
+    cls: "s-q",
+    title: (_c, host) => `Remote access is paused on ${host}.`,
+    sub: () => "Resume it in Remote on the computer. This reconnects by itself.",
+  },
+  unavailable: {
+    cls: "s-wait",
+    title: (_c, host) => `Can't reach ${host}.`,
+    sub: () => "It may be asleep or offline. Trying again every 10 s.",
+    action: "retry",
+  },
   stale: {
     cls: "s-wait",
-    text: (c) =>
+    title: (c) =>
       // Wording for this reason is fixed by PLAN section 3 and bridge-api-v1.
       c.reason === "layout_without_remote"
         ? "Switch to a layout with Remote"
@@ -21,14 +48,22 @@ const COPY: Record<Exclude<Connection["status"], "online">, { cls: string; text:
   },
 };
 
-/** Connection and stale-data banner. Renders nothing while online. */
-export function Banner({ connection }: { connection: Connection }) {
+/** Connection and stale-data banner. Renders nothing while online. `host` is the computer's name ("desk-1"). */
+export function Banner({ connection, host, onRetry }: { connection: Connection; host: string; onRetry?: (() => void) | undefined }) {
   if (connection.status === "online") return null;
-  const { cls, text } = COPY[connection.status];
+  const c = COPY[connection.status];
   return (
-    <div role="status" className={`banner ${cls}`} data-status={connection.status}>
+    <div role="status" className={`banner ${c.cls}`} data-status={connection.status}>
       <span className="banner-dot" aria-hidden="true" />
-      {text(connection)}
+      <span className="col f1 banner-text">
+        <span className="banner-title">{c.title(connection, host)}</span>
+        {c.sub ? <span className="banner-sub">{c.sub(host)}</span> : null}
+      </span>
+      {c.action === "retry" && onRetry ? (
+        <button type="button" className="nf banner-action" onClick={onRetry}>
+          Retry now
+        </button>
+      ) : null}
     </div>
   );
 }

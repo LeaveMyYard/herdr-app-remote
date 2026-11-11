@@ -86,10 +86,10 @@ afterEach(() => {
 describe("LiveApp", () => {
   it("subscribes host, plugins and panorama, and shows connecting until the first host snap", async () => {
     await mount();
-    expect(screen.getByRole("status")).toHaveTextContent("Connecting to your computer");
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting to desk-1");
     const s = await greet();
     expect(subs(s)).toEqual(["host", "plugins", "panorama", "inbox"]);
-    expect(screen.getByRole("status")).toHaveTextContent("Connecting to your computer");
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting to desk-1");
     await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: HOST });
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("Agent 1")).toBeInTheDocument();

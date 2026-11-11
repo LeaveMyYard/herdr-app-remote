@@ -1,0 +1,37 @@
+/* Pairing screen and Home Screen prompt (S5b). Values follow design/PhonePair; colours come from the generated tokens. */
+.pair-top{height:44px}
+.pair-main{min-height:0;padding:24px;align-items:center;justify-content:center;gap:14px;text-align:center}
+.pair-mark{position:relative}
+.pair-icon{width:64px;height:64px;border-radius:14px}
+.pair-chip{position:absolute;right:-8px;bottom:-8px;width:28px;height:28px;justify-content:center;border-radius:9px;background:var(--t-chrome)}
+.pair-spinner{display:inline-block;flex:none;width:16px;height:16px;background:var(--spinner-working) center/contain no-repeat}
+.pair-dot{width:8px;height:8px;border-radius:4px;background:#ffb547;animation:hd-breathe 1.6s ease-in-out infinite}
+.pair-title{margin:0;font-size:17px;font-weight:600;line-height:1.4}
+.pair-body{margin:0;font-size:14px;color:var(--t-muted);line-height:1.5;max-width:300px}
+.pair-card{border-radius:10px;background:var(--t-background);border:1px solid var(--t-border)}
+.pair-facts{width:100%;padding:12px 14px;gap:10px;text-align:left}
+.pair-kv{gap:8px;font-size:13px}
+.pair-k{color:var(--t-dim)}
+.pair-v{font-weight:500}
+.pair-waiting{gap:8px;padding-top:10px;border-top:1px solid var(--t-border);font-size:13px;color:#ffb547}
+.pair-note{margin:0;font-size:12.5px;color:var(--t-dim)}
+.pair-foot{gap:8px;padding:12px 16px 34px;border-top:1px solid var(--t-border)}
+.hd .pair-solid{height:48px;width:100%;justify-content:center;border-radius:7px;border:1px solid var(--t-solid);background:var(--t-solid);color:var(--t-solid-fg);font-size:15px;font-weight:500}
+.pair-steps{width:100%;margin:0;padding:14px;gap:12px;list-style:none;text-align:left;border-radius:10px;background:var(--t-background);border:1px solid var(--t-border)}
+.pair-step{align-items:flex-start;gap:10px;font-size:13.5px;line-height:1.45}
+.pair-step-n{width:20px;height:20px;justify-content:center;border-radius:5px;background:var(--t-raised);font-size:11px;color:var(--t-muted)}
+
+/* "Get notifications on this phone": floats above the tab bar, like the connection banner. */
+.home-prompt{position:absolute;left:8px;right:8px;bottom:calc(58px + var(--sab) + 8px);z-index:2;padding:14px;gap:10px;border-radius:12px;background:var(--t-popover);border:1px solid #ffffff1f;box-shadow:0 12px 32px #00000080}
+.home-prompt-head{align-items:flex-start;gap:10px}
+.home-prompt-icon{width:36px;height:36px;border-radius:9px}
+.home-prompt-text{gap:2px;line-height:1.4}
+.home-prompt-title{font-size:15px;font-weight:600}
+.home-prompt-sub{font-size:13px;color:var(--t-muted)}
+.hd .home-prompt-close{width:44px;height:44px;margin:-12px -12px 0 0;justify-content:center;color:var(--t-dim)}
+.home-prompt-steps{padding:12px}
+.home-prompt-foot{gap:10px}
+.home-prompt-hint{font-size:12px;color:var(--t-dim)}
+.hd .home-prompt-later{height:44px;padding:0 16px;border-radius:7px;border:1px solid var(--t-input);background:var(--t-raised);font-size:13px}
+.share-glyph{vertical-align:-2px}
+.hd .bell-btn{margin-right:-8px}

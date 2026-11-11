@@ -4,6 +4,11 @@
 //   node phone.mjs <repo> <rig> pair            (posts the code in <rig>/pair.code, keeps the cookie)
 //   node phone.mjs <repo> <rig> me
 //   node phone.mjs <repo> <rig> ws <seconds>    (hello, sub host+setup; prints frames and the close code)
+//   node phone.mjs <repo> <rig> mint            (S5b: act pair.transfer over this jar's socket)
+//   node phone.mjs <repo> <rig> manifest        (S5b: GET /manifest.webmanifest with this jar's cookie; keeps the code)
+//   node phone.mjs <repo> <rig> transfer [origin] (S5b: posts the kept transfer code; keeps the new cookie)
+// JAR=<name> picks the cookie jar (default: Safari's). iOS keeps the Home Screen app's cookies apart from Safari's,
+// so the Home Screen app is another jar.
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,7 +19,10 @@ const HOST = 'desk-1.example-tailnet.ts.net:8443';
 const ORIGIN = `https://${HOST}`;
 const STANDIN = 8443;
 const API = 47391;
-const cookieFile = join(rig, 'phone.cookie');
+const jar = process.env.JAR ?? '';
+if (!/^[a-z0-9]*$/.test(jar)) throw new Error('bad JAR');
+const cookieFile = join(rig, jar ? `phone-${jar}.cookie` : 'phone.cookie');
+const codeFile = join(rig, 'transfer.code');
 const cookie = () => (existsSync(cookieFile) ? readFileSync(cookieFile, 'utf8').trim() : '');
 const say = (o) => console.log(JSON.stringify(o));
 
@@ -48,8 +56,41 @@ if (cmd === 'get') {
 } else if (cmd === 'me') {
   const r = await req('GET', '/api/v1/me', { headers: { Cookie: cookie() } });
   let state = null;
-  try { state = JSON.parse(r.body).device.state; } catch { /* unpaired */ }
-  say({ me: r.status, state });
+  let id = null;
+  try { ({ state, id } = JSON.parse(r.body).device); } catch { /* unpaired */ }
+  say({ me: r.status, state, id, jar: jar || 'safari' });
+} else if (cmd === 'manifest') {
+  const r = await req('GET', '/manifest.webmanifest', { headers: { Cookie: cookie() } });
+  let start = null;
+  try { start = JSON.parse(r.body).start_url; } catch { /* not json */ }
+  const m = /^\.\/pair#t=([A-Za-z0-9_-]{22})$/.exec(start ?? '');
+  if (m) writeFileSync(codeFile, m[1]);
+  // The code itself is not printed: only whether the start URL carries one.
+  say({ manifest: r.status, start_url: m ? './pair#t=<code>' : start, code: !!m, cache: r.headers['cache-control'] ?? null, vary: r.headers.vary ?? null, cors: r.headers['access-control-allow-origin'] ?? null, jar: jar || 'safari' });
+} else if (cmd === 'transfer') {
+  const code = readFileSync(codeFile, 'utf8').trim();
+  const r = await req('POST', '/api/v1/pair/transfer', {
+    headers: { Origin: rest[0] ?? ORIGIN, 'X-Remote-Api': '1', 'Content-Type': 'application/json', Cookie: cookie() },
+    body: JSON.stringify({ code }),
+  });
+  const sc = [r.headers['set-cookie'] ?? []].flat()[0] ?? '';
+  if (sc) writeFileSync(cookieFile, sc.split(';')[0]);
+  let state = null;
+  try { state = JSON.parse(r.body).device.state; } catch { /* refused */ }
+  say({ transfer: r.status, state, cookie: sc ? sc.split(';').slice(1).map((x) => x.trim()).join('; ') : null, jar: jar || 'safari' });
+} else if (cmd === 'mint') {
+  const require = createRequire(join(repo, 'packages/bridge/package.json'));
+  const WebSocket = require('ws');
+  const ws = new WebSocket(`ws://127.0.0.1:${STANDIN}/api/v1/ws`, ['herdr-remote.v1'], { headers: { Host: HOST, Origin: ORIGIN, Cookie: cookie() } });
+  ws.on('unexpected-response', (_q, res) => { say({ mint: 'refused', status: res.statusCode }); process.exit(0); });
+  ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', api: 1 })));
+  ws.on('message', (d) => {
+    const m = JSON.parse(d.toString());
+    if (m.type === 'welcome') ws.send(JSON.stringify({ type: 'act', id: 'm1', kind: 'pair.transfer', args: {} }));
+    if (m.type === 'res' && m.id === 'm1') { say({ mint: 'res', ok: m.ok, code: m.code ?? null }); ws.close(); process.exit(0); }
+  });
+  ws.on('error', (e) => { say({ mint: 'error', error: e.message }); process.exit(0); });
+  setTimeout(() => { say({ mint: 'timeout' }); process.exit(0); }, 10_000);
 } else if (cmd === 'ws') {
   const require = createRequire(join(repo, 'packages/bridge/package.json'));
   const WebSocket = require('ws');

@@ -103,6 +103,8 @@ export function describeAct(kind: string, args: Record<string, unknown>, label?:
       return "turned push on";
     case "push.unsubscribe":
       return "turned push off";
+    case "pair.transfer":
+      return "asked for a Home Screen setup code";
     default:
       // Unknown kinds come straight from the client: log the name only if it looks like one.
       return /^[a-z][a-z0-9_.-]{0,31}$/.test(kind) ? `tried ${kind}` : "tried an unknown action";

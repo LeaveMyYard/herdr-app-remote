@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { bridgeApi, HostState } from "@herdr-remote/protocol";
-import { App, type AppData, type LiveSources } from "./App";
+import { App, type AppData, type HomePromptState, type LiveSources } from "./App";
 import type { BridgeClient, ClientSnapshot } from "./bridge/client";
 import { fetchHostName, HostNameProvider } from "./bridge/host-name";
 import { fetchTerminalInput, type TerminalInputView } from "./bridge/me";
 import { useBridge, useTopics } from "./bridge/react";
+import { isStandalone, promptWanted, refreshManifest, setPromptWanted } from "./pair/flow";
 import { browserEnv } from "./push/push";
 import type { ChatInput } from "./screens/ChatComposer";
 import type { Connection } from "./model";
@@ -77,12 +78,46 @@ function useTerminalInput(active: boolean, online: boolean, read: () => Promise<
   return { view, refresh };
 }
 
+/**
+ * The "Add to Home Screen" prompt (S5b), in the browser only. While it is open and the socket is online, the bridge
+ * mints a one-time transfer code for this device (`act pair.transfer`) and the browser reads the manifest again, so
+ * a Home Screen app added now opens at `/pair#t=<code>` and sets itself up as this device. The page never sees the
+ * code: it is in the manifest only.
+ */
+function useHomePrompt(client: BridgeClient, online: boolean, standalone: boolean, refresh: () => void): HomePromptState | null {
+  const [open, setOpen] = useState(() => !standalone && promptWanted());
+  useEffect(() => {
+    if (!open || !online || standalone) return;
+    let gone = false;
+    void client.act("pair.transfer").then((r) => {
+      if (!gone && r.ok) refresh();
+    });
+    return () => {
+      gone = true;
+    };
+  }, [open, online, standalone, client, refresh]);
+  const onOpen = useCallback(() => {
+    setPromptWanted(true);
+    setOpen(true);
+  }, []);
+  const onClose = useCallback(() => {
+    setPromptWanted(false);
+    setOpen(false);
+  }, []);
+  if (standalone) return null;
+  return { open: open && online, onOpen, onClose };
+}
+
+const refreshManifestNow = () => refreshManifest();
+
 /** The app over the bridge: topics in, `act`s out. Nothing changes on screen until the bridge says so. */
 export function LiveApp({
   client,
   hostName = hostNameFrom(window.location.hostname),
   readTerminalInput = fetchTerminalInput,
   readHostName = fetchHostName,
+  standalone = isStandalone(),
+  onManifest = refreshManifestNow,
 }: {
   client: BridgeClient;
   hostName?: string;
@@ -90,6 +125,10 @@ export function LiveApp({
   readTerminalInput?: () => Promise<TerminalInputView | null>;
   /** Test seam for `GET /api/v1/meta`'s `host_name`. */
   readHostName?: () => Promise<string | null>;
+  /** Installed to the Home Screen: no bell, no prompt. */
+  standalone?: boolean;
+  /** Test seam: makes the browser read the manifest again. */
+  onManifest?: () => void;
 }) {
   const snap = useBridge(client);
   // The bridge's own name for the computer (serve identity, else its hostname); the page's host name until it answers.
@@ -106,6 +145,7 @@ export function LiveApp({
     };
   }, [online, readHostName]);
   const name = bridgeHostName ?? hostName;
+  const homePrompt = useHomePrompt(client, online, standalone, onManifest);
   useTopics(client, BASE_TOPICS);
   // Usage polls the desktop's CLI while subscribed, so it is asked for only once the tab has been opened.
   const hash = useHash();
@@ -175,7 +215,7 @@ export function LiveApp({
   };
   return (
     <HostNameProvider name={name}>
-      <App connection={liveConnection(snap)} data={data} live={live} />
+      <App connection={liveConnection(snap)} onRetry={client.wake} data={data} live={live} homePrompt={homePrompt} />
     </HostNameProvider>
   );
 }

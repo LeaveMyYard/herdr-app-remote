@@ -5,8 +5,12 @@ import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 /**
  * `fixture` selects the fake data behind the screen (main.tsx; without it the app connects to the bridge); `nav: false` is a full-screen sheet with no tab bar.
  * `skip` is a region of the design render that this slice leaves out on purpose (painted out of both images).
+ * `viewport` and `clip` are for a board drawn inside browser chrome: the page gets the height the browser leaves it,
+ * and only `clip` (the part above the chrome, from the top) is compared.
  */
-const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[] }[] = [
+/** The design-only state switcher at the top of the PhonePair and PhoneBanners boards; not part of the app. */
+const SWITCHER: Rect = { x: 0, y: 0, width: 390, height: 44 };
+const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[]; viewport?: { width: number; height: number }; clip?: Rect }[] = [
   { ref: "PhoneAgentsBasic", url: "/?fixture=basic#/agents" },
   { ref: "PhoneUsage", url: "/?fixture=usage#/usage" },
   { ref: "PhoneMissing", url: "/?fixture=usage#/usage/missing" },
@@ -19,14 +23,28 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[] 
   { ref: "PhoneInbox", url: "/?fixture=inbox#/inbox" },
   { ref: "PhoneQuestion", url: "/?fixture=inbox&pick=0#/inbox/q/group%3A123/123", nav: false },
   { ref: "PhoneReview", url: "/?fixture=inbox&inbox=review#/inbox/q/group%3A123/submit", nav: false },
+  // S5b: the pairing screen, one ref per board state.
+  ...(["check", "wait", "ok", "bad", "first"] as const).map((st) => ({ ref: `PhonePair-${st}`, url: `/?fixture=pair&state=${st}`, nav: false, skip: [SWITCHER] })),
+  // "In Safari": the board draws Safari's toolbar under the app (147 px from the tab bar's top down), so the page is
+  // as tall as Safari leaves it and the part above the tab bar is compared (the prompt sits 8 px above the tab bar).
+  {
+    ref: "PhonePair-safari",
+    url: "/?fixture=agents&prompt=1#/agents",
+    skip: [SWITCHER],
+    viewport: { width: 390, height: 786 },
+    clip: { x: 0, y: 0, width: 390, height: 697 },
+  },
+  // S5b: the connection banners with the approved copy.
+  ...(["unpaired", "refused", "paused", "unavailable"] as const).map((st) => ({ ref: `PhoneBanners-${st}`, url: `/?fixture=agents&banner=${st}#/agents`, skip: [SWITCHER] })),
 ];
 
 for (const board of BOARDS) {
   test(`${board.ref} matches the design render`, async ({ page }, info) => {
     const nav = board.nav !== false;
+    if (board.viewport) await page.setViewportSize(board.viewport);
     await page.goto(board.url);
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek], .chat-head, .qn-head");
+    await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek], .chat-head, .qn-head, .pair");
     const masks: Rect[] = [
       ...(await page.$$eval("[data-vis-mask]", (els) =>
         els.map((e) => {
@@ -38,7 +56,7 @@ for (const board of BOARDS) {
     ];
     const shot = await page.screenshot({ type: "png", animations: "disabled", caret: "hide" });
     const diffOut = info.outputPath(`${board.ref}.diff.png`);
-    const result = compare(shot, board.ref, masks, diffOut);
+    const result = compare(shot, board.ref, masks, diffOut, board.clip);
     writeFileSync(info.outputPath(`${board.ref}.actual.png`), shot);
     info.annotations.push({ type: "diff", description: `${(result.ratio * 100).toFixed(3)}% (${result.diffPixels} px)` });
     console.log(`${board.ref} [${info.project.name}] ${(result.ratio * 100).toFixed(3)}%`);

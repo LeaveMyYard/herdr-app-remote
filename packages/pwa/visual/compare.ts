@@ -41,10 +41,28 @@ export interface Result {
   total: number;
 }
 
-/** Compares a screenshot with a design render; masked rects (animations) are painted out of both. */
-export function compare(actual: Buffer, refName: string, masks: Rect[], diffOut?: string): Result {
-  const a = PNG.sync.read(actual);
-  const b = PNG.sync.read(readFileSync(resolve(REFS, `${refName}.png`)));
+/** The `clip` part of an image (whole pixels, clamped to the image). */
+function crop(png: PNG, r: Rect): PNG {
+  const x0 = Math.max(0, Math.floor(r.x));
+  const y0 = Math.max(0, Math.floor(r.y));
+  const w = Math.min(png.width - x0, Math.ceil(r.width));
+  const h = Math.min(png.height - y0, Math.ceil(r.height));
+  const out = new PNG({ width: w, height: h });
+  PNG.bitblt(png, out, x0, y0, w, h, 0, 0);
+  return out;
+}
+
+/**
+ * Compares a screenshot with a design render; masked rects (animations) are painted out of both. With `clip`, only
+ * that part of each image is compared (a board drawn inside browser chrome).
+ */
+export function compare(actual: Buffer, refName: string, masks: Rect[], diffOut?: string, clip?: Rect): Result {
+  let a: PNG = PNG.sync.read(actual);
+  let b: PNG = PNG.sync.read(readFileSync(resolve(REFS, `${refName}.png`)));
+  if (clip) {
+    a = crop(a, clip);
+    b = crop(b, clip);
+  }
   if (a.width !== b.width || a.height !== b.height) {
     throw new Error(`size mismatch for ${refName}: ${a.width}x${a.height} vs ${b.width}x${b.height}`);
   }

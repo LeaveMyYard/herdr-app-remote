@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Banner } from "./components/Banner";
+import { HomePrompt, HomePromptBell } from "./pair/HomePrompt";
 import { TabBar } from "./components/TabBar";
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { chats } from "./chat-fixtures";
@@ -86,8 +87,18 @@ export interface LiveSources {
   push?: PushEnv | undefined;
 }
 
+/** The "Add to Home Screen" prompt (S5b): in Safari only; null or undefined means no bell and no prompt. */
+export interface HomePromptState {
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}
+
 export interface AppProps {
   connection?: Connection | undefined;
+  /** The banner's "Retry now" (unavailable). */
+  onRetry?: (() => void) | undefined;
+  homePrompt?: HomePromptState | null | undefined;
   tabBadges?: TabBadges;
   data?: AppData | undefined;
   live?: LiveSources | undefined;
@@ -128,7 +139,7 @@ function useNowSeconds(fixed?: number): number {
   return fixed ?? now;
 }
 
-export function App({ connection, tabBadges, data, live, act }: AppProps) {
+export function App({ connection, onRetry, homePrompt, tabBadges, data, live, act }: AppProps) {
   const inboxAct = live?.inboxAct ?? act ?? offlineAct;
   const hostInfo = live ? { name: live.hostName } : host;
   const rows = live ? pluginRows(live.plugins) : plugins;
@@ -315,11 +326,14 @@ export function App({ connection, tabBadges, data, live, act }: AppProps) {
   }
 
   return (
-    <div className="hd ph">
-      <Banner connection={conn} />
-      {screen}
-      <TabBar active={tab} badges={tabBadgesNow} onSelect={select} />
-    </div>
+    <HomePromptBell.Provider value={homePrompt?.onOpen ?? null}>
+      <div className="hd ph">
+        <Banner connection={conn} host={hostInfo.name} onRetry={onRetry} />
+        {screen}
+        {homePrompt?.open ? <HomePrompt onClose={homePrompt.onClose} /> : null}
+        <TabBar active={tab} badges={tabBadgesNow} onSelect={select} />
+      </div>
+    </HomePromptBell.Provider>
   );
 }
 
