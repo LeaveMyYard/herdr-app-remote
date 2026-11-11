@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SetupTopic } from "./bridge-api.js";
 import { HostState } from "./host.js";
 
 export const MOD_LINK_VERSION = 1 as const;
@@ -68,6 +69,14 @@ export const PANEL_ACT_ARGS = {
   "pair.code": z.object({}).strict(),
   /** Hides the pairing code from the panel (the code itself stays valid until it expires or is used). */
   "pair.hide": z.object({}).strict(),
+  /**
+   * Tailscale setup (S14b): "Check now", "Start serving" and "Stop serving". No arguments at all: the port,
+   * the target and every command line are the bridge's own, and the operator-permission fix is only ever
+   * shown (`problem.fix`), never run.
+   */
+  "setup.check": z.object({}).strict(),
+  "setup.start": z.object({}).strict(),
+  "setup.stop": z.object({}).strict(),
 } as const;
 export type PanelActName = keyof typeof PANEL_ACT_ARGS;
 
@@ -191,6 +200,11 @@ export const PanelView = z
     /** Newest first. */
     activity: z.array(PanelActivity).max(100),
     pairing: PanelPairing.nullable(),
+    /**
+     * The Tailscale setup state (the `setup` topic's payload), drawn as the Setup view (design/DesktopSetup)
+     * while `status` is `setup`; null when this bridge runs no setup (a fixed serve identity).
+     */
+    setup: SetupTopic.nullable(),
   })
   .strict();
 export type PanelView = z.infer<typeof PanelView>;

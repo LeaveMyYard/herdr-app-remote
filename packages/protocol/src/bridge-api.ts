@@ -658,6 +658,14 @@ export const SetupTopic = z
     login: z.string().nullable(),
     can_start: z.boolean(),
     can_stop: z.boolean(),
+    /**
+     * A problem from the last Start or Stop that the steps can't show because step 4 reads done (S14b): Stop
+     * failing while the handler is still ours (e.g. `operator`), or Start serving without being able to record
+     * the handler as ours (`failed`, with the command that stops it). Cleared by the next Start or Stop, or once
+     * the port no longer holds the handler. In memory only: lost on a bridge restart (an unrecorded handler then
+     * reads `identical`: used, never removed by herdr).
+     */
+    notice: SetupProblem.nullable(),
     /** A start, stop or check is running. */
     busy: z.boolean(),
     checked_at: z.number().int().nullable(),

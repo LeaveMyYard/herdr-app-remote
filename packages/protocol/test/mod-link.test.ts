@@ -29,6 +29,15 @@ describe("panel acts", () => {
     expect(modLink.checkPanelAct("device.approve", { id: ID })).toEqual({ ok: true, kind: "device.approve", args: { id: ID } });
     expect(modLink.checkPanelAct("device.cap", { id: ID, cap: "terminal.input", on: true, minutes: 60 }).ok).toBe(true);
     expect(modLink.checkPanelAct("remote.pause", {}).ok).toBe(true);
+    for (const k of ["setup.check", "setup.start", "setup.stop"]) expect(modLink.checkPanelAct(k, {})).toEqual({ ok: true, kind: k, args: {} });
+  });
+  it("setup acts take no arguments at all: no port, target, command or fix ever comes from the panel", () => {
+    for (const k of ["setup.check", "setup.start", "setup.stop"]) {
+      for (const a of [{ port: 443 }, { target: "http://127.0.0.1:1" }, { fix: "sudo tailscale set --operator=$USER" }, { args: ["funnel"] }, { force: true }]) {
+        expect(modLink.checkPanelAct(k, a)).toEqual({ ok: false, error: "bad_args" });
+      }
+    }
+    for (const k of ["setup.funnel", "setup.set", "setup.operator", "setup.run", "setup"]) expect(modLink.checkPanelAct(k, {})).toEqual({ ok: false, error: "unsupported_action" });
   });
   it("refuses everything else: no run, no exec, no tab.new, no extra keys", () => {
     for (const k of ["run", "exec", "tab.new", "do", "__proto__", "constructor", "space.close"]) {

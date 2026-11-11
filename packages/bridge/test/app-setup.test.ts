@@ -1,8 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // S14 end to end inside one process: the bridge started without a serve identity gets it from Tailscale setup
 // (Start serving through the fake `tailscale` CLI), the S5 guards then accept the owner through the serve name
 // only, and Stop serving takes it away again. The real tailscale is never run.
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +40,7 @@ beforeEach(async () => {
     tailscale: bin,
     binaries: { hc: "/nonexistent/s14/hc", inbox: "/nonexistent/s14/inbox", usagebar: "/nonexistent/s14/usagebar" },
     funnelCheckMs: 60_000,
+    serveTimeoutMs: 1_000,
   });
 });
 
@@ -74,6 +77,45 @@ async function until(fn: () => boolean, ms = 5000) {
 }
 
 const setupTopic = () => app!.hub.get("setup") as bridgeApi.SetupTopic | undefined;
+
+/** The Remote panel copy of the mod, on the link server: sends panel_act, reads panel / panel_res. */
+async function panelCopy() {
+  const s = net.connect(link.port, "127.0.0.1");
+  await new Promise<void>((r) => s.once("connect", () => r()));
+  const lines: Record<string, unknown>[] = [];
+  let buf = "";
+  s.setEncoding("utf8");
+  s.on("data", (d: string) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      lines.push(JSON.parse(buf.slice(0, i)) as Record<string, unknown>);
+      buf = buf.slice(i + 1);
+    }
+  });
+  s.on("error", () => {});
+  s.write(JSON.stringify({ type: "hello", v: 1, token: "token-0123456789abcdef0123456789abcdef", copy: "panel", layout: "x", app: { version: "1" } }) + "\n");
+  await new Promise((r) => link.once("link", r));
+  let n = 0;
+  return {
+    lines,
+    close: () => s.destroy(),
+    async act(kind: string) {
+      n += 1;
+      const id = `s${n}`;
+      s.write(JSON.stringify({ type: "panel_act", id, kind, args: {} }) + "\n");
+      const end = Date.now() + 15_000;
+      for (;;) {
+        const i = lines.findIndex((l) => l.type === "panel_res" && l.id === id);
+        if (i >= 0) return lines.splice(i, 1)[0]!;
+        if (Date.now() > end) throw new Error("no panel_res");
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    },
+    /** The last view pushed. */
+    view: () => [...lines].reverse().find((l) => l.type === "panel")?.view as Record<string, any> | undefined,
+  };
+}
 
 describe("startApp with Tailscale setup", () => {
   it("serves nothing but /healthz until Start serving; then only through the serve name and owner login", async () => {
@@ -140,6 +182,51 @@ describe("startApp with Tailscale setup", () => {
     await app!.checkFunnel();
     await app!.setup!.check();
     expect((await http("GET", "/api/v1/me", { ...GET, Cookie: cookie })).status).toBe(200); // the phone was not revoked
+  });
+
+  it("the panel's Setup view runs Check now, Start and Stop serving, and every Start and Stop is audited", async () => {
+    await until(() => setupTopic()?.checked_at != null && !setupTopic()!.busy);
+    const p = await panelCopy();
+    try {
+      await until(() => p.view()?.setup?.step === 4);
+      expect(p.view()).toMatchObject({ status: "setup", setup: { can_start: true, can_stop: false } });
+      expect(await p.act("setup.check")).toMatchObject({ ok: true });
+      expect(await p.act("setup.start")).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(join(dir, "serve.json"), "utf8"))).toMatchObject({ TCP: { "8443": { HTTPS: true } } });
+      await until(() => p.view()?.status === "serving" && p.view()?.setup?.can_stop === true);
+      expect(await p.act("setup.stop")).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(join(dir, "serve.json"), "utf8"))).toEqual({});
+      await until(() => p.view()?.status === "setup");
+      writeFileSync(join(dir, "conf.json"), JSON.stringify({ set: "operator" }));
+      expect(await p.act("setup.start")).toMatchObject({ ok: false, code: "operator" });
+      await until(() => p.view()?.setup?.steps?.[3]?.problem?.code === "operator");
+      expect(p.view()!.setup.steps[3].problem.fix).toBe("sudo tailscale set --operator=$USER");
+      const texts = app!.security.activity().map((e) => e.text);
+      expect(texts).toEqual(expect.arrayContaining(["Started serving on the tailnet", "Stopped serving on the tailnet", "Start serving failed (operator)"]));
+      const serve = app!.security.activity().filter((e) => e.event.startsWith("serve."));
+      expect(serve.map((e) => [e.event, e.ok, e.code])).toEqual([
+        ["serve.start", true, undefined],
+        ["serve.stop", true, undefined],
+        ["serve.start", false, "operator"],
+      ]);
+      // No host name, command line or CLI output in the log.
+      for (const e of serve) expect(e.text).not.toMatch(/ts\.net|tailscale serve|127\.0\.0\.1|sudo/);
+      // The fix command is only ever shown: `tailscale set` never ran.
+      expect(readFileSync(join(dir, "calls.log"), "utf8")).not.toContain('"set"');
+    } finally {
+      p.close();
+    }
+  });
+
+  it("App.stop waits for a Start serving in flight to finish", async () => {
+    writeFileSync(join(dir, "conf.json"), JSON.stringify({ set: "disabled" })); // `serve --bg` hangs until cut off (1 s here)
+    await until(() => setupTopic()?.checked_at != null && !setupTopic()!.busy);
+    const p = app!.setup!.start();
+    await until(() => readFileSync(join(dir, "calls.log"), "utf8").includes('"--bg"'));
+    await app!.stop();
+    // Finished and audited before stop resolved.
+    expect(app!.security.activity().map((e) => e.text)).toContain("Start serving failed (serve_disabled)");
+    expect(await p).toMatchObject({ ok: false, code: "serve_disabled" });
   });
 
   it("App.setServe refuses while setup owns the identity", () => {

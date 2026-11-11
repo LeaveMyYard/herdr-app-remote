@@ -42,6 +42,7 @@
   "login": "user-1@example",
   "can_start": false,
   "can_stop": true,
+  "notice": null,
   "busy": false,
   "checked_at": 1762862400000
 }

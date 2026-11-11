@@ -77,9 +77,25 @@ export interface SetupOptions {
   now?: () => number;
   /** Test seam: how long `serve --bg` / `serve ... off` may run. Default {@link SERVE_TIMEOUT_MS}. */
   serveTimeoutMs?: number;
+  /** Called once per finished Start or Stop with its outcome (the audit log; codes only, never CLI output). */
+  onAction?: (a: SetupAction) => void;
+}
+
+/** One finished Start or Stop: what it was and how it ended, as fixed codes only. */
+export interface SetupAction {
+  op: "start" | "stop";
+  ok: boolean;
+  code?: Code;
 }
 
 export type SetupResult = { ok: true } | { ok: false; code: Code; problem: SetupProblem };
+
+/** Thrown by an operation asked for after {@link Setup.close}. */
+export class SetupClosedError extends Error {
+  constructor() {
+    super("setup is closed");
+  }
+}
 
 /** What the five steps were found to be by one round of reads. */
 interface Reading {
@@ -90,6 +106,8 @@ interface Reading {
   serving: SetupServing;
   /** The reads could not tell (a run failed or printed something unreadable): keep the last identity. */
   unsure: boolean;
+  /** An exact handler was to be adopted as ours, but writing the record failed. */
+  recordFailed?: boolean;
 }
 
 interface Record_ {
@@ -110,7 +128,11 @@ export class Setup {
   private identity: ServeIdentity | null = null;
   private current: SetupTopic;
   private actionProblem: SetupProblem | null = null;
+  /** See `SetupTopic.notice`: what the last Start or Stop left to say while step 4 reads done. */
+  private notice: SetupProblem | null = null;
   private chain: Promise<unknown> = Promise.resolve();
+  /** Start, Stop and Check calls not yet answered (with their audit report): `close` waits for them. */
+  private readonly ops = new Set<Promise<unknown>>();
   private busyCount = 0;
   private poked: number;
   private timer: NodeJS.Timeout | undefined;
@@ -133,11 +155,11 @@ export class Setup {
     return this.identity;
   }
 
-  /** Reads everything again ("Check now"). */
+  /** Reads everything again ("Check now"). Rejects with {@link SetupClosedError} once closed. */
   check(): Promise<SetupTopic> {
     this.poked = this.now();
     // Resolves with the state once the check is no longer busy.
-    return this.exclusive(() => this.read()).then(() => this.current);
+    return this.track(this.exclusive(() => this.read()).then(() => this.current));
   }
 
   /** Step 5 changed (a device was approved or revoked): recomputed without running tailscale. */
@@ -148,8 +170,9 @@ export class Setup {
   /** "Start serving". Never changes a port that already has any handler. */
   start(): Promise<SetupResult> {
     this.poked = this.now();
-    return this.exclusive(async () => {
+    return this.audited("start", async () => {
       this.actionProblem = null;
+      this.notice = null;
       const r = await this.read();
       if (r.blocker) return this.fail(r.blocker.problem, false);
       if (r.serving === "ours" || r.serving === "identical") return { ok: true };
@@ -163,6 +186,16 @@ export class Setup {
       const mayHaveApplied = (res.code === 0 && !res.error) || res.error === "timeout";
       const after = await this.read({ adoptIfExact: mayHaveApplied });
       if (after.serving === "ours") return { ok: true };
+      // Served exactly as ours by our own command, but the record could not be written: it works, yet herdr
+      // will never remove it (only a recorded handler is ours). Reported as `failed`, with the command that
+      // stops it, so nobody is left with a serve config they think herdr will clean up.
+      if (after.serving === "identical" && after.recordFailed) {
+        // Step 4 reads done (it is served): the problem stays on screen as the notice, not as a step problem.
+        this.notice = problem("failed", "herdr is served on the tailnet, but could not record that it set this up, so it will not stop serving by itself. To stop, run this in a terminal.", {
+          fix: `tailscale serve --https=${this.o.port} off`,
+        });
+        return this.fail(this.notice, false);
+      }
       return this.fail(this.trouble(res, "Tailscale did not serve herdr as expected. Nothing of yours was changed."), true);
     });
   }
@@ -170,17 +203,23 @@ export class Setup {
   /** "Stop serving". Removes only the handler this bridge created. */
   stop(): Promise<SetupResult> {
     this.poked = this.now();
-    return this.exclusive(async () => {
+    return this.audited("stop", async () => {
       this.actionProblem = null;
+      this.notice = null;
+      // A Stop that fails while the port still reads served (step 4 done) is explained by the notice.
+      const failStop = (p: SetupProblem, keep: boolean) => {
+        this.notice = p;
+        return this.fail(p, keep);
+      };
       const r = await this.read();
       if (r.serving === "off") {
         await this.forget();
         return { ok: true };
       }
       if (r.serving !== "ours") {
-        if (r.serving === "unknown") return this.fail(problem("unknown", "Could not read Tailscale's serve settings. Nothing was changed."), false);
+        if (r.serving === "unknown") return failStop(problem("unknown", "Could not read Tailscale's serve settings. Nothing was changed."), false);
         // Funnel on the port means the config was changed outside herdr: it is no longer ours to remove.
-        return this.fail(r.serving === "funnel" ? this.funnelChanged() : this.notOurs(), false);
+        return failStop(r.serving === "funnel" ? this.funnelChanged() : this.notOurs(), false);
       }
       const res = await this.ts(["serve", `--https=${this.o.port}`, "off"], this.o.serveTimeoutMs ?? SERVE_TIMEOUT_MS);
       const after = await this.read();
@@ -189,7 +228,7 @@ export class Setup {
         this.publish();
         return { ok: true };
       }
-      return this.fail(this.trouble(res, "Tailscale did not stop serving herdr."), true);
+      return failStop(this.trouble(res, "Tailscale did not stop serving herdr."), true);
     });
   }
 
@@ -209,15 +248,55 @@ export class Setup {
     return this.exclusive(() => this.read()).catch(() => undefined);
   }
 
-  close(): void {
+  /**
+   * Stops the periodic checks and refuses new operations. Resolves once the operation in flight (a Start or a
+   * Stop may be mid-command) has finished, so the bridge never exits between a serve change and its record.
+   */
+  async close(): Promise<void> {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
+    await this.chain;
+    await Promise.allSettled([...this.ops]);
   }
 
   // ---- internals ----
 
+  /** A Start or Stop, reported to `onAction` once it has an outcome (a throw counts as `failed`). */
+  private track<T>(p: Promise<T>): Promise<T> {
+    this.ops.add(p);
+    const done = () => void this.ops.delete(p);
+    p.then(done, done);
+    return p;
+  }
+
+  private audited(op: SetupAction["op"], fn: () => Promise<SetupResult>): Promise<SetupResult> {
+    return this.track(this.runAudited(op, fn));
+  }
+
+  private async runAudited(op: SetupAction["op"], fn: () => Promise<SetupResult>): Promise<SetupResult> {
+    let res: SetupResult;
+    try {
+      res = await this.exclusive(fn);
+    } catch (e) {
+      if (e instanceof SetupClosedError) throw e; // never ran: nothing to audit
+      this.report({ op, ok: false, code: "failed" });
+      throw e;
+    }
+    this.report(res.ok ? { op, ok: true } : { op, ok: false, code: res.code });
+    return res;
+  }
+
+  private report(a: SetupAction): void {
+    try {
+      this.o.onAction?.(a);
+    } catch {
+      // the audit hook must not turn a finished operation into a failure
+    }
+  }
+
   /** One operation at a time: a check never interleaves with a start or a stop. */
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new SetupClosedError());
     this.busyCount += 1;
     this.publish();
     const p = this.chain.then(fn, fn);
@@ -304,11 +383,16 @@ export class Setup {
         r.serving = "ours";
       } catch {
         // Not recorded: it stays `identical`, so it is used but never removed by us. The safe direction.
+        r.recordFailed = true;
       }
     }
     // Our record means "created by us, unchanged since". Once the port reads empty or different, it means nothing:
     // a handler that later reads exact again was put there by someone else, and is never removed by us.
-    if (r.serving === "off" || r.serving === "foreign" || r.serving === "funnel") await this.forget().catch(() => {});
+    if (r.serving === "off" || r.serving === "foreign" || r.serving === "funnel") {
+      await this.forget().catch(() => {});
+      this.notice = null; // the handler it was about is gone
+    }
+    if (this.notice?.code === "unknown" && !r.unsure) this.notice = null; // a clean read answers "could not read"
     this.last = r;
     if (r.serving === "ours" || r.serving === "identical") this.actionProblem = null;
     if (r.serving === "funnel") this.o.onFunnel?.();
@@ -497,8 +581,11 @@ export class Setup {
       port: this.o.port,
       url: this.identity ? `https://${this.identity.host}/` : null,
       login: this.identity?.login ?? null,
-      can_start: !busy && r !== null && !r.blocker && r.serving === "off",
-      can_stop: !busy && r !== null && r.serving === "ours",
+      // Not gated on `busy`: a Start or Stop queues behind a running check and reads everything again before it
+      // changes anything, and the buttons don't flicker with every periodic check (`busy` says one is running).
+      can_start: r !== null && !r.blocker && r.serving === "off",
+      can_stop: r !== null && r.serving === "ours",
+      notice: done[3] ? this.notice : null,
       busy,
       checked_at: r ? this.now() : null,
     };
