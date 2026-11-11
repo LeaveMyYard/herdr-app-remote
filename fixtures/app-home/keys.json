@@ -1,0 +1,13 @@
+{
+  "global": {
+    "ctrl-shift-t": "tab.new",
+    "alt-1": "space.select:1",
+    "ctrl-shift-b": "layout.toggle:sidebar"
+  },
+  "terminal": {
+    "ctrl-shift-c": "terminal.copy"
+  },
+  "layout:terminals": {
+    "ctrl-shift-pagedown": "space.next"
+  }
+}

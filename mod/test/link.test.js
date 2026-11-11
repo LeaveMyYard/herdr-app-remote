@@ -5,7 +5,7 @@ import Remote, { snapshot } from '../herdr-app-remote/main.js';
 import { BACKOFF_MS, Link } from '../herdr-app-remote/link.js';
 import { Mounted, settle } from './shim/runtime.js';
 import { resetWorld, world } from './shim/herdr.js';
-import { FakeBridge, RUNTIME_PATH, TOKEN } from './fake-bridge.js';
+import { BUNDLE_SHA, FAKE_PID, FakeBridge, RECEIPT_PATH, RUNTIME_PATH, TOKEN, fakeReceipt } from './fake-bridge.js';
 import { fakeWorld } from './fixtures.js';
 
 let bridge;
@@ -283,7 +283,8 @@ describe('link mod against the real bridge link server', () => {
     const token = 'real-token-0123456789abcdef0123456789';
     const server = new LinkServer({ token });
     const port = await server.listen();
-    world.files[RUNTIME_PATH] = JSON.stringify({ v: 1, port, token, pid: 4242, bundle_sha256: null });
+    world.files[RUNTIME_PATH] = JSON.stringify({ v: 1, port, token, pid: FAKE_PID, bundle_sha256: BUNDLE_SHA });
+    world.files[RECEIPT_PATH] = fakeReceipt();
     try {
       const host = new Promise((r) => server.once('host', r));
       const m = mount();

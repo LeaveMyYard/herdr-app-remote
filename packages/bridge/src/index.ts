@@ -18,3 +18,4 @@ export { buildRow, buildTopic } from "./inbox/build.js";
 export { loadInboxModules, resolveLauncher, type InboxModules, type Launch } from "./inbox/plugin.js";
 export { ChatTopicDriver, CHAT_PREFIX, CHAT_INTERVAL_MS, CHAT_LINES, MAX_ACTIVE_CHATS, terminalIds, type ChatTopicOptions } from "./chat/topic.js";
 export { parseAnsi, type ParsedAnsi, type ParseOptions } from "./chat/ansi.js";
+export * from "./daemon/index.js";

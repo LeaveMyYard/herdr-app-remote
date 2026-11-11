@@ -1,0 +1,136 @@
+{
+  "id": "root",
+  "type": "row",
+  "titlebar": "none",
+  "background": "canvas",
+  "divider": {
+    "width": 1,
+    "color": "border"
+  },
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "size": {
+        "px": 320
+      },
+      "children": [
+        {
+          "id": "brand",
+          "type": "block",
+          "size": {
+            "px": 46
+          },
+          "window_drag": true,
+          "content": {
+            "mod": "workspace-chrome"
+          }
+        },
+        {
+          "id": "spaces",
+          "type": "block",
+          "size": {
+            "weight": 1
+          },
+          "content": {
+            "mod": "panorama-spaces"
+          }
+        },
+        {
+          "id": "agents",
+          "type": "block",
+          "size": {
+            "weight": 1
+          },
+          "content": {
+            "mod": "panorama"
+          }
+        }
+      ]
+    },
+    {
+      "id": "work",
+      "type": "column",
+      "resizable": false,
+      "children": [
+        {
+          "id": "tabs",
+          "type": "block",
+          "size": {
+            "px": 42
+          },
+          "content": {
+            "mod": "panorama-tabs"
+          }
+        },
+        {
+          "id": "work-body",
+          "type": "row",
+          "padding": 8,
+          "gap": 8,
+          "children": [
+            {
+              "id": "main",
+              "type": "block",
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "gap": 8,
+                  "radius": 10
+                }
+              }
+            },
+            {
+              "id": "panel",
+              "type": "column",
+              "hidden": true,
+              "size": {
+                "px": 368
+              },
+              "children": [
+                {
+                  "id": "panel-body",
+                  "type": "stack",
+                  "active": "files",
+                  "children": [
+                    {
+                      "id": "files",
+                      "type": "block",
+                      "content": {
+                        "mod": "files"
+                      }
+                    },
+                    {
+                      "id": "changes",
+                      "type": "block",
+                      "content": {
+                        "mod": "changes"
+                      }
+                    },
+                    {
+                      "id": "usage",
+                      "type": "block",
+                      "content": {
+                        "mod": "agent-usage"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "type": "block",
+          "size": {
+            "px": 28
+          },
+          "content": {
+            "mod": "workspace-status"
+          }
+        }
+      ]
+    }
+  ]
+}

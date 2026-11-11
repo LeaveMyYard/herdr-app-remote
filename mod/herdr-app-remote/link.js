@@ -40,7 +40,9 @@ export async function readRuntime(read = readTextFile, home = appHome) {
   if (!rt || rt.v !== 1) return null;
   if (!Number.isInteger(rt.port) || rt.port < 1 || rt.port > 65535) return null;
   if (typeof rt.token !== 'string' || rt.token.length < 32 || rt.token.length > 256) return null;
-  return { port: rt.port, token: rt.token };
+  const pid = Number.isInteger(rt.pid) && rt.pid > 0 ? rt.pid : null;
+  const sha = typeof rt.bundle_sha256 === 'string' && /^[0-9a-f]{64}$/.test(rt.bundle_sha256) ? rt.bundle_sha256 : null;
+  return { port: rt.port, token: rt.token, pid, bundle_sha256: sha };
 }
 
 function decodeAscii(bytes) {
@@ -57,7 +59,9 @@ export class Link {
    * @param {() => {layout: string, app: {version: string}}} o.hello
    * @param {(name: string, args: object) => unknown} [o.run]   herdr's run
    * @param {(n: object) => unknown} [o.notify]                herdr's notify
-   * @param {() => Promise<{port: number, token: string} | null>} [o.runtime]
+   * @param {() => Promise<{port: number, token: string, pid: number|null, bundle_sha256: string|null} | null>} [o.runtime]
+   * @param {(rt: object) => Promise<boolean>} [o.trust]   whether to connect to this runtime (default: yes)
+   * @param {() => unknown} [o.unreachable]   called, not awaited, when an attempt found no usable bridge
    * @param {(host: string, port: number) => Promise<any>} [o.connect]
    * @param {number} [o.healthyMs]
    */
@@ -69,6 +73,8 @@ export class Link {
     this.runtimeFn = o.runtime ?? (() => readRuntime());
     this.connectFn = o.connect ?? ((host, port) => net.connect(host, port));
     this.healthyMs = o.healthyMs ?? HEALTHY_MS;
+    this.trustFn = o.trust ?? (async () => true);
+    this.unreachableFn = o.unreachable ?? (() => {});
     this.unblock = null; // ends the reader's pending read() when the connection is dropped
     this.closed = false;
     this.sock = null;
@@ -116,10 +122,13 @@ export class Link {
     while (!this.closed) {
       const started = Date.now();
       let healthy = false;
+      let reached = false;
       try {
         const rt = await this.runtimeFn();
         if (!rt || this.closed) throw new Error('no runtime');
+        if (!(await this.trustFn(rt)) || this.closed) throw new Error('runtime not trusted');
         const sock = await this.connectFn('127.0.0.1', rt.port);
+        reached = true;
         if (this.closed) {
           try { sock.close(); } catch { /* ignore */ }
           return;
@@ -141,6 +150,11 @@ export class Link {
       }
       this.drop();
       if (this.closed) return;
+      if (!reached) {
+        try {
+          Promise.resolve(this.unreachableFn()).catch(() => {});
+        } catch { /* a launcher failure must not end the loop */ }
+      }
       if (healthy || Date.now() - started >= this.healthyMs) delay = BACKOFF_MS.min;
       await cx.sleep(delay);
       delay = Math.min(delay * 2, BACKOFF_MS.max);

@@ -1,0 +1,38 @@
+{
+  "v": 1,
+  "install_id": "0123456789abcdef0123456789abcdef",
+  "node": "/usr/local/bin/node",
+  "dirs": [
+    "data"
+  ],
+  "files": {
+    "mods/herdr-app-remote/main.js": {
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "mode": 420
+    },
+    "mods/herdr-app-remote/mod.json": {
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "mode": 420
+    },
+    "data/herdr-app-remote/bin/bridge.mjs": {
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "mode": 420
+    },
+    "layouts/herdr-remote.json": {
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "mode": 420
+    },
+    "mods/herdr-app-remote/../agents/main.js": {
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "mode": 420
+    }
+  },
+  "previous": {},
+  "keys": {
+    "key": "ctrl-alt-r",
+    "action": "herdr-app-remote.open",
+    "sections": [
+      "layout:herdr-remote"
+    ]
+  }
+}
