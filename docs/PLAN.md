@@ -76,9 +76,9 @@ Sources:
 1. The desktop panel shows a QR for `https://<serve>/pair#c=<code>`. The code is 128-bit, valid for 5 min and single use.
 2. The phone opens it in Safari and posts the code (operator flow change, 2026-11-11: pairing happens in Safari).
 3. The device becomes pending, and the desktop panel and a toast ask "Approve a new phone?" (the toast never carries a device name).
-4. On approval, the phone gets a `__Host-` cookie (`HttpOnly; Secure; SameSite=Strict`) holding a random 256-bit token. Only its sha256 is stored, in `devices.json` (0600).
+4. The phone gets a `__Host-` cookie (`HttpOnly; Secure; SameSite=Strict`) holding a random 256-bit token when it pairs, as a `pending` device. The cookie grants nothing until the desktop approves the device. Only its sha256 is stored, in `devices.json` (0600).
 5. Devices can be revoked or renamed. A revoked device is dropped live.
-6. Safari then offers to add the app to the Home Screen (dismissible, again from a bell). iOS keeps the Home Screen app's storage apart from Safari's, so the bridge mints a one-time transfer code (128-bit, 10 min, single use, bound to the approved device) over Safari's socket and puts it only in that device's manifest `start_url` (`/pair#t=<code>`). On first launch the Home Screen app spends it for its own token of the same device, with no second approval (S5b; `docs/protocol/bridge-api-v1.md`, "Home Screen transfer").
+6. Safari then offers to add the app to the Home Screen (dismissible, again from a bell). iOS keeps the Home Screen app's storage apart from Safari's, so the bridge mints a one-time transfer code (128-bit, 10 min, single use, bound to the approved device) over Safari's socket and puts it only in that device's manifest `start_url` (`/pair#t=<code>`). On first launch the Home Screen app spends it for its own second token of the same device (revoke removes both), with no second approval (S5b; `docs/protocol/bridge-api-v1.md`, "Home Screen transfer").
 
 **Capabilities per device** (checked on the bridge for every action)
 
@@ -224,7 +224,7 @@ Tiers: **SC** = safety-critical (full review-cycle plus a fresh final reviewer p
 | S2 | Link mod + bridge link server | S1 | S3, S4, S6 | SC |
 | S3 | Rig port | S1 | S2, S4, S6 | N |
 | S4 | Bridge hub + host topic | S1 | S2, S3, S6 | N |
-| S4b | Bridge bootstrap + PWA client | S4, S6 | – | SC |
+| S4b | Bridge bootstrap + PWA client | S4, S6 | – | N |
 | S5 | Security: pairing, devices, guards, audit | S4 | S7 | SC |
 | S5b | PWA pairing screen (`/pair`), banners | S5, S6 | – | SC |
 | S6 | PWA shell, tokens, visual harness, Basic Agents, Missing | S1 | S2–S5 | N |
@@ -345,18 +345,18 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - It detects the Linux operator-permission error and shows the exact command to fix it.
 - Accepts: a serve config we did not create is never changed.
 
-**S4b Bridge bootstrap + PWA client** (merged)
+**S4b Bridge bootstrap + PWA client** (merged; Normal tier, reviewed with an opus author because of its security-adjacent surface)
 - Goal: the bridge entry point and the PWA client that connects the topic drivers to the screens, which until then ran on `?fixture=` data.
 
-**S5b PWA pairing screen** (design approved 2026-11-11: `design/PhonePair.dc.html`, `PhoneBanners.dc.html`)
+**S5b PWA pairing screen** (merged; design approved 2026-11-11: `design/PhonePair.dc.html`, `PhoneBanners.dc.html`)
 - Goal:
   - Safari pairs at `/pair#c=<code>`; the screen follows the board states (checking, waiting, approved, expired);
   - then a dismissible "Add to Home Screen for notifications" prompt, with a bell to reopen it;
   - the Home Screen app pairs itself on first launch with a one-time transfer code in the manifest `start_url` (`/pair#t=<code>`): short TTL, single use, bound to the paired device;
   - the connection banners use the strings in `design/COPY.md` (replacing the provisional ones in `Banner.tsx`).
-- Accepts: socket-level tests for the transfer code (replay, expiry, wrong device); verified once on a real iPhone, and the result recorded.
+- Accepts: socket-level tests for the transfer code (replay, expiry, wrong device); verified once on a real iPhone, and the result recorded (OPEN: the real-iPhone check is not done; see RECIPE.md).
 
-**S14b Panel Setup wiring**
+**S14b Panel Setup wiring** (merged)
 - Goal: `setup.check`, `setup.start` and `setup.stop` on the panel channel, so the Remote panel gets its Start serving button; the Security change chains `setup.refreshPhone()`.
 
 **S15 Chat, read-only**
@@ -371,7 +371,7 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - a rate limit;
   - audit entries that record only the length.
 
-**S16b Special keys menu** (design approved 2026-11-11: `design/PhoneKeys.dc.html`)
+**S16b Special keys menu** (merged; design approved 2026-11-11: `design/PhoneKeys.dc.html`)
 - Goal:
   - a separate phone menu opened from the key bar, sending Esc, Ctrl-C, arrows and the like through `hc keys`;
   - a separate capability, off by default, with its own desktop "Special keys" switch that mirrors the Typing row exactly (1 hour / 8 hours / No limit);
@@ -387,7 +387,7 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - generic payloads;
   - no announcements after a restart.
 
-**Copy PR**
+**Copy PR** (merged)
 - Goal: apply every `●` row of `design/COPY.md` not owned by S5b or S16b (push bodies kept, first-send note, send refused, notifications row, the Dismiss confirm bar with [Keep] [Dismiss]). "desk-1" is the Tailscale machine name from the serve identity, falling back to the hostname. Whichever of S5b and this PR lands first adds the host name to the PWA; the other reuses it.
 
 **S18 Docs + release**
@@ -419,7 +419,7 @@ Defaults taken until the operator says otherwise:
   - Serve config is global, so it can collide with other services.
 - **iOS:**
   - Push needs iOS ≥16.4, a Home Screen install, HTTPS, and permission from a user gesture.
-  - The Home Screen app's storage is separate from Safari's, so pairing must happen inside the installed app.
+  - The Home Screen app's storage is separate from Safari's, so pairing happens first in Safari, and the Home Screen app pairs itself through the one-time transfer code (S5b); that step is still to be verified on a real iPhone.
   - Background sockets are killed, and push subscriptions can lapse.
 - **The 1px link block:**
   - As the last child of `work`, it hasn't been tested for visual artifacts or for starting reliably.

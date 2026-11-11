@@ -39,9 +39,7 @@ Host, identity and Origin failures all answer the same `403 forbidden`, so a pro
 
 **Pairing and the cookie.** The desktop shows a one-time code (128 bits, 5 minutes, single use; a new code invalidates the old one). A phone that posts it becomes `pending` and receives a cookie, but it can do nothing until you approve it on the desktop. The cookie is `__Host-hr-device`, `HttpOnly; Secure; SameSite=Strict; Path=/`, holding a random 256-bit token; only its sha256 is stored (`devices.json`, mode 0600). Failed codes are rate-limited (10 a minute, global), at most 3 requests may be pending, and a pending request expires after 10 minutes. The phone never chooses its own name: the bridge calls it "Phone 1", "Phone 2", and the approval toast never shows a name. Revoking a device closes its sockets at once.
 
-*The Home Screen transfer code described in PR #24 is pending merge; until then the Home Screen app pairs separately.*
-
-<!-- PENDING-MERGE S5b (PR #24): add the Home Screen transfer code here once merged (one-time, bound to the paired device, 10 minutes, a second token for the same device, voided by revoke/pause/view off/serve change). Until then the cookie is the only credential and the Home Screen app pairs separately. -->
+**Home Screen transfer.** A Home Screen web app on iOS has its own cookie jar, so the Safari cookie does not reach it. An approved phone with `view` can ask its bridge for a one-time transfer code (128 bits, 10 minutes, single use, bound to that device, held in memory only). The app reads the code from its `start_url` (`/pair#t=<code>`; the fragment is never sent in a request) and posts it once, and the device gets a second token of its own: the same device, name, capabilities and Activity, with Safari's token still working. Transfer never skips approval (a pending device cannot mint a code), a code redeems only as the device that minted it, a spent code voids the device's others, failed codes are rate-limited (10 a minute, global), and revoking, pausing, turning `view` off or a change of serve name or login voids unspent codes. Revoking a device removes both tokens. Whether iOS keeps the code when adding to the Home Screen is not yet verified on a real iPhone (RECIPE.md).
 
 **Capabilities**, checked by the bridge on every action (the phone's own view of them is only a hint):
 
@@ -51,12 +49,10 @@ Host, identity and Origin failures all answer the same `403 forbidden`, so a pro
 | `inbox.answer` | on | the inbox verbs: draft, answer, dismiss, ack, retry, stop showing |
 | `navigate` | off | `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
 | `terminal.input` | **off** | `terminal.send` (`hc send`); desktop-only switch, with an optional expiry |
-| `terminal.keys` *(pending PR #22)* | **off** | special keys from a fixed menu (`hc keys`); desktop-only switch, with an optional expiry |
+| `terminal.keys` | **off** | special keys from a fixed menu (`hc keys`); desktop-only switch, with an optional expiry |
 | `push` | off | push subscriptions |
 
-*`terminal.keys` is not on main yet (pending PR #22); until it merges there are five capabilities.*
-
-<!-- PENDING-MERGE S16b (PR #22): `terminal.keys` is not on main yet. Until it merges, main has the first five capabilities; update this table once it lands, and add the matching accepted risk (special keys are on `hc keys`' command line while a press runs). -->
+`terminal.keys` presses only entries of the desktop's own `keys.json` menu. The phone names an entry and never sends key names; each key token must be on a strict allowlist (control bytes and escape sequences, never plain text); presses are rate-limited (10 per 10 seconds per device); Activity records identifiers only, with no free text. A press whose effect is unknown is reported as "<label> may have been pressed. Check the terminal before you press it again." and is never resent by the app.
 
 `terminal.input` and `terminal.keys` can be switched on only from the desktop Remote panel, for a chosen time or without limit; when the time is up the bridge turns them off by itself. There is no generic `run`, no `exec`, no arbitrary `herdr-app do`: any other action is refused and logged. The mod re-checks its own small allowlist (the four `navigate` commands) before running anything. `hc send` is called with `--` so text such as `--force` cannot be read as a flag, and never with `--force`.
 

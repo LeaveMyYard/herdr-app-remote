@@ -66,13 +66,10 @@ Uninstall removes only files that are unchanged since the install, and refuses w
 1. In herdr-app, switch to `herdr-remote` (or `panorama-remote`) and open the Remote panel (the key you bound with `--key`, or the Remote block in the right-hand panel column).
 2. The panel shows five setup steps: Tailscale installed, signed in, HTTPS on, serving, a phone approved. Fix what it flags (it shows the command to run, and never runs it for you), then press **Start serving**. This runs `tailscale serve --bg --https=8443 http://127.0.0.1:47391`, and only when that port has no other handler.
 3. In the panel, show a pairing code. It appears as a QR for `https://<your-machine>.<tailnet>.ts.net:8443/pair#c=<code>`. The code is valid for 5 minutes and works once.
-4. On the iPhone, scan it with the Camera. It opens **in Safari**; the phone asks the desktop for approval.
+4. On the iPhone, scan it with the Camera. It opens the pairing screen at `/pair#c=<code>` **in Safari**; the phone asks the desktop for approval.
 5. The panel and a desktop toast ask "Approve a new phone?". Approve it, and the phone opens the app.
-6. For notifications, add the app to the Home Screen from Safari's share sheet and turn notifications on from a tap inside the app.
-
-*Steps 4 to 6 describe the flow of PR #24 (pending merge); main's app has no `/pair` screen yet.*
-
-<!-- PENDING-MERGE S5b (PR #24): the /pair screen in Safari, the dismissible "Add to Home Screen" prompt, and the Home Screen app pairing itself on first launch with a one-time transfer code. Until it merges, main's PWA has no /pair screen. Update steps 4 to 6 (and confirm on a real iPhone, see RECIPE.md) when it lands. -->
+6. For notifications, Safari then offers (once, dismissible, and again from the bell) to add Herdr to the Home Screen. The Home Screen app is a separate app on iOS and does not share Safari's cookie, so it pairs itself on its first launch with a one-time transfer code (`/pair#t=<code>`) that the Safari session minted: it works once, within 10 minutes, for that phone only, and never skips approval. Turn notifications on from a tap inside the Home Screen app.
+   Whether iOS keeps the transfer code when adding to the Home Screen is still to be checked on a real iPhone (see RECIPE.md). If the Home Screen app opens unpaired, open Herdr in Safari, tap the bell, and add it to the Home Screen again.
 
 An approved phone can read. Everything else is a per-phone switch you turn on from the desktop.
 
@@ -84,12 +81,8 @@ An approved phone can read. Everything else is a per-phone switch you turn on fr
 | `inbox.answer` | on | answering, drafting, dismissing and acknowledging herdr-inbox questions |
 | `navigate` | off | focusing an agent, pane, tab or space on the desktop |
 | `terminal.input` | **off**; desktop only, can expire | typing text into a terminal (`hc send`) |
-| `terminal.keys` *(pending PR #22)* | **off**; desktop only, can expire | pressing special keys (Esc, Ctrl-C, arrows) from a configurable menu (`hc keys`) |
+| `terminal.keys` | **off**; desktop only, can expire | pressing special keys (Esc, Ctrl-C, arrows) from a configurable menu (`hc keys`) |
 | `push` | off | web push notifications |
-
-*`terminal.keys` and the Keys sheet are pending merge (PR #22); until then main has the first five capabilities.*
-
-<!-- PENDING-MERGE S16b (PR #22): `terminal.keys`, the Keys sheet on the phone, keys.json and the "Special keys" desktop switch are not on main yet. Remove this note and the row above if they change shape; until the PR merges, main has only the first five capabilities. -->
 
 Capabilities are switched in the Remote panel, per phone. A phone can never grant itself one. You can pause remote access, rename or revoke a phone at any time in the same panel; a revoked phone is cut off at once.
 
