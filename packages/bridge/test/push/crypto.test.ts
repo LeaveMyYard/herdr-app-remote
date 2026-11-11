@@ -65,7 +65,9 @@ describe("VAPID", () => {
     loadVapid(dir);
     const f = join(dir, VAPID_FILE);
     const doc = JSON.parse(readFileSync(f, "utf8")) as { public_key: string };
-    doc.public_key = `B${doc.public_key.slice(1, 86)}A`;
+    // Change the last character for sure: it carries only 4 bits, so a fixed "A" was already there 1 time in 16.
+    const last = doc.public_key.at(-1) === "A" ? "E" : "A";
+    doc.public_key = `B${doc.public_key.slice(1, 86)}${last}`;
     writeFileSync(f, JSON.stringify(doc));
     expect(() => loadVapid(dir)).toThrow(/invalid/);
     writeFileSync(f, "{}");
