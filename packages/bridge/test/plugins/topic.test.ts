@@ -72,4 +72,13 @@ describe("plugins topic", () => {
     await driver.start();
     expect((hub.get("plugins") as { hc: { state: string } }).hc.state).toBe("broken");
   });
+  it("publish after stop does nothing", async () => {
+    const { hub, driver } = setup();
+    await driver.start();
+    driver.stop();
+    const before = hub.seqOf("plugins");
+    hub.publish("host", { n: 2 });
+    driver.publish();
+    expect(hub.seqOf("plugins")).toBe(before);
+  });
 });

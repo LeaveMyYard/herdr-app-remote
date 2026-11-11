@@ -19,10 +19,15 @@ describe("hc (fake CLI)", () => {
   it("missing when not installed", async () => {
     expect((await detectHc(env("/none"))).state).toBe("missing");
   });
-  it("broken when it hangs past the timeout", async () => {
+  it("reports a timeout even when the CLI ignores SIGTERM, and does not wait for it", async () => {
     const d = tmp();
-    const slow = { ...env("/none", bins(d, { hc: fakeCli(d, "hc", "sleep 5") })), run: (c: string, a: string[]) => run(c, a, { timeoutMs: 100 }) };
-    expect((await detectHc(slow)).state).toBe("broken");
+    const bin = fakeCli(d, "hc", 'trap "" TERM; sleep 3; echo hc 9.9.9');
+    const t0 = Date.now();
+    const r = await run(bin, ["--version"], { timeoutMs: 150 });
+    expect(r.error).toBe("timeout");
+    expect(Date.now() - t0).toBeLessThan(2000);
+    const status = await detectHc({ appHome: "/none", binaries: bins(d, { hc: bin }), run: (c, a) => run(c, a, { timeoutMs: 150 }) });
+    expect(status).toEqual({ state: "broken", detail: "hc timed out" });
   });
   it("parses versions", () => {
     expect(parseVersion("hc v1.22.3-rc1")).toEqual([1, 22, 3]);
@@ -63,13 +68,12 @@ describe("usage (fake CLI)", () => {
   it("ready on version 1", async () => {
     expect((await case_(`echo '{"version":1,"providers":[]}'`)).state).toBe("ready");
   });
-  it("too_old when --format is rejected", async () => {
-    expect((await case_('echo "flag provided but not defined: -format" >&2; exit 2')).state).toBe("too_old");
-  });
   it("too_old when the unversioned shape comes back", async () => {
     expect((await case_(`echo '{"providers":[]}'`)).state).toBe("too_old");
   });
   it("broken for a newer format, bad JSON, or a failure", async () => {
+    const newer = await case_(`echo '{"version":"/home/someone/secret"}'`);
+    expect(newer).toEqual({ state: "broken", detail: "unsupported usagebar format" });
     expect((await case_(`echo '{"version":2}'`)).state).toBe("broken");
     expect((await case_("echo not-json")).state).toBe("broken");
     expect((await case_("echo boom >&2; exit 1")).state).toBe("broken");
@@ -108,6 +112,10 @@ describe("panorama (receipt, hash, feed)", () => {
   it("stale when the feed is older than 15 s", async () => {
     expect((await detectPanorama(env(panoramaHome({ feed: feed({ generated_at: NOW / 1000 - 16 }) })))).state).toBe("stale");
     expect((await detectPanorama(env(panoramaHome({ feed: feed({ generated_at: NOW / 1000 - 14 }) })))).state).toBe("ready");
+  });
+  it("broken for a feed over 1 MiB", async () => {
+    const big = JSON.stringify(feed({ pad: "x".repeat(1_048_576) }));
+    expect((await detectPanorama(env(panoramaHome({ feed: big })))).state).toBe("broken");
   });
   it("too_old for a v1 feed, broken for v3, non-JSON or contract failure", async () => {
     expect((await detectPanorama(env(panoramaHome({ feed: feed({ v: 1 }) })))).state).toBe("too_old");

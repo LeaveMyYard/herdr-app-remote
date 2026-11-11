@@ -1,14 +1,11 @@
-import { readFile, stat } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import {
   FEED_MAX_BYTES,
   FEED_STALE_MS,
-  INBOX_COMMANDS_JS,
-  INBOX_FEED_JS,
   INBOX_PROBE_PREFIX,
   INBOX_PROTOCOL,
-  INBOX_RECEIPT,
   MIN_HC_VERSION,
   PANORAMA_CONTRACT,
   PANORAMA_FEED,
@@ -79,6 +76,7 @@ export async function detectInbox(env: DetectEnv): Promise<PluginStatus> {
   const r = await env.run(bin, ["app", "--help"], { timeoutMs: PROBE_TIMEOUT_MS });
   const bad = unrunnable(r, "herdr-inbox");
   if (bad) return bad;
+  // A non-zero exit is taken as "no `app` command" (an older inbox); a crash looks the same by design.
   if (r.code !== 0) return st("too_old", "herdr-inbox has no app command");
   const first = r.stdout.split("\n")[0] ?? "";
   if (first === `${INBOX_PROBE_PREFIX}${INBOX_PROTOCOL}`) return ok();
@@ -88,8 +86,8 @@ export async function detectInbox(env: DetectEnv): Promise<PluginStatus> {
 }
 
 /**
- * `usagebar collect --format v1`: JSON with `version: 1` is ready. A usagebar that predates `--format` either
- * rejects the flag (too_old) or prints the unversioned debug shape (too_old). `--panes []` and `--quotas-only`
+ * `usagebar collect --format v1`: JSON with `version: 1` is ready. A usagebar that predates `--format` prints
+ * the unversioned debug shape (too_old). `--panes []` and `--quotas-only`
  * keep the probe cheap and independent of the open panes.
  */
 export async function detectUsage(env: DetectEnv): Promise<PluginStatus> {
@@ -97,11 +95,7 @@ export async function detectUsage(env: DetectEnv): Promise<PluginStatus> {
   const r = await env.run(bin, ["collect", "--format", "v1", "--quotas-only", "--panes", "[]"], { timeoutMs: PROBE_TIMEOUT_MS });
   const bad = unrunnable(r, "usagebar");
   if (bad) return bad;
-  if (r.code !== 0) {
-    return /flag provided but not defined|unknown (flag|option)|unrecognized (flag|option)|invalid (flag|value)/i.test(r.stderr)
-      ? st("too_old", "usagebar has no --format v1")
-      : st("broken", "usagebar collect failed");
-  }
+  if (r.code !== 0) return st("broken", "usagebar collect failed");
   let doc: unknown;
   try {
     doc = JSON.parse(r.stdout);
@@ -110,15 +104,20 @@ export async function detectUsage(env: DetectEnv): Promise<PluginStatus> {
   }
   const version = doc !== null && typeof doc === "object" ? (doc as { version?: unknown }).version : undefined;
   if (version === undefined) return st("too_old", "usagebar printed the unversioned shape");
-  if (version !== USAGE_FORMAT) return st("broken", `unsupported usagebar format ${JSON.stringify(version)}`);
+  if (version !== USAGE_FORMAT) return st("broken", "unsupported usagebar format");
   return ok();
 }
 
 async function readFeed(path: string): Promise<{ text: string } | { missing: true } | { error: string }> {
   try {
-    const s = await stat(path);
-    if (s.size > FEED_MAX_BYTES) return { error: "feed larger than 1 MiB" };
-    return { text: await readFile(path, "utf8") };
+    const h = await open(path, "r");
+    try {
+      const buf = Buffer.alloc(FEED_MAX_BYTES + 1);
+      const { bytesRead } = await h.read(buf, 0, buf.length, 0);
+      return bytesRead > FEED_MAX_BYTES ? { error: "feed larger than 1 MiB" } : { text: buf.toString("utf8", 0, bytesRead) };
+    } finally {
+      await h.close();
+    }
   } catch (e) {
     return (e as NodeJS.ErrnoException).code === "ENOENT" ? { missing: true } : { error: "feed unreadable" };
   }
@@ -148,7 +147,7 @@ export async function detectPanorama(env: DetectEnv): Promise<PluginStatus> {
     return st("broken", "feed is not JSON");
   }
   const v = raw !== null && typeof raw === "object" ? (raw as { v?: unknown }).v : undefined;
-  if (typeof v === "number" && v < PANORAMA_FEED_VERSION) return st("too_old", `feed v${v}`);
+  if (typeof v === "number" && v < PANORAMA_FEED_VERSION) return st("too_old", "feed is v1");
   if (v !== PANORAMA_FEED_VERSION) return st("broken", "unsupported feed version");
   let feed: unknown;
   try {
@@ -159,15 +158,6 @@ export async function detectPanorama(env: DetectEnv): Promise<PluginStatus> {
   const now = (env.now ?? Date.now)();
   // contract.js `aged` is the rule (15 s, unstamped or future = stale); FEED_STALE_MS documents the same number.
   return contract.aged(feed, now) ? st("stale", `feed older than ${FEED_STALE_MS / 1000} s`) : ok();
-}
-
-/**
- * Whether the inbox's own pure JS (`feed.js`, `commands.js`) can be loaded hash-pinned. S10 uses it; detection
- * reports it as extra `detail` only when the CLI probe passed but the files fail the pin.
- */
-export async function checkInboxJs(env: DetectEnv): Promise<PluginStatus> {
-  const r = await loadPinned(env.appHome, INBOX_RECEIPT, [INBOX_FEED_JS, INBOX_COMMANDS_JS]);
-  return r.ok ? ok() : st(r.reason, r.detail);
 }
 
 export interface HostView {

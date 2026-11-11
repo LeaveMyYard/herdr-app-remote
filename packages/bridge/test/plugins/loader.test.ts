@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hasImports, loadPinned, parseReceipt } from "../../src/plugins/loader.js";
+import { readFile } from "node:fs/promises";
 import { put, sha, tmp } from "./helpers.js";
 
 const receipt = (files: Record<string, unknown>) => JSON.stringify({ v: 1, files });
@@ -19,12 +20,24 @@ describe("parseReceipt", () => {
 });
 
 describe("hasImports", () => {
-  it("spots static, re-export and dynamic imports but not words in strings", () => {
-    expect(hasImports("import { a } from './a.js';")).toBe(true);
-    expect(hasImports("const x = 1;\nimport a from 'b';")).toBe(true);
-    expect(hasImports("export * from './a.js';")).toBe(true);
-    expect(hasImports("const m = await import('./a.js');")).toBe(true);
-    expect(hasImports("export const x = 'important';\n// reimport later")).toBe(false);
+  it.each([
+    "import { a } from './a.js';",
+    "const x = 1;\nimport a from 'b';",
+    "export * from './a.js';",
+    'export{platform as n}from"node:os";',
+    '/* x */ import "node:os";',
+    "const m = await import('./a.js');",
+  ])("finds %s", async (src) => {
+    expect(await hasImports(src)).toBe(true);
+  });
+  it.each(["export const x = 'important';\n// reimport later", "// see import(x)\nexport const s = 'a; import x';", "export const u = import.meta.url;"])(
+    "ignores %s",
+    async (src) => {
+      expect(await hasImports(src)).toBe(false);
+    },
+  );
+  it("refuses what it cannot parse", async () => {
+    expect(await hasImports("export const x = `unterminated")).toBe(true);
   });
 });
 
@@ -40,11 +53,18 @@ describe("loadPinned", () => {
     const r = await loadPinned(make("export const n = 41 + 1;"), "r.json", [files]);
     expect(r.ok && r.modules[files]?.["n"]).toBe(42);
   });
-  it("runs the checked bytes, not the file on disk afterwards", async () => {
+  it("runs the bytes that were checked even if the file changes right after the read", async () => {
     const home = make("export const n = 1;");
-    const r = await loadPinned(home, "r.json", [files]);
-    put(home, files, "export const n = 2;");
+    const r = await loadPinned(home, "r.json", [files], async (p) => {
+      const bytes = await readFile(p);
+      put(home, files, "export const n = 2;"); // swapped between the hash check and the import
+      return bytes;
+    });
     expect(r.ok && r.modules[files]?.["n"]).toBe(1);
+  });
+  it("broken when a file with an unpinned import is itself pinned", async () => {
+    const r = await loadPinned(make('export{platform as n}from"node:os";'), "r.json", [files]);
+    expect(r).toMatchObject({ ok: false, reason: "broken" });
   });
   it("broken on a hash mismatch", async () => {
     const r = await loadPinned(make("export const n = 1;", sha("other")), "r.json", [files]);
