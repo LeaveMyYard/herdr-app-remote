@@ -32,13 +32,33 @@ export interface InboxModules {
   incompleteness(feed: RawFeed): Incompleteness | null;
   leftOut(feed: RawFeed): number;
   showArgs(qid: number): string[];
+  /** The arguments after the launcher's `cli` for a verb, or null when these can't be a command (e.g. a detail over 64 KiB). */
+  verbArgs(cmd: { verb: string; entry: string; qids?: number[]; detail?: VerbDetail | undefined; clear?: boolean }, token: string): string[] | null;
   readResult(result: { code: number | null; stdout: string } | null, verb: string, entry: string | null): ShowResult | { kind: string; [k: string]: unknown };
   deliveryWords(row: unknown): { warn: boolean; line: string };
   knownDelivery(row: unknown): boolean;
   retryLabel(row: unknown): "Send now" | "Retry delivery";
   severity(word: string): "urgent" | "warning" | "info";
   alertKind(word: string): "agent" | "blocked";
+  refusalWords(verb: string, refusal: { code: string; message: string; closed: string | null }): string;
+  unknownWords(why: string): string;
+  heldWords(verb: string, done: number[]): string;
+  queuedWords(done: number[]): string;
+  skippedWords(skipped: number[]): string;
 }
+
+/** A Detail as app-commands-v1 takes it: option labels, notes keyed by label, free text. */
+export interface VerbDetail {
+  choices: string[];
+  notes: Record<string, string>;
+  text: string | null;
+}
+
+/** What `readResult` makes of a verb's exit and stdout. Anything but `done` or `refused` is of unknown effect. */
+export type VerbResult =
+  | { kind: "done"; token: string | null; done: number[]; skipped: number[]; delivery: "queued" | "held" | null }
+  | { kind: "refused"; code: string; closed: string | null; message: string }
+  | { kind: "unknown"; why: string };
 
 export interface ShowResult {
   kind: "shown";
@@ -49,8 +69,8 @@ export type ModulesLoad = { ok: true; modules: InboxModules } | { ok: false; rea
 
 const NAMES: Record<string, string[]> = {
   [INBOX_FEED_JS]: ["parseFeed", "isStale", "incompleteness", "leftOut"],
-  [INBOX_COMMANDS_JS]: ["showArgs", "readResult"],
-  [INBOX_WORDS_JS]: ["deliveryWords", "knownDelivery", "retryLabel", "severity", "alertKind"],
+  [INBOX_COMMANDS_JS]: ["showArgs", "verbArgs", "readResult"],
+  [INBOX_WORDS_JS]: ["deliveryWords", "knownDelivery", "retryLabel", "severity", "alertKind", "refusalWords", "unknownWords", "heldWords", "queuedWords", "skippedWords"],
 };
 
 export async function loadInboxModules(appHome: string): Promise<ModulesLoad> {

@@ -1,0 +1,9 @@
+{
+  "type": "act",
+  "id": "act-retry",
+  "kind": "inbox.retry",
+  "args": {
+    "key": "failed:119",
+    "rev": "0f1e2d3c4b5a69780001"
+  }
+}

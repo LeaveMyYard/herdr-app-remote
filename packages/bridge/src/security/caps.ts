@@ -42,6 +42,9 @@ export const ACTION_CAPS: ReadonlyMap<string, Capability> = new Map<string, Capa
   ["inbox.answer", "inbox.answer"],
   ["inbox.dismiss", "inbox.answer"],
   ["inbox.ack", "inbox.answer"],
+  // A `failed` row's two verbs (S11): they act on an answer the operator already gave, like the four above.
+  ["inbox.retry", "inbox.answer"],
+  ["inbox.stop_showing", "inbox.answer"],
   ["agent.focus", "navigate"],
   ["tab.select", "navigate"],
   ["space.select", "navigate"],

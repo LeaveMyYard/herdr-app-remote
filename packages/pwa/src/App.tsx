@@ -16,7 +16,9 @@ import { Soon } from "./screens/Soon";
 import { Swarm } from "./screens/Swarm";
 import { SwarmUnavailable } from "./screens/SwarmUnavailable";
 import { UsageTab } from "./screens/UsageTab";
-import { DEMO_NOW, demoHost, inboxScenario } from "./inbox-fixtures";
+import { Question } from "./screens/Question";
+import { DEMO_NOW, demoClosed, demoHost, inboxScenario } from "./inbox-fixtures";
+import { ClosedRows, offlineAct, type ActFn } from "./inbox/act";
 import { inboxBadge } from "./inbox/model";
 import { demoUsageNow, usageScenario } from "./usage-fixtures";
 
@@ -74,6 +76,8 @@ export interface LiveSources {
   onUsageRefresh: () => Promise<unknown>;
   /** The open chat's `chat:<t>` topic (LiveApp subscribes it from the route). */
   chat?: { topic: bridgeApi.ChatTopic | undefined; stale: string | null } | undefined;
+  /** Sends an inbox `act` (draft, answer, dismiss, retry, stop showing, ack); resolves with the bridge's `res`. */
+  inboxAct?: ActFn | undefined;
 }
 
 export interface AppProps {
@@ -81,6 +85,8 @@ export interface AppProps {
   tabBadges?: TabBadges;
   data?: AppData | undefined;
   live?: LiveSources | undefined;
+  /** Sends an inbox `act` without a live client (tests); `live.inboxAct` wins. Without either nothing is sent. */
+  act?: ActFn | undefined;
 }
 
 /** The plugin card rows from the `plugins` topic (it carries no versions). */
@@ -116,7 +122,8 @@ function useNowSeconds(fixed?: number): number {
   return fixed ?? now;
 }
 
-export function App({ connection, tabBadges, data, live }: AppProps) {
+export function App({ connection, tabBadges, data, live, act }: AppProps) {
+  const inboxAct = live?.inboxAct ?? act ?? offlineAct;
   const hostInfo = live ? { name: live.hostName } : host;
   const rows = live ? pluginRows(live.plugins) : plugins;
   const [tab, setTab] = useState<TabId>(() => tabFromHash(window.location.hash));
@@ -146,8 +153,12 @@ export function App({ connection, tabBadges, data, live }: AppProps) {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const scenario = usageScenario(scenarioName);
-  const inbox = inboxScenario(scenarioName);
-  const inboxBadgeNow = inboxBadge(live ? live.inbox : inbox.topic);
+  // `#/inbox/q/...` is a question; its demo data is named by `?inbox=<scenario>` instead of the hash.
+  const inQuestion = parts(hash)[0] === "inbox" && parts(hash)[1] === "q";
+  const inbox = inboxScenario(inQuestion ? (new URLSearchParams(window.location.search).get("inbox") ?? undefined) : scenarioName);
+  const [closedRows] = useState(() => new ClosedRows(!live && inbox.name === "typical" && !inQuestion ? demoClosed : []));
+  const inboxTopic = live ? live.inbox : inbox.topic;
+  const inboxBadgeNow = inboxBadge(inboxTopic);
   const tabBadgesNow: TabBadges = { ...(tabBadges ?? badges) };
   if (!tabBadges) {
     // The inbox badge comes from the topic, not from the fixture.
@@ -177,6 +188,36 @@ export function App({ connection, tabBadges, data, live }: AppProps) {
           closeHref={`#/swarm/${peeked.root.space_id !== null ? encodeURIComponent(peeked.root.space_id) : "all"}`}
           openRootHref={peeked.root.live ? `#/chat/${peeked.root.agent_id ?? ""}` : undefined}
         />
+      </div>
+    );
+  }
+
+  // A question (and its review) is a full screen with no tab bar, as on the boards.
+  if (tab === "inbox" && inQuestion) {
+    const key = decode(route[2] ?? "");
+    const row = inboxTopic?.entries.find((r) => r.key === key);
+    const sub = route[3] ?? "";
+    const pick = new URLSearchParams(window.location.search).get("pick");
+    return (
+      <div className="hd ph qn">
+        {row && row.kind === "group" ? (
+          <Question
+            row={row as Extract<typeof row, { kind: "group" }>}
+            tab={sub === "submit" ? "submit" : Number(sub)}
+            host={live ? data?.host : demoHost}
+            now={live ? now : DEMO_NOW}
+            act={inboxAct}
+            closed={closedRows}
+            initialPick={pick !== null && /^[0-9]$/.test(pick) ? Number(pick) : undefined}
+          />
+        ) : (
+          <div className="col f1 ib-empty">
+            <p className="ib-empty-head">This group is no longer open.</p>
+            <a href="#/inbox" className="qn-later row">
+              Back to the inbox
+            </a>
+          </div>
+        )}
       </div>
     );
   }
@@ -239,9 +280,9 @@ export function App({ connection, tabBadges, data, live }: AppProps) {
       />
     );
   } else if (tab === "inbox" && live) {
-    screen = live.inbox ? <Inbox topic={live.inbox} host={data?.host} now={now} /> : <Soon title="Inbox" />;
+    screen = live.inbox ? <Inbox topic={live.inbox} host={data?.host} now={now} act={inboxAct} closed={closedRows} /> : <Soon title="Inbox" />;
   } else if (tab === "inbox") {
-    screen = <Inbox topic={inbox.topic} host={demoHost} now={DEMO_NOW} />;
+    screen = <Inbox topic={inbox.topic} host={demoHost} now={DEMO_NOW} act={inboxAct} closed={closedRows} />;
   } else if (tab === "usage") {
     screen = (
       <UsageTab

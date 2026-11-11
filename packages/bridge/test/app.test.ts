@@ -362,13 +362,16 @@ describe("startApp: topics over the link", () => {
     expect(app!.security.activity().some((e) => e.text.includes("tab.select"))).toBe(true);
   });
 
-  it("refuses kinds no slice handles yet, and anything off the allowlist", async () => {
+  it("routes inbox acts to the inbox driver, and refuses anything off the allowlist", async () => {
     await start();
     const p = await phone(await paired());
     send(p, { type: "hello", api: 1 });
-    send(p, { type: "act", id: "x1", kind: "inbox.ack", args: { id: "Q1" } });
+    // The inbox driver takes it (no inbox installed here: unavailable), and a malformed one is bad_args.
+    send(p, { type: "act", id: "x1", kind: "inbox.ack", args: { key: "alert:1", rev: "r" } });
+    send(p, { type: "act", id: "x3", kind: "inbox.ack", args: { id: "Q1" } });
     send(p, { type: "act", id: "x2", kind: "tab.new", args: {} });
-    expect(await p.until(resOf("x1"))).toMatchObject({ ok: false, code: "unsupported_action" });
+    expect(await p.until(resOf("x1"))).toMatchObject({ ok: false, code: "unavailable" });
+    expect(await p.until(resOf("x3"))).toMatchObject({ ok: false, code: "bad_args" });
     expect(await p.until(resOf("x2"))).toMatchObject({ ok: false, code: "unsupported_action" });
   });
 

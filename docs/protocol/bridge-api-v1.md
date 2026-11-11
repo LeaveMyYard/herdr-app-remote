@@ -59,7 +59,7 @@ Checked by the bridge for every `act`:
 | capability | default after approval | `act` kinds |
 |---|---|---|
 | `view` | on | needed for the WebSocket itself (all read topics), plus `usage.refresh` and `usage.set_filter`, which only re-run the collect the subscription polls |
-| `inbox.answer` | on | `inbox.draft`, `inbox.answer`, `inbox.dismiss`, `inbox.ack` |
+| `inbox.answer` | on | `inbox.draft`, `inbox.answer`, `inbox.dismiss`, `inbox.ack`, `inbox.retry`, `inbox.stop_showing` |
 | `navigate` | off | `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
 | `terminal.input` | off; turned on from the desktop only, can expire | `terminal.send` |
 | `push` | off | `push.subscribe`, `push.unsubscribe` |
@@ -91,7 +91,7 @@ One JSON object per text frame, each with a `type`.
 | `snap` | `topic`, `epoch`, `seq`, `data` | Full state of a topic. |
 | `patch` | `topic`, `seq`, `ops` | RFC 6902 operations (`add remove replace move copy test`); paths are RFC 6901 JSON Pointers. |
 | `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`, and for `chat:<t>` `terminal_not_found`, `bad_terminal`, `too_many_chats`. The field is open. |
-| `res` | `id`, `ok`, `code?`, `unknown_effect?` | Result of an `act`. `code` is required when `ok` is false; `unknown_effect` is only valid when `ok` is false. |
+| `res` | `id`, `ok`, `code?`, `unknown_effect?`, `message?`, `closed?` | Result of an `act`. `code` is required when `ok` is false; `unknown_effect` is only valid when `ok` is false. `message` is plain text the PWA may show, in the plugin's own words (never answer text). `closed` (inbox acts) says the row is closed now, and why. |
 | `event` | `topic`, `name`, `data` | Fire-and-forget notification. |
 | `pong` | | Reply to `ping` (not in the plan's list; added so clients can detect dead sockets). |
 
@@ -220,10 +220,30 @@ A non-zero exit outside the contract, or bad stdout, is reported as `res {ok: fa
 - **Availability.** `herdr-inbox app --help` must print `herdr-inbox app v1` (`plugin: ready`). Any other state publishes `state: unavailable` and no rows.
 - **Writer.** While the feed is stale (older than 15 s, unstamped, from the future, or the newest read failed) and the probe passed, the bridge runs `app-feed --ensure --app-home <home>` at most once per 5 s. Exit 1 is not an error: the feed's age is what the phone shows.
 - **Last good feed.** A missing, unreadable, unsupported or `ok: false` feed keeps the last good one, `stale: true` with the reason in `problem`. With none held, `state: unavailable`: never an empty inbox. A topic value that fails its own schema is never left standing as fresh: the topic goes `stale` (`source_unavailable`). A row that can't be built is dropped, not the topic. `empty` is true only for an ok feed with no rows and nothing left out.
-- **Incomplete feeds.** `incomplete` carries the counts and the feed's `errors` whenever either exists. Left-out questions (`omitted.question_ids`, at most 20 at a time, 4 per pass) and cut groups are opened with `app show` and published as rows; ones not opened yet are counted in `incomplete.unlisted`. A `show` that fails (busy, not migrated, unknown) is retried no sooner than 30 s later, for cut groups too. A `stale` refusal is final for that key: the bridge never asks again by itself (app-commands-v1). A left-out row that was opened is re-opened every 30 s, so `tokenFor(key)` can change under a row a client rendered earlier: S11 must bind the token to the content it showed and let the verb's `stale` answer decide.
-- **Tokens.** Never in the topic. The bridge keeps each row's token (`InboxTopicDriver.tokenFor(key)`) for the answer slice (S11).
+- **Incomplete feeds.** `incomplete` carries the counts and the feed's `errors` whenever either exists. Left-out questions (`omitted.question_ids`, at most 20 at a time, 4 per pass) and cut groups are opened with `app show` and published as rows; ones not opened yet are counted in `incomplete.unlisted`. A `show` that fails (busy, not migrated, unknown) is retried no sooner than 30 s later, for cut groups too. A `stale` refusal is final for that key: the bridge never asks again by itself (app-commands-v1). A left-out row that was opened is re-opened every 30 s, so `tokenFor(key)` can change under a row a client rendered earlier: every row carries a `rev` that covers its token (see Inbox acts).
+- **Tokens.** Never in the topic. The bridge keeps each row's token (`InboxTopicDriver.tokenFor(key)`). Each row's `rev` is an HMAC (key random per bridge start) over the token it holds and the row as published, minus `new`: it reveals nothing of the token and changes whenever either does.
 - **New.** The toast marks of the feed protocol: the first good feed announces nothing; after that a row above the marks is `new` for 60 s.
 - **Unknown words.** An unknown row kind is published as `{key, kind, actions: [], new}`; an unknown delivery state as `known: false` with no actions; unknown severity, alert kind and asker host read as `warning`, `agent` and `unknown`. Remote rows are read-only (`actions: []`).
 
 The driver is not started by `createBridgeServer` yet (nor is `PluginsTopicDriver`); whichever slice wires startup constructs it with `{hub, appHome, run}` and calls `start()`.
 
+## Inbox acts (S11)
+
+`InboxTopicDriver.act(kind, args)` runs herdr-inbox's write verbs, `herdr-inbox app <verb> --json` through the launcher (herdr-inbox `docs/protocol/app-commands-v1.md`). Schemas: `bridgeApi.INBOX_ACTS`, `bridgeApi.InboxAct`; fixtures `fixtures/bridge-api/inbox-act/`. Every kind needs the `inbox.answer` capability and is audited by `Security.act`.
+
+| `act` kind | verb | row | `args` (besides `key`, `rev`) |
+|---|---|---|---|
+| `inbox.answer` | `answer` | `group` | `question` + `detail` (a lone question), or `questions` (Submit: the stored drafts of these) |
+| `inbox.draft` | `draft` | `group` | `question` + `detail`, or `question` + `clear: true` |
+| `inbox.dismiss` | `dismiss` | `group` | `question?` (none: every open question of the group) |
+| `inbox.retry` | `retry` | `failed` | none |
+| `inbox.stop_showing` | `stop-showing` | `failed` | none |
+| `inbox.ack` | `ack` | `alert` | none |
+
+- **Bound to what was shown.** `key` and `rev` name the row as the phone drew it. The bridge acts only on a `rev` it published for that key, with the token that `rev` covers; any other is refused `stale` before the inbox is asked. So a token that moved under a rendered row (a re-opened left-out row, a newer feed) is never used for it, and the phone looks again. A `rev` the inbox answered `stale` for is refused here until the row changes: nothing is repeated with any token.
+- **Labels are the bridge's.** `detail.choices` are option *indices*, and `detail.notes` are keyed by index. The bridge builds the Detail from its own copy of the question, with the plugin's own `verbArgs`; a label, a token or any unknown field in `args` is refused (`bad_args`). The option labels go to the audit log as `ActResult.audit_label` ("Phone 1 answered Q127 (Option B)"); a label the client sends is never logged, and free text is logged by length only.
+- **Checked against the row.** A row kind that does not fit the act is `invalid`, a verb the row's `actions` do not list is `read_only`, a question not in the group, an index out of range, two picks on a single-select, or a one-shot answer on a group of several questions is `invalid`, and a detail over 64 KiB is `invalid`. None of these runs anything.
+- **Results.** The plugin's own `readResult` reads the verb. Success is `ok: true` with the plugin's words for `queued`, `held` and skipped questions in `message`; a result with no token (the row is gone) adds `closed` (`answered`, `dismissed`, `acked`, `hidden`). A refusal is `ok: false` with the inbox's code (`stale`, `already_sending`, `invalid`, `read_only`, `busy`, `not_migrated`, `error`), the plugin's `refusalWords` as `message`, and for `stale` the inbox's `closed` word. Any other exit, bad stdout, a result naming another row, or a run past 8 s is `code: unknown_effect, unknown_effect: true`: the phone says so and the feed is reloaded; nothing is repeated.
+- **Tokens after a verb.** The token of the bridge's last result is used for the row until a feed written after that result, or a later `app show`, arrives (app-commands-v1). The new `rev` is published before the `res` is sent. One verb runs at a time.
+- **Touch.** The PWA keeps the inbox's own arm delays (`model/data.js`): a screen takes no action tap for 400 ms after it appears or its row changes, and a row that has just arrived takes no tap for 1 s.
+- **Known limitation (app-commands-v1).** `exec` has no stdin, so the answer (`--detail`) is on the verb's command line while it runs, for up to its 5 s budget. Any local user can read it from the process list then, although the feed is 0600. The bridge adds no other copy: it is not logged, and it never leaves the bridge in a result.

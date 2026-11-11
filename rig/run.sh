@@ -48,7 +48,7 @@ cp "$here/sidecar.mjs" "$here/inner.sh" "$here/lib.sh" "$rig/bin/"
 repo=$(cd "$here/.." && pwd -P)
 mkdir -p "$rig/home/.config/herdr-app/mods/herdr-app-remote"
 cp "$repo"/mod/herdr-app-remote/*.js "$repo"/mod/herdr-app-remote/mod.json "$rig/home/.config/herdr-app/mods/herdr-app-remote/"
-cp "$here/link-harness.mjs" "$rig/bin/"
+cp "$here/link-harness.mjs" "$here/inbox-harness.mjs" "$rig/bin/"
 cp "$here/scenarios/$scenario.sh" "$rig/scenarios/"
 echo "rig: $rig"
 rc=0

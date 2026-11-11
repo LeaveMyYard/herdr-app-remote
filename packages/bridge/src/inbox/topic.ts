@@ -1,13 +1,15 @@
+import { createHmac, randomBytes } from "node:crypto";
 import { open } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { bridgeApi } from "@herdr-remote/protocol";
-import type { Hub } from "../hub.js";
+import type { ActResult, Hub } from "../hub.js";
 import type { Json } from "../patch.js";
 import { FEED_MAX_BYTES, INBOX_FEED } from "../plugins/constants.js";
 import { detectInbox, type Binaries } from "../plugins/detect.js";
 import type { Runner } from "../plugins/exec.js";
+import { planAct } from "./act.js";
 import { buildTopic, type BuildEnv } from "./build.js";
-import { loadInboxModules, resolveLauncher, type InboxModules, type Launch, type RawFeed } from "./plugin.js";
+import { loadInboxModules, resolveLauncher, type InboxModules, type Launch, type RawFeed, type VerbResult } from "./plugin.js";
 
 export const INBOX_TOPIC = "inbox";
 
@@ -30,6 +32,8 @@ export interface InboxTopicOptions {
   /** How long a row stays `new`. Default 60 s. */
   newMs?: number;
   onInvalid?: (error: string) => void;
+  /** How long a write verb may run before its effect counts as unknown. Default `VERB_TIMEOUT_MS`. */
+  verbTimeoutMs?: number;
 }
 
 const ENSURE_TIMEOUT_MS = 15_000;
@@ -40,6 +44,15 @@ const MAX_SHOWN = 20;
 const SHOWS_PER_PASS = 4;
 const SHOW_REFRESH_MS = 30_000;
 const SHOW_RETRY_MS = 30_000;
+/** A verb has its own 5 s budget (app-commands-v1); past this the bridge stops it and the effect is unknown. */
+export const VERB_TIMEOUT_MS = 8_000;
+
+/** What an `act` is checked against: the row as the phone was shown it, and the token the bridge holds for it. */
+interface Binding {
+  rev: string;
+  token: string | undefined;
+  row: bridgeApi.InboxRow;
+}
 
 interface ShowEntry {
   row: Obj | null;
@@ -73,7 +86,8 @@ async function readFeedText(path: string): Promise<Read> {
  * - a bad read keeps the last good feed, marked stale, and never becomes an empty inbox;
  * - the writer is started with `app-feed --ensure`, only after the `app --help` probe says ready, at most once per 5 s while stale;
  * - left-out questions and cut ones are opened with `app show`; row tokens stay on the bridge (`tokenFor`).
- * Nothing is written to the inbox here: answering is S11.
+ * - `act` runs the write verbs (`herdr-inbox app <verb> --json`, app-commands-v1) for the row a phone was shown,
+ *   bound by the row's `rev`; the token never leaves the bridge.
  */
 export class InboxTopicDriver {
   private modules: InboxModules | undefined;
@@ -96,6 +110,14 @@ export class InboxTopicDriver {
   private timer: NodeJS.Timeout | undefined;
   private inflight: Promise<void> | undefined;
   private running = false;
+  /** Keys every `rev`: a rev says nothing about the token it covers. Random per bridge start. */
+  private readonly revKey = randomBytes(32);
+  private bound = new Map<string, Binding>();
+  /** The token of the bridge's last verb result per row (null: the row is gone), until a newer feed or `show`. */
+  private readonly overrides = new Map<string, { token: string | null; at: number }>();
+  /** Revs the inbox answered `stale` for: refused here until the row's content or token moves (no silent repeat). */
+  private readonly refusedRevs = new Set<string>();
+  private acting: Promise<unknown> = Promise.resolve();
   /** Every spawn of the launcher, for tests and the audit of "at most once per 5 s". */
   ensureCount = 0;
 
@@ -191,6 +213,9 @@ export class InboxTopicDriver {
     const parsed = modules.parseFeed(read.text);
     if (parsed.feed) {
       this.problem = null;
+      // "The mod uses the token of its last result until a newer feed arrives" (app-commands-v1).
+      const g = parsed.feed.generated_at;
+      for (const [k, o] of this.overrides) if (typeof g === "number" && g * 1000 > o.at) this.overrides.delete(k);
       this.takeMarks(parsed.feed, now);
       this.lastGood = parsed.feed;
     } else {
@@ -305,11 +330,22 @@ export class InboxTopicDriver {
     this.tokens.clear();
     if (feed) {
       for (const e of feed.entries) if (typeof e.token === "string") this.tokens.set(String(e.key), e.token);
+      const shownAt = new Map<string, number>();
       for (const [k, s] of this.shows) {
         if (!s.row) continue;
         if (k.startsWith("cut:")) shown.set(String(s.row.key), s.row);
         else extra.push(s.row);
         if (typeof s.row.token === "string") this.tokens.set(String(s.row.key), s.row.token);
+        shownAt.set(String(s.row.key), s.at);
+      }
+      // A verb's own result outranks what was read before it; a later `show` of the row outranks the result.
+      for (const [k, o] of this.overrides) {
+        if ((shownAt.get(k) ?? -Infinity) > o.at) {
+          this.overrides.delete(k);
+          continue;
+        }
+        if (o.token === null) this.tokens.delete(k);
+        else this.tokens.set(k, o.token);
       }
     }
     // One row per key, in question order: several left-out ids can be in one group.
@@ -324,6 +360,7 @@ export class InboxTopicDriver {
       modules: modules as InboxModules,
       shown,
       isNew: (key) => (this.newUntil.get(key) ?? 0) > now || rows.some((r) => r.key === key && this.isNewShown(r, now)),
+      rev: (key, content) => this.revOf(this.tokens.get(key), content),
     };
     const topic = buildTopic(
       {
@@ -339,11 +376,82 @@ export class InboxTopicDriver {
     const r = bridgeApi.InboxTopic.safeParse(topic);
     if (!r.success) {
       this.opts.onInvalid?.(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
-      // Never leave an old value standing as fresh.
+      // Never leave an old value standing as fresh, and nothing on it can be acted on.
+      this.bound = new Map();
       if (hub.get(INBOX_TOPIC) !== undefined) hub.setStale(INBOX_TOPIC, "source_unavailable");
       return;
     }
+    // Bound before it is sent: a phone can act only on a rev it was published.
+    this.bound = new Map(r.data.entries.map((row) => [row.key, { rev: row.rev, token: this.tokens.get(row.key), row }]));
+    for (const rev of this.refusedRevs) if (![...this.bound.values()].some((b) => b.rev === rev)) this.refusedRevs.delete(rev);
     hub.publish(INBOX_TOPIC, r.data as unknown as Json);
+  }
+
+  /** HMAC over the token and the row's content as published: any change to either is a new rev. */
+  private revOf(token: string | undefined, content: Record<string, unknown>): string {
+    return createHmac("sha256", this.revKey)
+      .update(token === undefined ? "\u0000none" : `t${token}`)
+      .update("\u0000")
+      .update(JSON.stringify(content))
+      .digest("base64url")
+      .slice(0, 32);
+  }
+
+  // ---- acts (S11) ----
+
+  /**
+   * The inbox `act` kinds; undefined for any other. Capabilities and the audit log are `Security.act`'s: this
+   * returns the bridge-resolved option label as `audit_label`. One verb runs at a time.
+   */
+  act(kind: string, args: Record<string, unknown>): Promise<ActResult> | undefined {
+    if (!Object.prototype.hasOwnProperty.call(bridgeApi.INBOX_ACTS, kind)) return undefined;
+    const k = kind as bridgeApi.InboxActKind;
+    const parsed = bridgeApi.INBOX_ACTS[k].args.safeParse(args);
+    if (!parsed.success) return Promise.resolve({ ok: false, code: "bad_args" });
+    const run = this.acting.then(() => this.runVerb(k, parsed.data as Record<string, unknown> & { key: string; rev: string }));
+    this.acting = run.catch(() => undefined);
+    return run;
+  }
+
+  private async runVerb(kind: bridgeApi.InboxActKind, args: Record<string, unknown> & { key: string; rev: string }): Promise<ActResult> {
+    const { verb } = bridgeApi.INBOX_ACTS[kind];
+    const modules = this.modules;
+    const launch = this.launch;
+    if (!this.running || this.plugin !== "ready" || !modules || !launch) {
+      return { ok: false, code: "unavailable", message: "The inbox is not available here. Nothing was sent." };
+    }
+    const b = this.bound.get(args.key);
+    // Not the content the phone drew, or no token for it: say so without asking the inbox.
+    if (!b || b.rev !== args.rev || b.token === undefined || this.refusedRevs.has(b.rev)) {
+      return { ok: false, code: "stale", message: modules.refusalWords(verb, { code: "stale", message: "", closed: null }) };
+    }
+    const plan = planAct(kind, args, b.row);
+    if ("code" in plan) return { ok: false, code: plan.code, message: plan.message };
+    const argv = modules.verbArgs({ verb, entry: args.key, qids: plan.qids, detail: plan.detail, clear: plan.clear === true }, b.token);
+    const label = plan.label !== undefined ? { audit_label: plan.label } : {};
+    if (argv === null) return { ok: false, code: "invalid", message: "That answer is too long for the inbox. Nothing was sent.", ...label };
+    const r = await launch(argv, this.opts.verbTimeoutMs ?? VERB_TIMEOUT_MS).catch(() => null);
+    const res = modules.readResult(r === null ? null : { code: r.error ? null : r.code, stdout: r.stdout }, verb, args.key) as VerbResult;
+    let out: ActResult;
+    if (res.kind === "done") {
+      this.overrides.set(args.key, { token: res.token, at: this.now() });
+      const said = [
+        res.delivery === "held" ? modules.heldWords(verb, res.done) : res.delivery === "queued" ? modules.queuedWords(res.done) : "",
+        res.skipped.length > 0 ? modules.skippedWords(res.skipped) : "",
+      ].filter((x) => x !== "");
+      out = { ok: true, ...(said.length > 0 ? { message: said.join(" ") } : {}), ...(res.token === null && plan.closes ? { closed: plan.closes } : {}) };
+    } else if (res.kind === "refused") {
+      if (res.code === "stale") this.refusedRevs.add(b.rev);
+      const closed = res.code === "stale" && (bridgeApi.INBOX_CLOSED as readonly string[]).includes(res.closed ?? "") ? { closed: res.closed as bridgeApi.Res["closed"] } : {};
+      out = { ok: false, code: res.code, message: modules.refusalWords(verb, res), ...closed };
+    } else {
+      // Any other exit or stdout: it may or may not have been done. Say so, reload, never repeat it.
+      out = { ok: false, code: "unknown_effect", unknown_effect: true, message: modules.unknownWords(String((res as { why?: unknown }).why ?? "no result")) };
+    }
+    // The new token (and so a new rev) goes out before the result, so the phone's next act can use it.
+    this.publish();
+    void this.refresh();
+    return { ...out, ...label };
   }
 
   /** A left-out group is new when one of its questions' ids is. */

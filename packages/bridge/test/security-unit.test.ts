@@ -72,17 +72,24 @@ describe("audit redaction", () => {
   });
 
   it("inbox answers log the bridge-resolved option label, never client text", () => {
-    expect(describeAct("inbox.answer", { id: "Q119" }, "Option B")).toBe("answered Q119 (Option B)");
+    expect(describeAct("inbox.answer", { key: "group:119", question: 119 }, "Option B")).toBe("answered Q119 (Option B)");
     // A label in the client's args is client text: ignored.
-    expect(describeAct("inbox.answer", { id: "Q119", label: SECRET })).toBe("answered Q119");
-    const free = describeAct("inbox.answer", { id: "Q119", text: SECRET });
+    expect(describeAct("inbox.answer", { key: "group:119", question: 119, label: SECRET })).toBe("answered Q119");
+    const free = describeAct("inbox.answer", { key: "group:119", question: 119, detail: { choices: [], notes: {}, text: SECRET } });
     expect(free).toBe("answered Q119 (23 chars)");
-    expect(describeAct("inbox.draft", { id: "Q1", text: SECRET })).not.toContain("secret");
+    expect(describeAct("inbox.answer", { key: "group:123", questions: [123, 124] }, "Q123: Option A")).toBe("answered Q123, Q124 (Q123: Option A)");
+    expect(describeAct("inbox.draft", { key: "group:1", question: 1, detail: { choices: [], notes: { 0: SECRET }, text: SECRET } })).not.toContain("secret");
+    expect(describeAct("inbox.draft", { key: "group:1", question: 1, clear: true })).toBe("cleared the draft of Q1");
+    expect(describeAct("inbox.ack", { key: "alert:456" })).toBe("acknowledged A456");
+    expect(describeAct("inbox.dismiss", { key: "group:123" })).toBe("dismissed group 123");
+    expect(describeAct("inbox.retry", { key: "failed:119" })).toBe("asked to resend the answer to Q119");
+    expect(describeAct("inbox.stop_showing", { key: "failed:119" })).toBe("stopped showing the answer to Q119");
   });
 
   it("ids that aren't ids, and unknown kinds that aren't names, are not logged", () => {
     expect(describeAct("terminal.send", { terminal: SECRET, text: "x" })).toBe("sent 1 chars to a terminal");
-    expect(describeAct("inbox.dismiss", { id: SECRET })).toBe("dismissed a question");
+    expect(describeAct("inbox.dismiss", { key: SECRET, question: SECRET })).toBe("dismissed a question");
+    expect(describeAct("inbox.dismiss", { key: "group:01", question: 1.5 })).toBe("dismissed a question");
     expect(describeAct(SECRET, {})).toBe("tried an unknown action");
     expect(describeAct("exec", { cmd: SECRET })).toBe("tried exec");
   });

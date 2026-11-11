@@ -58,16 +58,26 @@ export interface BuildEnv {
   /** Rows the bridge opened with `app show` (left out of, or cut in, the feed), by row key. They replace the feed's. */
   shown: ReadonlyMap<string, Obj>;
   isNew: (key: string) => boolean;
+  /**
+   * The row's `rev`: binds an `act` to this content and the token the bridge holds for it (S11). Called with the
+   * row as published, minus `new` and `rev`.
+   */
+  rev: (key: string, row: Record<string, unknown>) => string;
+}
+
+/** The row with its `rev`, validated; undefined if it fails the schema. */
+function finish(row: Record<string, unknown>, env: BuildEnv): bridgeApi.InboxRow | undefined {
+  const content = { ...row };
+  delete content.new;
+  const r = bridgeApi.InboxRow.safeParse({ ...row, rev: env.rev(String(row.key), content) });
+  return r.success ? r.data : undefined;
 }
 
 /** One feed entry as a topic row. A row that cannot be built reads as an unknown row: its key, and no actions. */
 export function buildRow(entry: Obj, env: BuildEnv): bridgeApi.InboxRow | undefined {
   const base = { key: str(entry.key), actions: arr(entry.actions).filter((a): a is string => typeof a === "string"), new: env.isNew(str(entry.key)) };
   // A row that cannot be built reads as an unknown row; one with no usable key or a known kind that fails the schema is dropped.
-  const unknown = (): bridgeApi.InboxRow | undefined => {
-    const r = bridgeApi.InboxRow.safeParse({ key: base.key, kind: str(entry.kind), actions: [], new: base.new });
-    return r.success ? r.data : undefined;
-  };
+  const unknown = (): bridgeApi.InboxRow | undefined => finish({ key: base.key, kind: str(entry.kind), actions: [], new: base.new }, env);
   const { modules } = env;
   let row: unknown;
   try {
@@ -191,8 +201,7 @@ export function buildRow(entry: Obj, env: BuildEnv): bridgeApi.InboxRow | undefi
   } catch {
     return unknown();
   }
-  const r = bridgeApi.InboxRow.safeParse(row);
-  return r.success ? r.data : unknown();
+  return finish(row as Record<string, unknown>, env) ?? unknown();
 }
 
 export interface TopicInput {

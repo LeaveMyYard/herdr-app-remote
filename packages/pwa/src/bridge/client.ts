@@ -41,6 +41,10 @@ export interface ActOutcome {
   code?: string;
   /** The action may have run: say so, refresh, and never retry it by itself. */
   unknown_effect?: boolean;
+  /** Plain text the PWA may show (the plugin's own words); never answer text. */
+  message?: string;
+  /** For an inbox `act`: the row is closed now, and why. */
+  closed?: bridgeApi.Res["closed"];
 }
 
 /** The subset of the DOM WebSocket the client uses (injectable for tests). */
@@ -460,7 +464,8 @@ export class BridgeClient {
         const resolve = this.pending.get(msg.id);
         if (!resolve) return;
         this.pending.delete(msg.id);
-        resolve(msg.ok ? { ok: true } : { ok: false, code: msg.code ?? "failed", ...(msg.unknown_effect ? { unknown_effect: true } : {}) });
+        const extra = { ...(msg.message !== undefined ? { message: msg.message } : {}), ...(msg.closed !== undefined ? { closed: msg.closed } : {}) };
+        resolve(msg.ok ? { ok: true, ...extra } : { ok: false, code: msg.code ?? "failed", ...(msg.unknown_effect ? { unknown_effect: true } : {}), ...extra });
         return;
       }
       default:

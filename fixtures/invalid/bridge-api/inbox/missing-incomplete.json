@@ -11,6 +11,7 @@
   "entries": [
     {
       "key": "alert:456",
+      "rev": "0f1e2d3c4b5a69780016",
       "actions": [
         "ack"
       ],
@@ -33,6 +34,7 @@
     },
     {
       "key": "group:123",
+      "rev": "0f1e2d3c4b5a69780017",
       "actions": [
         "answer",
         "draft",
@@ -77,6 +79,7 @@
     },
     {
       "key": "group:127",
+      "rev": "0f1e2d3c4b5a69780018",
       "actions": [
         "answer",
         "draft",

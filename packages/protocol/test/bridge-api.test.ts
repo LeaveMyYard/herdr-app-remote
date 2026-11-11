@@ -37,6 +37,7 @@ describe("bridge-api", () => {
   it("drops a row token from the inbox topic: tokens stay on the bridge", () => {
     const row = {
       key: "alert:1",
+      rev: "rev-1",
       kind: "alert",
       actions: ["ack"],
       new: false,
@@ -56,9 +57,24 @@ describe("bridge-api", () => {
   });
 
   it("reads a kind it does not know as an unknown row, and rejects a known kind with bad fields", () => {
-    const base = { key: "k:1", actions: [], new: false };
+    const base = { key: "k:1", rev: "rev-1", actions: [], new: false };
     expect(bridgeApi.InboxRow.safeParse({ ...base, kind: "wat" }).success).toBe(true);
     expect(bridgeApi.InboxRow.safeParse({ ...base, kind: "alert" }).success).toBe(false);
+  });
+
+  it("requires a rev on every inbox row: an act is bound to the content shown", () => {
+    expect(bridgeApi.InboxRow.safeParse({ key: "k:1", actions: [], new: false, kind: "wat" }).success).toBe(false);
+  });
+
+  it("takes inbox answers as option indices only, never a label or a token", () => {
+    const act = (args: unknown) => bridgeApi.InboxAct.safeParse({ type: "act", id: "a", kind: "inbox.answer", args });
+    const detail = { choices: [0], notes: {}, text: null };
+    expect(act({ key: "group:1", rev: "r", question: 1, detail }).success).toBe(true);
+    expect(act({ key: "group:1", rev: "r", question: 1, detail: { ...detail, choices: ["Option A"] } }).success).toBe(false);
+    expect(act({ key: "group:1", rev: "r", question: 1, detail, label: "Option A" }).success).toBe(false);
+    expect(act({ key: "group:1", rev: "r", question: 1, detail, token: "t" }).success).toBe(false);
+    expect(act({ key: "group:1", rev: "r", question: 1, detail: { ...detail, label: "x" } }).success).toBe(false);
+    expect(act({ key: "group:1", rev: "r", question: 2 ** 53, detail }).success).toBe(false);
   });
 
   it("extracts a safe terminal id from chat topics only", () => {

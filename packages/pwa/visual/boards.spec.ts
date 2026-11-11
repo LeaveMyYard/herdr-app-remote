@@ -15,9 +15,10 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[] 
   { ref: "PhonePeek", url: "/?fixture=peek#/swarm/peek/t2%00a9f8e7d6", nav: false },
   // Chat's terminal text, spinner, tile and footer slot (S16's key bar and composer) are masked in the page.
   { ref: "PhoneChat", url: "/?fixture=chat#/chat/a-1", nav: false },
-  // PhoneInbox: the board's fourth row ("delivered" placeholder) and the footer with its "Seen" button are not
-  // in the read-only slice: PLAN S11 owns them.
-  { ref: "PhoneInbox", url: "/?fixture=inbox#/inbox", skip: [{ x: 0, y: 372, width: 390, height: 124 }] },
+  // PhoneInbox: the fourth row is the placeholder of an answer the phone saw delivered (demo data seeds it).
+  { ref: "PhoneInbox", url: "/?fixture=inbox#/inbox" },
+  { ref: "PhoneQuestion", url: "/?fixture=inbox&pick=0#/inbox/q/group%3A123/123", nav: false },
+  { ref: "PhoneReview", url: "/?fixture=inbox&inbox=review#/inbox/q/group%3A123/submit", nav: false },
 ];
 
 for (const board of BOARDS) {
@@ -25,7 +26,7 @@ for (const board of BOARDS) {
     const nav = board.nav !== false;
     await page.goto(board.url);
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek], .chat-head");
+    await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek], .chat-head, .qn-head");
     const masks: Rect[] = [
       ...(await page.$$eval("[data-vis-mask]", (els) =>
         els.map((e) => {

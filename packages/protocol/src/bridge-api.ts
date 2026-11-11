@@ -279,6 +279,12 @@ export const INBOX_ALERT_KINDS = ["agent", "blocked"] as const;
  */
 const RowBase = {
   key: z.string().min(1),
+  /**
+   * Binds an `act` to the content shown (S11): the bridge's own keyed hash of this row as published plus the
+   * row token it holds. An `act` names the `rev` it was drawn from; any other is refused as `stale` before the
+   * inbox is asked, so a token that moved under a rendered row is never used for it. Reveals nothing of the token.
+   */
+  rev: z.string().min(1).max(64),
   actions: z.array(Str),
   /** First seen after the bridge's first good feed, within the last minute. */
   new: z.boolean(),
@@ -432,6 +438,69 @@ export const InboxTopic = z.object({
   entries: z.array(InboxRow),
 });
 export type InboxTopic = z.infer<typeof InboxTopic>;
+
+// ---- inbox acts (S11) ----
+
+/** A question or alert id as the inbox writes it: canonical decimal in [1, 2^53 - 1]. */
+const InboxId = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * An answer as the phone picked it. `choices` are option INDICES into the question as the bridge published it,
+ * and `notes` are keyed by those indices: the bridge turns them into labels from its own data, so no label the
+ * client sends is ever passed on or logged. `text` is the free-text answer.
+ */
+export const InboxDetailArg = z
+  .object({
+    choices: z.array(z.number().int().nonnegative()).max(256),
+    notes: z.record(z.string().regex(/^(0|[1-9][0-9]{0,2})$/), z.string()),
+    text: z.string().nullable(),
+  })
+  .strict();
+export type InboxDetailArg = z.infer<typeof InboxDetailArg>;
+
+const Bound = { key: z.string().min(1).max(200), rev: z.string().min(1).max(64) };
+
+/** `inbox.answer`: a lone question's answer (`question` + `detail`), or a Submit of stored drafts (`questions`). */
+export const InboxAnswerArgs = z.union([
+  z.object({ ...Bound, question: InboxId, detail: InboxDetailArg }).strict(),
+  z.object({ ...Bound, questions: z.array(InboxId).min(1).max(64) }).strict(),
+]);
+/** `inbox.draft`: store an unsent answer, or clear it. */
+export const InboxDraftArgs = z.union([
+  z.object({ ...Bound, question: InboxId, detail: InboxDetailArg }).strict(),
+  z.object({ ...Bound, question: InboxId, clear: z.literal(true) }).strict(),
+]);
+/** `inbox.dismiss`: one question, or without `question` every open question of the group. */
+export const InboxDismissArgs = z.object({ ...Bound, question: InboxId.optional() }).strict();
+/** `inbox.retry`, `inbox.stop_showing` (a `failed` row) and `inbox.ack` (an alert). */
+export const InboxRowArgs = z.object(Bound).strict();
+
+/** Each inbox `act` kind, the `herdr-inbox app` verb it runs, the row kind it takes and its argument schema. */
+export const INBOX_ACTS = {
+  "inbox.answer": { verb: "answer", row: "group", args: InboxAnswerArgs },
+  "inbox.draft": { verb: "draft", row: "group", args: InboxDraftArgs },
+  "inbox.dismiss": { verb: "dismiss", row: "group", args: InboxDismissArgs },
+  "inbox.retry": { verb: "retry", row: "failed", args: InboxRowArgs },
+  "inbox.stop_showing": { verb: "stop-showing", row: "failed", args: InboxRowArgs },
+  "inbox.ack": { verb: "ack", row: "alert", args: InboxRowArgs },
+} as const;
+export type InboxActKind = keyof typeof INBOX_ACTS;
+
+const actOf = <K extends InboxActKind>(kind: K) =>
+  z.object({ type: z.literal("act"), id: z.string().min(1), kind: z.literal(kind), args: INBOX_ACTS[kind].args }).strict();
+/** A client `act` for the inbox, checked against its kind's arguments (the bridge parses `args` with the same schemas). */
+export const InboxAct = z.union([
+  actOf("inbox.answer"),
+  actOf("inbox.draft"),
+  actOf("inbox.dismiss"),
+  actOf("inbox.retry"),
+  actOf("inbox.stop_showing"),
+  actOf("inbox.ack"),
+]);
+export type InboxAct = z.infer<typeof InboxAct>;
+
+/** The `closed` words of app-commands-v1 (a `stale` refusal), plus `answered`/`dismissed`/`acked`/`hidden` for the bridge's own verbs. */
+export const INBOX_CLOSED = ["answered", "dismissed", "withdrawn", "delivered", "fetched", "hidden", "acked", "cleared", "removed"] as const;
 /**
  * `chat:<t>` topic: the text of terminal `<t>` (an `hc read`), ANSI already turned into spans.
  * Spans carry text only: the PWA renders them as text nodes, never as HTML. Colours are a palette index
@@ -550,6 +619,13 @@ export const Res = z
     code: z.string().min(1).optional(),
     /** Non-zero exit outside the contract, or bad stdout: the PWA says so, refreshes and never retries. Only with `ok: false`. */
     unknown_effect: z.boolean().optional(),
+    /**
+     * Plain text the PWA may show, in the plugin's own words (for the inbox: herdr-inbox's words.js). It never
+     * holds answer text: the inbox never echoes `--detail`, and the bridge adds none.
+     */
+    message: z.string().max(2000).optional(),
+    /** For an inbox `act`: the row is closed now, and why (one of `INBOX_CLOSED`). The PWA shows a placeholder. */
+    closed: z.enum(INBOX_CLOSED).optional(),
   })
   .refine((r) => r.ok || r.code !== undefined, { message: "code is required when ok is false", path: ["code"] })
   .refine((r) => !r.ok || r.unknown_effect === undefined, {

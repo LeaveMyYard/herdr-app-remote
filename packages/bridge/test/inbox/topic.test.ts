@@ -124,7 +124,7 @@ describe("inbox topic: reading the feed", () => {
       odd,
     ];
     const t = (await started({ feed: feedDoc({ entries }) })).topic();
-    expect(t.entries[0]).toEqual({ key: "wat:1", kind: "wat", actions: [], new: false });
+    expect(t.entries[0]).toEqual({ key: "wat:1", rev: expect.any(String), kind: "wat", actions: [], new: false });
     expect(t.entries[1]).toMatchObject({ severity: "warning", alert_kind: "agent", asker: { host: "unknown" } });
     expect(t.entries[2]).toMatchObject({ actions: [], delivery: { known: false, line: "somewhere" } });
   });

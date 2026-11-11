@@ -1,0 +1,18 @@
+{
+  "type": "act",
+  "id": "act-client-label",
+  "kind": "inbox.answer",
+  "args": {
+    "key": "group:127",
+    "rev": "0f1e2d3c4b5a69780001",
+    "question": 127,
+    "label": "Option A",
+    "detail": {
+      "choices": [
+        0
+      ],
+      "notes": {},
+      "text": null
+    }
+  }
+}

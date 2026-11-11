@@ -36,6 +36,10 @@ export interface ActResult {
    * Never sent to the client, and never taken from the client's args.
    */
   audit_label?: string;
+  /** Plain text the PWA may show (the plugin's own words). Never free text the client sent. */
+  message?: string;
+  /** For an inbox `act`: the row is closed now, and why. */
+  closed?: bridgeApi.Res["closed"];
 }
 
 /** Handles an `act`. `Security.act` wraps the real handler with capability checks and the audit log. */
@@ -320,10 +324,12 @@ export class Hub {
   }
 }
 
+/** The client's copy of a result: `audit_label` (and anything else) stays on the bridge. */
 export function toRes(id: string, r: ActResult): bridgeApi.Res {
-  if (r.ok) return { type: "res", id, ok: true };
-  const out: bridgeApi.Res = { type: "res", id, ok: false, code: r.code ?? "failed" };
-  if (r.unknown_effect) out.unknown_effect = true;
+  const out: bridgeApi.Res = r.ok ? { type: "res", id, ok: true } : { type: "res", id, ok: false, code: r.code ?? "failed" };
+  if (!r.ok && r.unknown_effect) out.unknown_effect = true;
+  if (typeof r.message === "string" && r.message !== "") out.message = r.message.slice(0, 2000);
+  if (r.closed !== undefined && (bridgeApi.INBOX_CLOSED as readonly string[]).includes(r.closed)) out.closed = r.closed;
   return out;
 }
 

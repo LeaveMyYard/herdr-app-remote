@@ -1,0 +1,20 @@
+{
+  "type": "act",
+  "id": "act-detail-and-questions",
+  "kind": "inbox.answer",
+  "args": {
+    "key": "group:123",
+    "rev": "0f1e2d3c4b5a69780001",
+    "question": 123,
+    "questions": [
+      123
+    ],
+    "detail": {
+      "choices": [
+        0
+      ],
+      "notes": {},
+      "text": null
+    }
+  }
+}

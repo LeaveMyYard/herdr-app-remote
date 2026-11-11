@@ -12,6 +12,7 @@
   "entries": [
     {
       "key": "group:1",
+      "rev": "0f1e2d3c4b5a69780013",
       "actions": [
         "answer",
         "draft",

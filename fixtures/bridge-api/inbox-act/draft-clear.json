@@ -1,0 +1,11 @@
+{
+  "type": "act",
+  "id": "act-draft-clear",
+  "kind": "inbox.draft",
+  "args": {
+    "key": "group:123",
+    "rev": "0f1e2d3c4b5a69780001",
+    "question": 124,
+    "clear": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "type": "act",
+  "id": "act-answer-submit",
+  "kind": "inbox.answer",
+  "args": {
+    "key": "group:123",
+    "rev": "0f1e2d3c4b5a69780001",
+    "questions": [
+      123,
+      124
+    ]
+  }
+}

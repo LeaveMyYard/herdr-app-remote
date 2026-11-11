@@ -12,6 +12,7 @@
   "entries": [
     {
       "key": "alert:456",
+      "rev": "0f1e2d3c4b5a69780001",
       "actions": [
         "ack"
       ],
@@ -34,6 +35,7 @@
     },
     {
       "key": "group:123",
+      "rev": "0f1e2d3c4b5a69780002",
       "actions": [
         "answer",
         "draft",
@@ -78,6 +80,7 @@
     },
     {
       "key": "failed:119",
+      "rev": "0f1e2d3c4b5a69780003",
       "actions": [
         "retry",
         "stop-showing"
@@ -113,12 +116,14 @@
     },
     {
       "key": "wat:1",
+      "rev": "0f1e2d3c4b5a69780004",
       "kind": "wat",
       "actions": [],
       "new": false
     },
     {
       "key": "remote:m1|db|3",
+      "rev": "0f1e2d3c4b5a69780005",
       "actions": [],
       "new": false,
       "kind": "remote_group",
