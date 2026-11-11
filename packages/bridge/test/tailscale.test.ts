@@ -47,7 +47,7 @@ interface Rig {
   phone: { on: boolean };
 }
 
-function rig(opts: { conf?: Record<string, string>; serve?: string; serveTimeoutMs?: number; bin?: string } = {}): Rig {
+function rig(opts: { conf?: Record<string, string>; serve?: string; serveTimeoutMs?: number; bin?: string; onFunnel?: () => void } = {}): Rig {
   const dir = mkdtempSync(join(tmpdir(), "s14-ts-"));
   dirs.push(dir);
   const bin = join(dir, "tailscale");
@@ -71,6 +71,7 @@ function rig(opts: { conf?: Record<string, string>; serve?: string; serveTimeout
     onIdentity: (id) => ids.push(id),
     onState: (s) => states.push(s),
     ...(opts.serveTimeoutMs ? { serveTimeoutMs: opts.serveTimeoutMs } : {}),
+    ...(opts.onFunnel ? { onFunnel: opts.onFunnel } : {}),
   });
   setups.push(setup);
   return {
@@ -138,6 +139,9 @@ describe("tailscale CLI parsing", () => {
     ["serve-tcp-8443.json", "foreign"],
     ["serve-funnel.json", "funnel"],
     ["serve-foreground.json", "foreign"],
+    ["serve-ours-plus-foreground.json", "foreign"],
+    ["serve-ours-bad-tcp.json", "foreign"],
+    ["serve-ours-no-tcp.json", "foreign"],
   ])("port use of %s is %s", (f, want) => {
     expect(portUse(fxj(f), { port: 8443, apiPort: API, dnsName: DNS })).toBe(want);
   });
@@ -270,6 +274,32 @@ describe("Start serving", () => {
     expect(r.calls().flat()).not.toContain("funnel");
   });
 
+  it.each([{ serveStatus: "fail" }, { serveStatus: "garbage" }])("refuses when the serve config can't be read (%o), and runs nothing", async (c) => {
+    const r = rig({ conf: c, serve: "serve-foreign-8443.json" });
+    expect(await r.setup.start()).toMatchObject({ ok: false, code: "unknown" });
+    expect(mutating(r.calls())).toEqual([]);
+    expect(r.ids).toEqual([]);
+  });
+
+  it.each<[string, Record<string, string>]>([
+    ["HTTPS off", { status: "status-https-off.json" }],
+    ["signed out", { status: "status-needs-login.json" }],
+    ["tailscale unreadable", { version: "garbage" }],
+  ])("refuses before steps 1-3 are done (%s), and runs nothing", async (_n, c) => {
+    const r = rig({ conf: c });
+    expect((await r.setup.start()).ok).toBe(false);
+    expect(mutating(r.calls())).toEqual([]);
+  });
+
+  it("an exact handler that appears while our command failed is not adopted as ours", async () => {
+    const r = rig({ conf: { set: "applied-then-denied" } });
+    expect(await r.setup.start()).toMatchObject({ ok: false, code: "operator" });
+    expect(existsSync(join(r.dataDir, SERVE_RECORD))).toBe(false);
+    expect(r.setup.state.serving).toBe("identical");
+    expect(await r.setup.stop()).toMatchObject({ ok: false, code: "not_ours" });
+    expect(mutating(r.calls())).toEqual([START]);
+  });
+
   it("detects the Linux operator error and shows the fix, without running it", async () => {
     const r = rig({ conf: { set: "operator" } });
     const res = await r.setup.start();
@@ -367,17 +397,42 @@ describe("serve identity", () => {
     r.conf({ status: "status-other-login.json" });
     await r.setup.check();
     expect(r.ids.at(-1)).toEqual({ host: HOST, login: "user-2@example" });
-    r.conf({ status: "status-needs-login.json" });
+    r.conf({ status: "status-tagged.json" });
     await r.setup.check();
     expect(r.ids.at(-1)).toBeNull();
   });
 
-  it("Funnel turning on for our handler clears the identity", async () => {
+  it.each<[string, Record<string, string>]>([
+    ["tailscaled down", { status: "daemon-down" }],
+    ["tailscale stopped", { status: "status-stopped.json" }],
+    ["signed out", { status: "status-needs-login.json" }],
+    ["HTTPS off", { status: "status-https-off.json" }],
+  ])("keeps the identity while %s (phones would otherwise be refused for good)", async (_n, c) => {
     const r = rig();
+    expect((await r.setup.start()).ok).toBe(true);
+    r.conf(c);
+    await r.setup.check();
+    r.conf({});
+    await r.setup.check();
+    expect(r.ids).toEqual([{ host: HOST, login: "user-1@example" }]);
+  });
+
+  it("the owner changing while blocked clears the identity", async () => {
+    const r = rig();
+    expect((await r.setup.start()).ok).toBe(true);
+    r.conf({ status: "status-other-login-https-off.json" }); // HTTPS off, and another owner
+    await r.setup.check();
+    expect(r.ids.at(-1)).toBeNull();
+  });
+
+  it("Funnel turning on for our handler keeps the identity and asks for a Funnel re-check", async () => {
+    let funnels = 0;
+    const r = rig({ onFunnel: () => (funnels += 1) });
     expect((await r.setup.start()).ok).toBe(true);
     r.serve({ ...(r.serveDoc() as object), AllowFunnel: { [HOST]: true } });
     expect((await r.setup.check()).serving).toBe("funnel");
-    expect(r.ids.at(-1)).toBeNull();
+    expect(funnels).toBe(1);
+    expect(r.ids).toEqual([{ host: HOST, login: "user-1@example" }]); // the Funnel guard refuses; 4004, not 4001
     // Changed outside herdr: no longer ours to remove, even once Funnel is off again.
     expect(await r.setup.stop()).toMatchObject({ ok: false, code: "funnel_on" });
     r.serve(fxj("serve-ours.json"));
@@ -391,6 +446,33 @@ describe("serve identity", () => {
     await r.setup.check();
     await r.setup.check();
     expect(r.ids).toHaveLength(1);
+  });
+
+  it("a periodic check whose callback throws is not an unhandled rejection", async () => {
+    const r = rig();
+    const s = new Setup({
+      run,
+      tailscale: r.bin,
+      apiPort: API,
+      dataDir: r.dataDir,
+      hasPhone: () => false,
+      onIdentity: () => {},
+      onState: (st) => {
+        if (st.checked_at !== null && !st.busy) throw new Error("subscriber failed");
+      },
+    });
+    setups.push(s);
+    const seen: unknown[] = [];
+    const onRej = (e: unknown) => seen.push(e);
+    process.on("unhandledRejection", onRej);
+    try {
+      s.startTimer();
+      await new Promise((res) => setTimeout(res, 1500));
+    } finally {
+      process.off("unhandledRejection", onRej);
+    }
+    expect(seen).toEqual([]);
+    expect(r.calls().length).toBeGreaterThan(0);
   });
 
   it("every published state matches the protocol schema", async () => {

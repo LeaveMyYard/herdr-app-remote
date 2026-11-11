@@ -28,7 +28,7 @@ export function targetPort(target: string): number | undefined {
 }
 
 /** `host:port` → port. */
-const hostPortPort = (hp: string): number | undefined => {
+export const hostPortPort = (hp: string): number | undefined => {
   const m = /:(\d+)$/.exec(hp);
   return m ? Number(m[1]) : undefined;
 };
@@ -55,7 +55,7 @@ function forwardedPorts(cfg: Obj, hostPort: string): number[] {
 }
 
 /** The serve configs in a status document: the main one and each foreground session's. */
-function configs(doc: Obj): Obj[] {
+export function configs(doc: Obj): Obj[] {
   const out = [doc];
   if (isObj(doc.Foreground)) for (const v of Object.values(doc.Foreground)) if (isObj(v)) out.push(v);
   return out;

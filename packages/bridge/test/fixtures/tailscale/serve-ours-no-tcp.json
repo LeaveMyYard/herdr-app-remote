@@ -1,0 +1,11 @@
+{
+  "Web": {
+    "desk-1.example-tailnet.ts.net:8443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:47391"
+        }
+      }
+    }
+  }
+}

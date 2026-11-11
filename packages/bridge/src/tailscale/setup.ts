@@ -8,6 +8,9 @@
 // - "Stop serving": `tailscale serve --https=<port> off`, only when the port holds exactly our handler AND our
 //   record says we created it. A config we did not create is never changed, whatever it looks like.
 //
+// Not atomic: the CLI has no compare-and-set, so a handler mounted between our read and our command (a process
+// spawn apart) would be replaced by Start or removed by Stop. Accepted for v1; every other path is checked.
+//
 // Funnel is never used: no command here enables it, start refuses while it is on for the port, and the bridge
 // refuses to serve while it is on (see `app/funnel.ts`).
 //
@@ -67,6 +70,8 @@ export interface SetupOptions {
   hasPhone: () => boolean;
   /** Called only when the identity changes (a change drops every live socket). */
   onIdentity: (id: ServeIdentity | null) => void;
+  /** Funnel was seen on the serve port: the bridge re-reads its Funnel verdict at once (closing with 4004). */
+  onFunnel?: () => void;
   /** Called with every new state. */
   onState?: (s: SetupTopic) => void;
   now?: () => number;
@@ -153,7 +158,10 @@ export class Setup {
       if (r.serving === "unknown") return this.fail(problem("unknown", "Could not read Tailscale's serve settings. Nothing was changed."), false);
       // r.serving === "off": the port is empty, so whatever appears there now is the handler we asked for.
       const res = await this.ts(["serve", "--bg", `--https=${this.o.port}`, serveTarget(this.o.apiPort)], this.o.serveTimeoutMs ?? SERVE_TIMEOUT_MS);
-      const after = await this.read({ adoptIfExact: true });
+      // Adopt the handler only if our command can have made it: it succeeded, or it was cut off (it may have
+      // applied the config first). After any other failure an exact handler is someone else's: never ours.
+      const mayHaveApplied = (res.code === 0 && !res.error) || res.error === "timeout";
+      const after = await this.read({ adoptIfExact: mayHaveApplied });
       if (after.serving === "ours") return { ok: true };
       return this.fail(this.trouble(res, "Tailscale did not serve herdr as expected. Nothing of yours was changed."), true);
     });
@@ -172,7 +180,7 @@ export class Setup {
       if (r.serving !== "ours") {
         if (r.serving === "unknown") return this.fail(problem("unknown", "Could not read Tailscale's serve settings. Nothing was changed."), false);
         // Funnel on the port means the config was changed outside herdr: it is no longer ours to remove.
-        return this.fail(r.serving === "funnel" ? this.funnelOn() : this.notOurs(), false);
+        return this.fail(r.serving === "funnel" ? this.funnelChanged() : this.notOurs(), false);
       }
       const res = await this.ts(["serve", `--https=${this.o.port}`, "off"], this.o.serveTimeoutMs ?? SERVE_TIMEOUT_MS);
       const after = await this.read();
@@ -190,10 +198,15 @@ export class Setup {
     const tick = () => {
       if (this.closed) return;
       const fast = this.current.step <= 4 && this.now() - this.poked < FAST_WINDOW_MS;
-      this.timer = setTimeout(() => void this.exclusive(() => this.read()).finally(tick), fast ? FAST_CHECK_MS : SLOW_CHECK_MS);
+      this.timer = setTimeout(() => void this.background().finally(tick), fast ? FAST_CHECK_MS : SLOW_CHECK_MS);
       this.timer.unref();
     };
-    void this.exclusive(() => this.read()).finally(tick);
+    void this.background().finally(tick);
+  }
+
+  /** A periodic check: a failure (a throwing callback) must not become an unhandled rejection. */
+  private background(): Promise<unknown> {
+    return this.exclusive(() => this.read()).catch(() => undefined);
   }
 
   close(): void {
@@ -231,6 +244,10 @@ export class Setup {
   private portTaken = () =>
     problem("port_taken", `Port ${this.o.port} already has a tailscale serve handler that herdr did not create. herdr will not change it.`);
   private funnelOn = () => problem("funnel_on", `Funnel is on for port ${this.o.port}. herdr never serves through Funnel, so it will not start while Funnel is on.`);
+  private funnelChanged = () =>
+    problem("funnel_on", `Funnel is on for port ${this.o.port}: the handler was changed outside herdr, so herdr will not remove it.`, {
+      fix: `tailscale serve --https=${this.o.port} off`,
+    });
   private notOurs = () =>
     problem("not_ours", `The handler on port ${this.o.port} was not created by herdr, so herdr will not remove it.`, {
       fix: `tailscale serve --https=${this.o.port} off`,
@@ -291,9 +308,10 @@ export class Setup {
     }
     // Our record means "created by us, unchanged since". Once the port reads empty or different, it means nothing:
     // a handler that later reads exact again was put there by someone else, and is never removed by us.
-    if (!r.unsure && !r.blocker && (r.serving === "off" || r.serving === "foreign" || r.serving === "funnel")) await this.forget().catch(() => {});
+    if (r.serving === "off" || r.serving === "foreign" || r.serving === "funnel") await this.forget().catch(() => {});
     this.last = r;
     if (r.serving === "ours" || r.serving === "identical") this.actionProblem = null;
+    if (r.serving === "funnel") this.o.onFunnel?.();
     this.decideIdentity(r);
     this.publish();
     return r;
@@ -388,12 +406,27 @@ export class Setup {
     return out;
   }
 
+  /**
+   * Clearing the identity drops every phone with 4001 and makes `/api/v1/me` answer 403, which the PWA takes as
+   * final ("no longer accepts this phone"). So it is cleared only on proof that the phones' access is gone for
+   * good: the port is empty or someone else's, the node became tagged, or its owner changed (then replaced).
+   * States in which serve can't deliver a request anyway, or that another guard already refuses, keep it:
+   * tailscaled down or stopped, signed out, MagicDNS/HTTPS off, and Funnel (the Funnel guard answers 503 and
+   * closes with 4004; see `onFunnel`). A read that can't tell keeps it too.
+   */
   private decideIdentity(r: Reading): void {
     let next: ServeIdentity | null;
     if (r.unsure) return; // proves nothing: keep what we had
-    if ((r.serving === "ours" || r.serving === "identical") && r.status?.dnsName && r.status.login && !r.blocker) {
-      next = { host: this.hostFor(r.status.dnsName), login: r.status.login };
-    } else next = null;
+    const login = r.status?.login ?? null;
+    if ((r.serving === "ours" || r.serving === "identical") && r.status?.dnsName && login && !r.blocker) {
+      next = { host: this.hostFor(r.status.dnsName), login };
+    } else if (r.blocker?.problem.code === "tagged") {
+      next = null;
+    } else if (r.blocker || r.serving === "funnel") {
+      // Keep, unless the owner is proven to be someone else now.
+      if (!this.identity || !login || login === this.identity.login) return;
+      next = null;
+    } else next = null; // off or foreign
     const same = next === this.identity || (next !== null && this.identity !== null && next.host === this.identity.host && next.login === this.identity.login);
     if (same) return;
     this.identity = next;

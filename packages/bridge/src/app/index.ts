@@ -86,6 +86,7 @@ export interface App {
   readonly funnel: FunnelVerdict | null;
   /** Re-reads the Funnel state now (also runs every `funnelCheckMs`). */
   checkFunnel(): Promise<FunnelVerdict>;
+  /** Only without setup (an explicit `serve` was given); throws while setup owns the identity. */
   setServe(serve: ServeIdentity | null): void;
   /** Tailscale setup and serve control; null when an explicit `serve` was given. Also published as topic `setup`. */
   readonly setup: Setup | null;
@@ -183,6 +184,7 @@ export async function startApp(o: AppOptions): Promise<App> {
           dataDir: join(o.appHome, "data/herdr-app-remote"),
           hasPhone: () => security.devices().some((d) => d.state === "approved"),
           onIdentity: (id) => security.setServe(id),
+          onFunnel: () => void recheck(),
           onState: (st) => {
             const r = bridgeApi.SetupTopic.safeParse(st);
             if (r.success) hub.publish("setup", r.data as Json);
@@ -250,7 +252,11 @@ export async function startApp(o: AppOptions): Promise<App> {
       return funnel;
     },
     checkFunnel: recheck,
-    setServe: (s) => security.setServe(s),
+    setServe: (s) => {
+      // With setup running, it owns the identity (and dedupes against it): a second writer would desync it.
+      if (setup) throw new Error("the serve identity comes from Tailscale setup");
+      security.setServe(s);
+    },
     setup,
     async stop() {
       if (stopped) return;

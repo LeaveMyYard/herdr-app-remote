@@ -18,7 +18,8 @@ const DEFAULTS = {
   version: 'version.txt', // a fixture name, or "garbage", or "fail"
   status: 'status-running.json', // a fixture name, or "daemon-down", or "garbage"
   serveStatus: 'state', // "state" prints serve.json; "fail", "garbage", "empty-output"
-  set: 'ok', // serve --bg: "ok", "operator", "disabled" (prints the enable URL and waits), "foreign" (applies another handler), "noop"
+  set: 'ok', // serve --bg: "ok", "operator", "disabled" (prints the enable URL and waits), "foreign" (applies another handler), "noop",
+  //            "applied-then-denied" (someone else's identical handler appears, and this call fails)
   off: 'ok', // serve ... off: "ok", "operator", "noop"
 };
 appendFileSync(join(dir, 'calls.log'), JSON.stringify(args) + '\n');
@@ -50,6 +51,10 @@ if (same(args, ['version'])) {
   const port = args[2].slice('--https='.length);
   const hp = `${dnsName()}:${port}`;
   if (conf.set === 'operator') err(fx('err-operator.txt'));
+  if (conf.set === 'applied-then-denied') {
+    save({ TCP: { [port]: { HTTPS: true } }, Web: { [hp]: { Handlers: { '/': { Proxy: args[3] } } } } });
+    err(fx('err-operator.txt'));
+  }
   if (conf.set === 'disabled') {
     out(fx('err-serve-disabled.txt'));
     setInterval(() => {}, 1000); // waits for the tailnet, like the real CLI
@@ -67,10 +72,17 @@ if (same(args, ['version'])) {
   const port = args[1].slice('--https='.length);
   if (conf.off === 'operator') err(fx('err-operator.txt'));
   if (conf.off !== 'noop') {
+    // Like the real CLI: removes the `/` mount of this node's name on the port, then the web and TCP entries
+    // (and the Funnel flag) once nothing is left on them.
     const s = state();
-    if (s.TCP) delete s.TCP[port];
-    for (const k of Object.keys(s.Web ?? {})) if (k.endsWith(`:${port}`)) delete s.Web[k];
-    for (const k of Object.keys(s.AllowFunnel ?? {})) if (k.endsWith(`:${port}`)) delete s.AllowFunnel[k];
+    const hp = `${dnsName()}:${port}`;
+    const web = s.Web?.[hp];
+    if (web?.Handlers) delete web.Handlers['/'];
+    if (web && Object.keys(web.Handlers ?? {}).length === 0) {
+      delete s.Web[hp];
+      if (s.AllowFunnel) delete s.AllowFunnel[hp];
+    }
+    if (s.TCP && !Object.keys(s.Web ?? {}).some((k) => k.endsWith(`:${port}`))) delete s.TCP[port];
     for (const k of ['TCP', 'Web', 'AllowFunnel']) if (s[k] && Object.keys(s[k]).length === 0) delete s[k];
     save(s);
   }

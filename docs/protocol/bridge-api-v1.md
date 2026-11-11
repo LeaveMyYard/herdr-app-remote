@@ -131,12 +131,14 @@ Source: `packages/bridge/src/tailscale/` (`Setup`). Schema: `SetupTopic` in `pac
 
 `serving` says how the port is configured: `ours` (our handler, created by this bridge), `identical` (exactly our handler, created by someone else: used, never removed), `off`, `foreign`, `funnel` or `unknown`. "Exactly our handler" means `TCP[port] == {HTTPS: true}`, one web entry `<this node's DNS name>:<port>` whose only handler is `/` with `Proxy: http://127.0.0.1:47391`, no Funnel and no foreground session on the port.
 
-Checks only read: `tailscale version`, `status --json` and `serve status --json`, every 5 s for 10 minutes after the last explicit check, start or stop while setup is not complete, every 30 s otherwise. A check that fails or prints something unreadable proves nothing and keeps the last identity.
+Checks only read: `tailscale version`, `status --json` and `serve status --json`, every 5 s for 10 minutes after the last explicit check, start or stop while steps 1 to 4 are not all done, every 30 s otherwise (step 5 waits on an approval, which updates it at once). A check that fails or prints something unreadable proves nothing and keeps the last identity.
 
 **Start serving** (`setup.start()`):
 - refuses unless steps 1 to 3 are done and the port is `off`: any other handler on the port, foreground sessions included, is `port_taken`; Funnel on it is `funnel_on`. Nothing is run then;
 - runs `tailscale serve --bg --https=8443 http://127.0.0.1:47391` (20 s limit: when serve is not enabled for the tailnet, the CLI prints an enable link and waits; it is cut off, and the link is shown as `serve_disabled`);
-- reads the config back: only an exact handler is recorded as ours, in `data/herdr-app-remote/serve.json` (0600). Anything else is `failed` and left alone.
+- reads the config back: only an exact handler, and only when the command succeeded or was cut off by the time limit, is recorded as ours, in `data/herdr-app-remote/serve.json` (0600). Anything else is `failed` and left alone.
+
+**Not atomic.** The CLI has no compare-and-set: a handler mounted on the port between the bridge's read and its command (a process spawn apart) would be replaced by Start, or removed by Stop. This window is accepted for v1; nothing else can make the bridge change a config it did not create.
 
 **Stop serving** (`setup.stop()`) runs `tailscale serve --https=8443 off` only while the port is `ours`: our record exists and the port still reads exactly our handler. The record is dropped as soon as a check finds the port empty, different or funneled, so a handler that later reads exact again is someone else's and is never removed. Handlers on other ports are never touched.
 
@@ -144,7 +146,7 @@ Checks only read: `tailscale version`, `status --json` and `serve status --json`
 
 **Funnel** is never used: no command the bridge runs enables it, start refuses while it is on, and the API refuses while it is on (see "Listener and Funnel").
 
-**Serve identity.** While the port is `ours` or `identical` on a signed-in, untagged node, the bridge's serve identity (`Security.setServe`) is `{host: "<DNS name>:8443", login: <owner login>}`: the `Host` every request must carry and the `Tailscale-User-Login` it must match. When a check proves otherwise (stopped, not served, foreign, Funnel, signed out, another owner) it is cleared or replaced, which drops every live socket (`4001`) and the current pairing code. It changes only when the value changes. A bridge started with an explicit `serve` (tests, rigs) runs no setup.
+**Serve identity.** While the port is `ours` or `identical` on a signed-in, untagged node, the bridge's serve identity (`Security.setServe`) is `{host: "<DNS name>:8443", login: <owner login>}`: the `Host` every request must carry and the `Tailscale-User-Login` it must match. It changes only when the value changes; a change drops every live socket (`4001`) and the current pairing code, and while it is unset `/api/v1/me` answers 403, which the PWA treats as final. So it is cleared only on proof that access is gone for good: the port is empty or someone else's, or the node is tagged; an owner change replaces it. States in which serve can't deliver a request anyway keep it: tailscaled down or stopped, signed out, MagicDNS or HTTPS off, a read that can't tell, and Funnel (Setup seeing Funnel makes the bridge re-read its Funnel verdict at once, so phones get `503 funnel` and close `4004`, and serve again once it is off). A bridge started with an explicit `serve` (tests, rigs) runs no setup, and `App.setServe` throws while setup runs.
 
 The desktop panel reaches `check`, `start` and `stop` through the mod link (S13's panel channel); until that is wired they are methods on the bridge's `App.setup`.
 

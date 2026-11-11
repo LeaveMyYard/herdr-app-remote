@@ -4,6 +4,8 @@
 // Nothing a parser returns carries CLI output verbatim, except the fields the setup screen shows by design
 // (tailnet name, host name, DNS name, owner login) and an enable URL that is checked to be a Tailscale admin link.
 
+import { configs, hostPortPort } from "../app/funnel.js";
+
 /** `tailscale serve --bg --https=<port> <target>` exists since 1.52 (serve v2). */
 export const MIN_TAILSCALE = "1.52.0";
 
@@ -88,17 +90,8 @@ export const serveTarget = (apiPort: number) => `http://127.0.0.1:${apiPort}`;
  */
 export type PortUse = "off" | "exact" | "funnel" | "foreign";
 
-/** The configs of a status document: the main one, then each foreground session's. */
-function configs(doc: Obj): Obj[] {
-  const out = [doc];
-  if (isObj(doc.Foreground)) for (const v of Object.values(doc.Foreground)) if (isObj(v)) out.push(v);
-  return out;
-}
-
-const portOf = (hostPort: string): number | undefined => {
-  const m = /:(\d+)$/.exec(hostPort);
-  return m ? Number(m[1]) : undefined;
-};
+// The main config first, then each foreground session's (shared with the Funnel check).
+const portOf = hostPortPort;
 
 /** Everything a single config holds for `port`. */
 function onPort(cfg: Obj, port: number): { tcp: unknown; web: [string, unknown][]; funnel: boolean } {

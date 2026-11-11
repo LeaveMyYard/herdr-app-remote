@@ -118,6 +118,34 @@ describe("startApp with Tailscale setup", () => {
     expect(setupTopic()).toMatchObject({ serving: "off", url: null, login: null, can_start: true });
   });
 
+  it("Funnel seen first by a setup check still refuses with 503 funnel and closes 4004, then serves again", async () => {
+    expect((await app!.setup!.start()).ok).toBe(true);
+    const { code } = app!.security.issueCode();
+    const r = await http("POST", "/api/v1/pair", POST, JSON.stringify({ code, name: "Phone 1" }));
+    app!.security.approve((JSON.parse(r.body) as { device: { id: string } }).device.id);
+    const sc = r.headers["set-cookie"];
+    const cookie = (Array.isArray(sc) ? sc[0]! : sc!).split(";")[0]!;
+    const ws = new WebSocket(`ws://127.0.0.1:${app!.port}/api/v1/ws`, [bridgeApi.WS_PROTOCOL], { headers: { ...GET, Origin: ORIGIN, Cookie: cookie } });
+    socks.push(ws);
+    await new Promise((res, rej) => ws.once("open", res).once("error", rej));
+    const closed = new Promise<number>((res) => ws.once("close", (c) => res(c)));
+    const cfgPath = join(dir, "serve.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(cfgPath, JSON.stringify({ ...cfg, AllowFunnel: { [HOST]: true } }));
+    await app!.setup!.check(); // setup sees Funnel before the 60 s Funnel timer
+    expect(await closed).toBe(4004);
+    await until(() => app!.funnel?.state === "on");
+    expect((await http("GET", "/healthz", { Host: "127.0.0.1" })).status).toBe(503);
+    writeFileSync(cfgPath, JSON.stringify(cfg));
+    await app!.checkFunnel();
+    await app!.setup!.check();
+    expect((await http("GET", "/api/v1/me", { ...GET, Cookie: cookie })).status).toBe(200); // the phone was not revoked
+  });
+
+  it("App.setServe refuses while setup owns the identity", () => {
+    expect(() => app!.setServe({ host: HOST, login: OWNER })).toThrow(/setup/);
+  });
+
   it("an explicit serve identity runs no setup", async () => {
     await app!.stop();
     app = await startApp({ appHome: join(dir, "home2"), link, port: 0, serve: { host: HOST, login: OWNER }, tailscale: join(dir, "tailscale"), funnelCheckMs: 60_000, binaries: { hc: "/nonexistent/s14/hc", inbox: "/nonexistent/s14/inbox", usagebar: "/nonexistent/s14/usagebar" } });
