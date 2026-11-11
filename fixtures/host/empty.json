@@ -1,0 +1,10 @@
+{
+  "spaces": [],
+  "agents": [],
+  "terminals": [],
+  "panes": [],
+  "focused": { "space_id": null, "pane_id": null, "agent_id": null },
+  "theme": { "name": "Theme 1", "mode": "light" },
+  "layout_name": "herdr-remote",
+  "shared": { "panorama.feed.owner": null }
+}

@@ -1,0 +1,11 @@
+{
+  "type": "snap",
+  "topic": "plugins",
+  "epoch": "epoch-1",
+  "seq": 1,
+  "data": {
+    "panorama": {
+      "state": "ready"
+    }
+  }
+}

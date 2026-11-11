@@ -1,0 +1,1 @@
+{ "type": "hello", "api": 1, "resume": { "epoch": "epoch-1", "seqs": { "host": 42, "plugins": 7 } } }

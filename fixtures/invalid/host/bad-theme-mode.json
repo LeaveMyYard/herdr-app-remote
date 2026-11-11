@@ -1,0 +1,80 @@
+{
+  "spaces": [
+    {
+      "id": "space-1",
+      "name": "Project Alpha",
+      "focused": true
+    },
+    {
+      "id": "space-2",
+      "name": "Project Beta",
+      "focused": false
+    }
+  ],
+  "agents": [
+    {
+      "id": "agent-1",
+      "name": "Agent 1",
+      "harness": "claude",
+      "state": "working",
+      "space_id": "space-1",
+      "terminal_id": "term-1"
+    },
+    {
+      "id": "agent-2",
+      "name": "Agent 2",
+      "harness": "codex",
+      "state": "waiting",
+      "space_id": "space-2",
+      "terminal_id": "term-2"
+    }
+  ],
+  "terminals": [
+    {
+      "id": "term-1",
+      "title": "Agent 1",
+      "space_id": "space-1",
+      "cols": 120,
+      "rows": 40
+    },
+    {
+      "id": "term-2",
+      "title": "Agent 2",
+      "space_id": "space-2",
+      "cols": 100,
+      "rows": 30
+    }
+  ],
+  "panes": [
+    {
+      "id": "pane-1",
+      "space_id": "space-1",
+      "terminal_id": "term-1",
+      "kind": "terminal"
+    },
+    {
+      "id": "pane-2",
+      "space_id": "space-2",
+      "terminal_id": "term-2",
+      "kind": "terminal"
+    },
+    {
+      "id": "pane-3",
+      "space_id": "space-1",
+      "kind": "mod"
+    }
+  ],
+  "focused": {
+    "space_id": "space-1",
+    "pane_id": "pane-1",
+    "agent_id": "agent-1"
+  },
+  "theme": {
+    "name": "Theme 1",
+    "mode": "sepia"
+  },
+  "layout_name": "herdr-remote",
+  "shared": {
+    "panorama.feed.owner": "owner-1"
+  }
+}

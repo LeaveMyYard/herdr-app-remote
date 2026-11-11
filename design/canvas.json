@@ -1,0 +1,161 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-10T21:05:00Z"
+  },
+  "title": "herdr-web mobile",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Desktop · Panorama layout (same as herdr-app)"
+    },
+    "DesktopInbox.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Desktop · Inbox dialog"
+    },
+    "PhoneAgents.dc.html": {
+      "x": 0,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Agents (Panorama)"
+    },
+    "PhoneSwarm.dc.html": {
+      "x": 470,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Swarm tree (tap to expand)",
+      "is_interactive": true
+    },
+    "PhonePeek.dc.html": {
+      "x": 940,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Peek"
+    },
+    "PhoneChat.dc.html": {
+      "x": 1410,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Chat (any agent)"
+    },
+    "PhoneInbox.dc.html": {
+      "x": 1880,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Inbox list"
+    },
+    "PhoneQuestion.dc.html": {
+      "x": 2350,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Question"
+    },
+    "PhoneReview.dc.html": {
+      "x": 2820,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Review & submit"
+    },
+    "PhoneUsage.dc.html": {
+      "x": 3290,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Agent usage"
+    },
+    "DesktopRemote.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Desktop · Remote panel (tabs)",
+      "is_interactive": true
+    },
+    "PhoneMissing.dc.html": {
+      "x": 3760,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Tab without its plugin"
+    },
+    "PhoneAgentsBasic.dc.html": {
+      "x": 4230,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Agents without Panorama (basic)"
+    },
+    "DesktopSetup.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Desktop · Remote setup (Tailscale checked automatically)"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "DesktopInbox.dc.html",
+    "DesktopRemote.dc.html",
+    "DesktopSetup.dc.html",
+    "PhoneAgents.dc.html",
+    "PhoneSwarm.dc.html",
+    "PhonePeek.dc.html",
+    "PhoneChat.dc.html",
+    "PhoneInbox.dc.html",
+    "PhoneQuestion.dc.html",
+    "PhoneReview.dc.html",
+    "PhoneUsage.dc.html",
+    "PhoneMissing.dc.html",
+    "PhoneAgentsBasic.dc.html"
+  ],
+  "notes": {
+    "t-desktop": {
+      "x": 0,
+      "y": -300,
+      "text": "Desktop width: identical to herdr-app",
+      "kind": "title1",
+      "maxW": 6000
+    },
+    "t-phone": {
+      "x": 0,
+      "y": 1000,
+      "text": "iPhone PWA: the same mods, compact layout",
+      "kind": "title1",
+      "maxW": 4620
+    },
+    "n-source": {
+      "x": 4720,
+      "y": 1300,
+      "w": 320,
+      "text": "Standalone web app (React PWA). Behaviour and data come from the plugins: Panorama's feed, herdr-inbox's app-feed and app-commands protocols, herdr-app's state and commands. Tabs whose plugin is missing or too old show what to install, here and in herdr-app's Remote panel.",
+      "fill": "teal"
+    },
+    "n-data": {
+      "x": 4720,
+      "y": 1760,
+      "w": 320,
+      "text": "All names and numbers are fake sample data.",
+      "fill": "gray"
+    }
+  },
+  "designSystems": []
+}
