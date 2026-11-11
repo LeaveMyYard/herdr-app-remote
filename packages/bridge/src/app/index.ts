@@ -13,6 +13,7 @@ import { InboxTopicDriver } from "../inbox/topic.js";
 import { Hub } from "../hub.js";
 import { LinkHostSource } from "../link/host-source.js";
 import type { LinkServer } from "../link/server.js";
+import { PanelDriver } from "../panel/driver.js";
 import { PanoramaTopicDriver } from "../panorama/topic.js";
 import { PluginsTopicDriver } from "../plugins/topic.js";
 import { Security, type DeviceView, type ServeIdentity } from "../security/security.js";
@@ -57,6 +58,8 @@ export interface AppOptions {
   actors?: readonly Actor[];
   /** A device asked to pair: the desktop panel and a toast ask "Approve Phone 1?" (S13 wires it). */
   onPending?: (d: DeviceView) => void;
+  /** Extra Status checks and panel operations (S14). */
+  panel?: Pick<import("../panel/driver.js").PanelDriverOptions, "extraChecks" | "extraAct">;
   log?: (e: AppLogEvent) => void;
 }
 
@@ -101,11 +104,17 @@ export async function startApp(o: AppOptions): Promise<App> {
     (_c, kind, args) => inboxDriver?.act(kind, args),
     navigateActor(o.link),
   ];
+  // The desktop panel (S13) hears of security changes and new pairing requests through these two.
+  const panelRef: { current?: PanelDriver } = {};
   const security = new Security({
     dataDir: join(o.appHome, "data/herdr-app-remote"),
     serve: o.serve ?? null,
     inner: routeActs(actors),
-    ...(o.onPending ? { onPending: o.onPending } : {}),
+    onChange: () => panelRef.current?.changed(),
+    onPending: (d) => {
+      o.link.notify("info", `Approve ${d.name}? Open the Remote panel.`, "link", "open_panel");
+      o.onPending?.(d);
+    },
   });
   // null: not checked yet. Serving needs an `off` verdict; anything else refuses requests and acts alike.
   let funnel: FunnelVerdict | null = null;
@@ -122,6 +131,14 @@ export async function startApp(o: AppOptions): Promise<App> {
   const chat = new ChatTopicDriver({ hub, run, binaries });
   const inbox = (inboxDriver = new InboxTopicDriver({ hub, appHome: o.appHome, run, binaries }));
   usage = new UsageTopicDriver({ hub, run, binaries, appHome: o.appHome, ...(o.home !== undefined ? { home: o.home } : {}) });
+
+  const panel = (panelRef.current = new PanelDriver({
+    link: o.link,
+    security,
+    hub,
+    funnel: () => funnel?.state ?? null,
+    ...(o.panel ?? {}),
+  }));
 
   const guard = (req: IncomingMessage, kind: "http" | "ws"): GuardVerdict => {
     if (funnel === null) return { allow: false, status: 503, reason: "starting" };
@@ -168,6 +185,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     usage.start();
     chat.start();
   } catch (e) {
+    panel.stop();
     // Each stop is safe on a driver that never started.
     chat.stop();
     usage.stop();
@@ -201,6 +219,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     async stop() {
       if (stopped) return;
       stopped = true;
+      panel.stop();
       if (timer) clearTimeout(timer);
       usage?.stop();
       chat.stop();

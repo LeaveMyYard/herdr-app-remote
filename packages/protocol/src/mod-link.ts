@@ -40,7 +40,62 @@ export type Result = z.infer<typeof Result>;
 export const Pong = z.object({ type: z.literal("pong") });
 export type Pong = z.infer<typeof Pong>;
 
-export const ModToBridge = z.union([Hello, State, Result, Pong]);
+// ---- panel (the desktop Remote panel, copy "panel" only) ----
+
+/** The capabilities the panel can switch (all five; `view` and the rest are desktop-only decisions). */
+export const PanelCap = z.enum(["view", "inbox.answer", "navigate", "terminal.input", "push"]);
+export type PanelCap = z.infer<typeof PanelCap>;
+
+const DeviceId = z.string().regex(/^d-[0-9a-f]{16}$/);
+
+/**
+ * What the panel may ask the bridge to do: the desktop-only operations of the security layer, nothing else
+ * (no `run`, no exec). Exactly these kinds with exactly these argument shapes; extra keys are refused. A
+ * `panel_act` from the `link` copy is dropped. `minutes` (1 to 10080) is how long `terminal.input` stays on;
+ * the bridge turns it into an expiry on its own clock, so none means no expiry.
+ */
+export const PANEL_ACT_ARGS = {
+  "device.approve": z.object({ id: DeviceId }).strict(),
+  /** Refuses a pending request or revokes an approved device. */
+  "device.revoke": z.object({ id: DeviceId }).strict(),
+  "device.cap": z
+    .object({ id: DeviceId, cap: PanelCap, on: z.boolean(), minutes: z.number().int().min(1).max(10_080).optional() })
+    .strict()
+    .refine((a) => a.minutes === undefined || (a.cap === "terminal.input" && a.on), { message: "minutes only applies when turning terminal.input on" }),
+  "remote.pause": z.object({}).strict(),
+  "remote.resume": z.object({}).strict(),
+  /** Shows a fresh pairing code (QR) for adding a phone. */
+  "pair.code": z.object({}).strict(),
+  /** Hides the pairing code from the panel (the code itself stays valid until it expires or is used). */
+  "pair.hide": z.object({}).strict(),
+} as const;
+export type PanelActName = keyof typeof PANEL_ACT_ARGS;
+
+export const PanelAct = z
+  .object({
+    type: z.literal("panel_act"),
+    id: z.string().min(1).max(128),
+    kind: z.string().min(1).max(64),
+    args: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type PanelAct = z.infer<typeof PanelAct>;
+
+/** Why the bridge refused a panel act before doing anything. */
+export type PanelActRefusal = "unsupported_action" | "bad_args";
+
+export function checkPanelAct(
+  kind: unknown,
+  args: unknown,
+): { ok: true; kind: PanelActName; args: Record<string, unknown> } | { ok: false; error: PanelActRefusal } {
+  if (typeof kind !== "string" || !Object.prototype.hasOwnProperty.call(PANEL_ACT_ARGS, kind)) {
+    return { ok: false, error: "unsupported_action" };
+  }
+  const parsed = PANEL_ACT_ARGS[kind as PanelActName].safeParse(args);
+  return parsed.success ? { ok: true, kind: kind as PanelActName, args: parsed.data as Record<string, unknown> } : { ok: false, error: "bad_args" };
+}
+
+export const ModToBridge = z.union([Hello, State, Result, Pong, PanelAct]);
 export type ModToBridge = z.infer<typeof ModToBridge>;
 
 // ---- bridge -> mod ----
@@ -58,13 +113,98 @@ export const Notify = z.object({
   type: z.literal("notify"),
   level: z.enum(["info", "warn", "error"]),
   message: z.string(),
+  /** `open_panel`: clicking the toast shows the Remote panel (the mod's own local `open` command). */
+  action: z.literal("open_panel").optional(),
 });
 export type Notify = z.infer<typeof Notify>;
 
 export const Ping = z.object({ type: z.literal("ping") });
 export type Ping = z.infer<typeof Ping>;
 
-export const BridgeToMod = z.discriminatedUnion("type", [Run, Notify, Ping]);
+// ---- panel view (bridge -> the panel copy) ----
+
+const Short = (max: number) => z.string().max(max);
+const Epoch = z.number().int().nonnegative();
+
+export const PanelCheck = z
+  .object({
+    id: z.string().min(1).max(32),
+    label: Short(80),
+    detail: Short(160),
+    /** `ok` a green check, `warn` amber, `bad` red, `off` neutral (not done yet). */
+    state: z.enum(["ok", "warn", "bad", "off"]),
+  })
+  .strict();
+export type PanelCheck = z.infer<typeof PanelCheck>;
+
+export const PanelDevice = z
+  .object({
+    id: DeviceId,
+    name: Short(32),
+    login: Short(120),
+    state: z.enum(["pending", "approved"]),
+    /** Effective capabilities right now (an expired `terminal.input` reads false). */
+    caps: z.object({ view: z.boolean(), "inbox.answer": z.boolean(), navigate: z.boolean(), "terminal.input": z.boolean(), push: z.boolean() }).strict(),
+    terminal_input_until: Epoch.nullable(),
+    created_at: Epoch,
+    last_seen: Epoch.nullable(),
+    /** Open connections right now. */
+    live: z.number().int().nonnegative(),
+  })
+  .strict();
+export type PanelDevice = z.infer<typeof PanelDevice>;
+
+export const PanelPlugin = z
+  .object({
+    id: z.string().min(1).max(32),
+    name: Short(40),
+    state: z.enum(["ready", "missing", "too_old", "broken", "stale", "not_running"]),
+    /** The phone tabs it powers, e.g. "Agents (rich), Swarm, Peek". */
+    powers: Short(120),
+    detail: Short(160).optional(),
+  })
+  .strict();
+export type PanelPlugin = z.infer<typeof PanelPlugin>;
+
+export const PanelActivity = z.object({ ts: Epoch, text: Short(200) }).strict();
+export type PanelActivity = z.infer<typeof PanelActivity>;
+
+/** A pairing code on screen: the URL to copy and the QR as rows of "0"/"1" modules (dark = 1, quiet zone included). */
+export const PanelPairing = z
+  .object({ url: Short(300), expires_at: Epoch, qr: z.array(z.string().regex(/^[01]{1,200}$/)).min(1).max(200) })
+  .strict();
+export type PanelPairing = z.infer<typeof PanelPairing>;
+
+/**
+ * Everything the Remote panel shows (a full snapshot each time). Text fields are bounded and the mod draws
+ * them as text only. No tokens, cookies or token hashes are ever in it.
+ */
+export const PanelView = z
+  .object({
+    /** The header badge: `serving`, `paused`, `setup` (not serving yet) or `blocked` (Funnel on). */
+    status: z.enum(["serving", "paused", "setup", "blocked"]),
+    /** `https://<serve host>`: what the phone opens; null until serve is set up. */
+    url: Short(300).nullable(),
+    checks: z.array(PanelCheck).max(16),
+    devices: z.array(PanelDevice).max(64),
+    plugins: z.array(PanelPlugin).max(16),
+    /** Newest first. */
+    activity: z.array(PanelActivity).max(100),
+    pairing: PanelPairing.nullable(),
+  })
+  .strict();
+export type PanelView = z.infer<typeof PanelView>;
+
+export const Panel = z.object({ type: z.literal("panel"), seq: z.number().int().nonnegative(), view: PanelView }).strict();
+export type Panel = z.infer<typeof Panel>;
+
+/** Answer to a `panel_act` with the same `id`; `code` is set when `ok` is false. */
+export const PanelRes = z
+  .object({ type: z.literal("panel_res"), id: z.string().min(1).max(128), ok: z.boolean(), code: Short(40).optional() })
+  .strict();
+export type PanelRes = z.infer<typeof PanelRes>;
+
+export const BridgeToMod = z.discriminatedUnion("type", [Run, Notify, Ping, Panel, PanelRes]);
 export type BridgeToMod = z.infer<typeof BridgeToMod>;
 
 /** Reconnect backoff bounds for the mod, in milliseconds. */

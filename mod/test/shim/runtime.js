@@ -25,6 +25,7 @@ export class Mounted {
     const guard = () => { if (self.stopped) throw new Error('cx used after close'); };
     return {
       notify: () => { guard(); self.render(); },
+      write_to_clipboard: (text) => { guard(); self.clipboard = text; },
       spawn: (task) => {
         guard();
         Promise.resolve().then(() => task(self.cx())).catch((e) => { if (!self.stopped) self.error = e; });

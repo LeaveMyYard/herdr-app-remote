@@ -20,3 +20,4 @@ export { ChatTopicDriver, CHAT_PREFIX, CHAT_INTERVAL_MS, CHAT_LINES, MAX_ACTIVE_
 export { parseAnsi, type ParsedAnsi, type ParseOptions } from "./chat/ansi.js";
 export * from "./daemon/index.js";
 export { startApp, DEFAULT_API_PORT, FUNNEL_CHECK_MS, FUNNEL_RETRY_MS, CLOSE_FUNNEL, BRIDGE_VERSION, routeActs, navigateActor, fromRun, checkFunnel, funnelFromStatus, targetPort, SERVE_PORT, FUNNEL_TIMEOUT_MS, type App, type AppOptions, type AppLogEvent, type Actor, type FunnelVerdict } from "./app/index.js";
+export { PanelDriver, duration, type PanelDriverOptions } from "./panel/driver.js";

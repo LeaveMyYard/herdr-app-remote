@@ -53,6 +53,7 @@ There is no reply to `hello`; the first `ping` (or `run`/`notify`) is the first 
 | `state` | `seq`, `host: HostState` | Sent from `render()` (and a 5 s recheck), deduplicated by content (the serialized `host` is compared with the last one sent on this connection), at most once per 100 ms, with at most one write in flight: a burst coalesces to its latest snapshot. |
 | `result` | `id`, `ok`, `error?` | Answer to a `run` with the same `id`. `error` only when `ok` is false: `not_allowed` or `bad_args` when the mod refused it (nothing ran), `run_failed: <message>` when herdr's `run()` threw. |
 | `pong` | | Reply to `ping`. |
+| `panel_act` | `id`, `kind`, `args` | **`panel` copy only** (from the `link` copy it is dropped and logged). A desktop-only operation for the Remote panel; see "Panel" below. `id` is 1 to 128 chars, `kind` at most 64. |
 
 `HostState` (shared with the bridge-api `host` topic):
 
@@ -72,8 +73,29 @@ How the mod fills it from herdr-app (`mod/herdr-app-remote/host.js`): agent and 
 | type | fields | notes |
 |---|---|---|
 | `run` | `id`, `name`, `args` | `name` and `args` must pass the allowlist below. The mod checks it again itself and answers with `result`. A `run` without a string `id` of 1 to 128 chars is ignored. |
-| `notify` | `level: info\|warn\|error`, `message` | Shown by the mod as a toast titled "Remote" (`warn` is herdr's `warning`); at most 500 chars. |
+| `notify` | `level: info\|warn\|error`, `message`, `action?: "open_panel"` | Shown by the mod as a toast titled "Remote" (`warn` is herdr's `warning`); at most 500 chars. `open_panel` makes a click on the toast run the mod's own `open` command (shows the Remote panel); it is the only action there is. The bridge uses it for "Approve Phone 1?". |
+| `panel` | `seq`, `view: PanelView` | Sent to the `panel` copy only: on its `hello`, and whenever the view changes (a security change at once, otherwise a 2 s recheck), deduplicated by content. A full snapshot. |
+| `panel_res` | `id`, `ok`, `code?` | Answer to a `panel_act` with the same `id`. `code` when `ok` is false: `unsupported_action` and `bad_args` (refused, nothing done), `not_found`, `serve_not_configured`, `paused`, `unavailable`, `failed`. |
 | `ping` | | Keep-alive, every 15 s. The mod answers with `pong`. A copy that sends nothing for 37.5 s is disconnected. |
+
+### Panel
+
+The desktop Remote panel (S13) is the `panel` copy (layout props `role: "panel"`). It never sends `state`. The bridge pushes it a `PanelView` and it asks for desktop-only operations. Schemas: `PanelView`, `PanelAct`, `PANEL_ACT_ARGS` in `packages/protocol/src/mod-link.ts`; driver: `packages/bridge/src/panel/driver.ts`.
+
+`PanelView` has `status` (`serving`, `paused`, `setup`, `blocked`), `url`, `checks[]` (`{id, label, detail, state: ok|warn|bad|off}`), `devices[]` (name, login, `pending|approved`, the five effective capabilities, `terminal_input_until`, `last_seen`, `live`), `plugins[]` (state and the phone tabs each powers), `activity[]` (newest first, 100 at most) and `pairing` (the URL and the QR as rows of `0`/`1`, present while a code is valid). Every text is bounded, drawn as text only, and the view never carries tokens, cookies or token hashes. The mod checks it again (`sanitize` in `mod/herdr-app-remote/panel.js`) and drops a device whose id is not `d-` plus 16 hex digits.
+
+`panel_act` kinds (strict: each takes exactly these keys, anything else is `unsupported_action` or `bad_args` and nothing happens):
+
+| `kind` | `args` |
+|---|---|
+| `device.approve` | `{id}` |
+| `device.revoke` | `{id}` (refuses a pending request, revokes an approved device; its sockets drop now) |
+| `device.cap` | `{id, cap: view\|inbox.answer\|navigate\|terminal.input\|push, on, minutes?}`. `minutes` (1 to 10080) only with `cap: terminal.input` and `on: true`; the bridge turns it into an expiry on its own clock, none means no expiry. |
+| `remote.pause`, `remote.resume` | `{}` |
+| `pair.code` | `{}`: a fresh pairing code, shown as a QR in the next view |
+| `pair.hide` | `{}`: hides it from the panel |
+
+These are the same operations the security layer offers the desktop; they are not `act` kinds, so no phone can reach them, and they run no herdr command. The run allowlist below is unchanged. Capabilities (above all `terminal.input`) can only be switched here. The panel trusts the same runtime token as the link; any local process with that token (the same user) can send `panel_act`, as it could already edit `devices.json`.
 
 ### Run allowlist
 
