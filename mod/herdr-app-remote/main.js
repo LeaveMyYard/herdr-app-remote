@@ -1,8 +1,10 @@
 // herdr-app-remote: one mod, two copies.
-// - role "link" (the default): a 1 px block in an always-shown column. Mirrors host state to the
+// - role "link": a 1 px block in an always-shown column. Mirrors host state to the
 //   bridge and runs the allowlisted commands it sends back.
 // - role "panel": the Remote panel in panel-body (its views land in S13); it links as copy
 //   "panel" and never sends state.
+// - any other props (mod.open, tab.new {mod}, a hand-made block): inert, never connects, so a stray
+//   copy can't fight the real link for its slot.
 import { View, div } from 'gpui-kit';
 import { agents, focused, panes, settings, shared, spaces, terminals, updates } from 'herdr';
 import { buildHost } from './host.js';
@@ -41,7 +43,9 @@ export function snapshot(now = Date.now()) {
 
 export default class Remote extends View {
   init(props, cx) {
-    this.role = props?.role === 'panel' ? 'panel' : 'link';
+    const role = props?.role;
+    this.role = role === 'link' || role === 'panel' ? role : null;
+    if (!this.role) return;
     this.link = new Link({ copy: this.role, hello: () => ({ layout: layoutName(), app: { version: appVersion() } }) });
     if (this.role === 'link') {
       this.offer();
@@ -51,6 +55,7 @@ export default class Remote extends View {
   }
 
   offer() {
+    if (!this.link) return;
     try {
       this.link.offer(snapshot());
     } catch (e) {
@@ -63,10 +68,11 @@ export default class Remote extends View {
       this.offer();
       return div().id('remote-link').size_full();
     }
-    return div().id('remote-panel').size_full().p(12).text_size(13).child('Remote');
+    if (this.role === 'panel') return div().id('remote-panel').size_full().p(12).text_size(13).child('Remote');
+    return div().id('remote-inert').size_full();
   }
 
   async close() {
-    this.link.close();
+    this.link?.close();
   }
 }

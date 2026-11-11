@@ -100,12 +100,16 @@ export const RUN_ALLOWLIST = Object.keys(RUN_ARGS).sort() as RunName[];
 export type RunRefusal = "not_allowed" | "bad_args";
 
 /** Checks a run request against the allowlist. Nothing is run when this fails. */
-export function checkRun(name: unknown, args: unknown): { ok: true; name: RunName } | { ok: false; error: RunRefusal } {
+export function checkRun(
+  name: unknown,
+  args: unknown,
+): { ok: true; name: RunName; args: Record<string, unknown> } | { ok: false; error: RunRefusal } {
   if (typeof name !== "string" || !Object.prototype.hasOwnProperty.call(RUN_ARGS, name)) {
     return { ok: false, error: "not_allowed" };
   }
-  const schema = RUN_ARGS[name as RunName];
-  return schema.safeParse(args).success ? { ok: true, name: name as RunName } : { ok: false, error: "bad_args" };
+  const parsed = RUN_ARGS[name as RunName].safeParse(args);
+  // `args` is the parsed copy: send that, never the caller's object (a getter or toJSON could differ).
+  return parsed.success ? { ok: true, name: name as RunName, args: parsed.data } : { ok: false, error: "bad_args" };
 }
 
 // ---- runtime file ----

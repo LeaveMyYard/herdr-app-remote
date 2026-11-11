@@ -26,14 +26,15 @@ export interface LinkServerOptions {
   /** A peer that sends nothing for this long (pongs included) is dropped. Default 2.5 × ping. */
   idleTimeoutMs?: number;
   runTimeoutMs?: number;
-  maxConnections?: number;
+  /** Connections still waiting for a hello; past this the oldest is dropped. Default 8. */
+  maxPending?: number;
   log?: (event: LinkLogEvent) => void;
 }
 
 /** Structured log events. They never carry tokens, state contents or command arguments. */
 export type LinkLogEvent =
   | { event: "listening"; port: number }
-  | { event: "auth_failed"; reason: "not_hello" | "bad_hello" | "bad_token" | "timeout" | "too_long" | "closed" }
+  | { event: "auth_failed"; reason: "not_hello" | "bad_hello" | "bad_token" | "timeout" | "too_long" | "closed" | "evicted" }
   | { event: "link"; copy: Copy; replaced: boolean }
   | { event: "unlink"; copy: Copy }
   | { event: "dropped_line"; copy: Copy; reason: "invalid" | "panel_state" | "stale_seq" | "unknown_result" }
@@ -66,7 +67,9 @@ interface Pending {
 interface Conn {
   socket: net.Socket;
   hello: modLink.Hello | null;
-  buf: Buffer;
+  /** Bytes of the current, not yet terminated line, as received. */
+  chunks: Buffer[];
+  size: number;
   lastSeq: number;
   lastInbound: number;
   pending: Map<string, Pending>;
@@ -112,12 +115,11 @@ export class LinkServer extends EventEmitter {
       pingIntervalMs,
       idleTimeoutMs: options.idleTimeoutMs ?? Math.round(pingIntervalMs * 2.5),
       runTimeoutMs: options.runTimeoutMs ?? 10_000,
-      maxConnections: options.maxConnections ?? 8,
+      maxPending: options.maxPending ?? 8,
     };
     this.tokenDigest = digest(options.token);
     this.log = options.log ?? (() => {});
     this.server = net.createServer((socket) => this.accept(socket));
-    this.server.maxConnections = this.opts.maxConnections;
   }
 
   /** Starts listening; resolves with the bound port. */
@@ -165,7 +167,8 @@ export class LinkServer extends EventEmitter {
       return Promise.resolve({ ok: false, code: check.error, unknown_effect: false });
     }
     const conn = this.slots.get(opts.copy ?? "link");
-    if (!conn) return Promise.resolve({ ok: false, code: "no_link", unknown_effect: false });
+    if (conn && this.congested(conn)) this.drop(conn, "backpressure");
+    if (!conn || conn.closed) return Promise.resolve({ ok: false, code: "no_link", unknown_effect: false });
     this.runCounter += 1;
     const id = `run-${this.runCounter}`;
     return new Promise<RunOutcome>((resolve) => {
@@ -175,7 +178,7 @@ export class LinkServer extends EventEmitter {
       }, opts.timeoutMs ?? this.opts.runTimeoutMs);
       timer.unref();
       conn.pending.set(id, { resolve, timer });
-      this.send(conn, { type: "run", id, name: check.name, args });
+      this.send(conn, { type: "run", id, name: check.name, args: check.args });
     });
   }
 
@@ -201,10 +204,15 @@ export class LinkServer extends EventEmitter {
       socket.destroy();
       return;
     }
+    // Unauthenticated peers are capped, and the oldest goes first, so idle sockets opened by any
+    // local process can't keep the real mod out. Authenticated slots are bounded by copy.
+    const pending = [...this.conns].filter((c) => !c.hello);
+    for (let i = 0; i <= pending.length - this.opts.maxPending; i += 1) this.reject(pending[i]!, "evicted");
     const conn: Conn = {
       socket,
       hello: null,
-      buf: Buffer.alloc(0),
+      chunks: [],
+      size: 0,
       lastSeq: -1,
       lastInbound: Date.now(),
       pending: new Map(),
@@ -228,21 +236,28 @@ export class LinkServer extends EventEmitter {
   private onData(conn: Conn, chunk: Buffer): void {
     if (conn.closed) return;
     conn.lastInbound = Date.now();
-    conn.buf = conn.buf.length ? Buffer.concat([conn.buf, chunk]) : chunk;
-    for (;;) {
-      if (conn.closed) return;
-      const i = conn.buf.indexOf(0x0a);
+    // Each byte is scanned once: unterminated data waits in `chunks` until its newline arrives.
+    let start = 0;
+    while (start <= chunk.length && !conn.closed) {
       const limit = conn.hello ? modLink.LINE_LIMITS.modToBridge : modLink.LINE_LIMITS.preHello;
-      if (i < 0) {
-        if (conn.buf.length > limit) this.tooLong(conn);
-        return;
-      }
-      if (i > limit) {
+      const i = chunk.indexOf(0x0a, start);
+      const end = i < 0 ? chunk.length : i;
+      if (conn.size + (end - start) > limit) {
         this.tooLong(conn);
         return;
       }
-      const line = conn.buf.subarray(0, i).toString("utf8");
-      conn.buf = conn.buf.subarray(i + 1);
+      if (i < 0) {
+        if (end > start) {
+          conn.chunks.push(chunk.subarray(start));
+          conn.size += end - start;
+        }
+        return;
+      }
+      const piece = chunk.subarray(start, i);
+      const line = (conn.chunks.length ? Buffer.concat([...conn.chunks, piece]) : piece).toString("utf8");
+      conn.chunks = [];
+      conn.size = 0;
+      start = i + 1;
       if (line.trim() === "") continue;
       if (conn.hello) this.onMessage(conn, conn.hello.copy, line);
       else this.onHello(conn, line);
@@ -251,8 +266,7 @@ export class LinkServer extends EventEmitter {
 
   private tooLong(conn: Conn): void {
     if (conn.hello) {
-      this.log({ event: "dropped_peer", copy: conn.hello.copy, reason: "too_long" });
-      this.drop(conn);
+      this.drop(conn, "too_long");
     } else {
       this.reject(conn, "too_long");
     }
@@ -347,11 +361,14 @@ export class LinkServer extends EventEmitter {
     }
   }
 
+  private congested(conn: Conn): boolean {
+    return conn.socket.writableLength > MAX_QUEUED_OUT;
+  }
+
   private send(conn: Conn, msg: modLink.BridgeToMod): void {
     if (conn.closed) return;
-    if (conn.socket.writableLength > MAX_QUEUED_OUT) {
-      if (conn.hello) this.log({ event: "dropped_peer", copy: conn.hello.copy, reason: "backpressure" });
-      this.drop(conn);
+    if (this.congested(conn)) {
+      this.drop(conn, "backpressure");
       return;
     }
     conn.socket.write(modLink.encodeLine(msg));
@@ -361,15 +378,15 @@ export class LinkServer extends EventEmitter {
     const now = Date.now();
     for (const conn of [...this.slots.values()]) {
       if (now - conn.lastInbound > this.opts.idleTimeoutMs) {
-        if (conn.hello) this.log({ event: "dropped_peer", copy: conn.hello.copy, reason: "idle" });
-        this.drop(conn);
+        this.drop(conn, "idle");
         continue;
       }
       this.send(conn, { type: "ping" });
     }
   }
 
-  private drop(conn: Conn): void {
+  private drop(conn: Conn, reason?: "too_long" | "idle" | "backpressure"): void {
+    if (reason && conn.hello && !conn.closed) this.log({ event: "dropped_peer", copy: conn.hello.copy, reason });
     conn.closed = true;
     this.conns.delete(conn);
     if (!conn.socket.destroyed) conn.socket.destroy();

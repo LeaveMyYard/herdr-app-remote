@@ -21,6 +21,6 @@ export default tseslint.config(
   },
   {
     files: ["mod/test/**/*.js", "mod/vitest.config.js"],
-    languageOptions: { globals: { ...timers, console: "readonly", URL: "readonly", process: "readonly" } },
+    languageOptions: { globals: { ...timers, console: "readonly", URL: "readonly", TextEncoder: "readonly", process: "readonly" } },
   },
 );

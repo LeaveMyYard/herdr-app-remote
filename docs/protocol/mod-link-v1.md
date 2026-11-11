@@ -29,7 +29,7 @@ The mod reads it before every connection attempt, so a restarted bridge with a n
 
 The first line from the mod must be `hello`. The bridge checks `token` (constant-time, on sha256 digests) and keeps one connection slot per `copy`: a second authenticated `hello` with the same `copy` replaces the first (the older connection is closed), while `link` and `panel` never displace each other. Only the `link` copy's `state` feeds the `host` topic; a `panel` connection may send `result` for the commands routed to it and receives `notify`/`ping`.
 
-Before a valid `hello` nothing is processed. The bridge closes the connection when the first line is not a `hello`, the `hello` is malformed or carries the wrong token, no line arrives within 5 s, or the preamble passes 16 KiB. A failed `hello` never displaces the current holder of a slot. A later `hello` on an authenticated connection is ignored.
+Before a valid `hello` nothing is processed. The bridge closes the connection when the first line is not a `hello`, the `hello` is malformed or carries the wrong token, no line arrives within 5 s, or the preamble passes 16 KiB. At most 8 connections may wait for a `hello` at once; a new one evicts the oldest waiting one, so idle sockets can't keep the mod out. A failed `hello` never displaces the current holder of a slot. A later `hello` on an authenticated connection is ignored.
 
 There is no reply to `hello`; the first `ping` (or `run`/`notify`) is the first bridge line.
 
@@ -77,6 +77,15 @@ How the mod fills it from herdr-app (`mod/herdr-app-remote/host.js`): agent and 
 `Id` matches `^[A-Za-z0-9._:/-]{1,128}$`; `Index` is an integer from 1 to 10000.
 
 The bridge's `run()` resolves to `{ok: true}` or `{ok: false, code, error?, unknown_effect}`. `unknown_effect` is false only when nothing can have run (`not_allowed`, `bad_args`, `no_link`) and true for `failed`, `timeout` (10 s) and `link_lost`: the caller must not retry those by itself.
+
+## Copies
+
+A copy links only when its layout props say `role: "link"` or `role: "panel"`. A copy with any other props (opened with `mod.open`, `tab.new {mod}` or a hand-made block) renders an empty block and never connects, so it can't compete with the real link for its slot.
+
+## Security notes
+
+- The bridge authenticates the mod (the token); the mod does **not** authenticate the bridge. If a bridge dies without removing `runtime.json`, another local process (another user too) could bind the stale port. The mod would then send it the token and the host state, and show its `notify` text as a "Remote" toast. The token is useless once the real bridge has rotated it, and `run` stays limited to the mod's own navigate allowlist, so no command outside that list can run. This is a residual risk on multi-user machines, accepted for v1. Two ways to narrow it later: the launcher (S12) checks that the runtime pid is alive before connecting, or a v2 handshake has the bridge prove the token (an HMAC over a nonce from the mod's `hello`).
+- The bridge's `run()` sends the schema-parsed copy of `args`, never the caller's object.
 
 ## Lifecycle
 

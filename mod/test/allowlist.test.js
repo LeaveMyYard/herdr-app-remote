@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { modLink } from '@herdr-remote/protocol';
 import { ALLOWLIST, checkRun } from '../herdr-app-remote/allowlist.js';
+import { BACKOFF_MS, MAX_LINE, RUNTIME_RELATIVE_PATH, STATE_MIN_INTERVAL_MS } from '../herdr-app-remote/link.js';
 
 const CASES = [
   ['agent.focus', { terminal: 't3' }],
@@ -50,5 +51,14 @@ describe('mod allowlist', () => {
 
   it('refuses objects that are not plain JSON objects', () => {
     expect(checkRun('tab.select', Object.assign(Object.create({ evil: 1 }), { index: 1 }))).toEqual({ ok: false, error: 'bad_args' });
+  });
+});
+
+describe('constants the mod copies from the protocol', () => {
+  it('match', () => {
+    expect(RUNTIME_RELATIVE_PATH).toBe(modLink.RUNTIME_RELATIVE_PATH);
+    expect(BACKOFF_MS).toEqual(modLink.RECONNECT_BACKOFF_MS);
+    expect(STATE_MIN_INTERVAL_MS).toBe(modLink.STATE_MIN_INTERVAL_MS);
+    expect(MAX_LINE).toBe(modLink.LINE_LIMITS.bridgeToMod);
   });
 });

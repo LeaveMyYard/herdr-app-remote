@@ -31,7 +31,12 @@ export async function writeRuntime(path: string, runtime: modLink.Runtime): Prom
     throw e;
   }
   await fh.close();
-  await rename(tmp, path);
+  try {
+    await rename(tmp, path);
+  } catch (e) {
+    await rm(tmp, { force: true });
+    throw e;
+  }
 }
 
 /** Removes runtime.json only if it still names this process (another bridge may have replaced it). */

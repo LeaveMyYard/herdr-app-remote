@@ -62,7 +62,7 @@ describe("fixtures", () => {
     expect(runs.length).toBeGreaterThan(0);
     for (const { json } of runs) {
       const r = json as { name: string; args: unknown };
-      expect(modLink.checkRun(r.name, r.args)).toEqual({ ok: true, name: r.name });
+      expect(modLink.checkRun(r.name, r.args)).toEqual({ ok: true, name: r.name, args: r.args });
     }
   });
 

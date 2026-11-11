@@ -21,7 +21,7 @@ function load() {
 }
 
 function mount(opts = {}) {
-  const m = new Mounted(Remote, opts);
+  const m = new Mounted(Remote, { props: { role: 'link' }, ...opts });
   mounted.push(m);
   return m;
 }
@@ -262,6 +262,8 @@ describe('link mod: commands in', () => {
     expect(await next(c, (x) => x.type === 'pong')).toEqual({ type: 'pong' });
     send(c, { type: 'notify', level: 'warn', message: 'Question Title 123' });
     send(c, { type: 'notify', level: 'shout', message: 'ignored' });
+    send(c, { type: 'notify', level: 'constructor', message: 'ignored' });
+    send(c, { type: 'notify', level: '__proto__', message: 'ignored' });
     await waitFor(() => world.ran.some(([k]) => k === 'notify'));
     await settle(50);
     expect(world.ran.filter(([k]) => k === 'notify')).toEqual([['notify', { title: 'Remote', body: 'Question Title 123', level: 'warning' }]]);
@@ -314,6 +316,32 @@ describe('link mod against the real bridge link server', () => {
   });
 });
 
+describe('stray copies', () => {
+  it.each([[{}], [{ role: 'other' }], [{ file: 'x' }]])('a copy with props %j stays inert and never connects', async (props) => {
+    const m = mount({ props, scale: 0.01 });
+    await settle(300);
+    expect(bridge.conns).toHaveLength(0);
+    expect(m.tree.id).toBe('remote-inert');
+  });
+});
+
+/** A scripted socket: writes wait for `release()`, reads for `push()`; close() never ends a read. */
+function fakeSocket() {
+  const s = {
+    written: [], pendingWrites: [], reads: [], closed: false, failWrites: false,
+    write(line) {
+      if (s.failWrites) return Promise.reject(new Error('broken pipe'));
+      s.written.push(line);
+      return new Promise((r) => s.pendingWrites.push(r));
+    },
+    read() { return new Promise((r) => s.reads.push(r)); }, // like a runtime whose close() leaves it pending
+    close() { s.closed = true; },
+    release() { for (const r of s.pendingWrites.splice(0)) r(); },
+    push(text) { s.reads.shift()?.(new TextEncoder().encode(text)); },
+  };
+  return s;
+}
+
 describe('Link unit', () => {
   // A cx whose sleeps are never cancelled: only Link.close() can stop the loop.
   const freeCx = () => {
@@ -343,6 +371,74 @@ describe('Link unit', () => {
     expect(bridge.conns).toHaveLength(1);
   });
 
+
+  const rt = async () => ({ port: 1, token: TOKEN });
+  const hello = () => ({ layout: 'x', app: { version: '1' } });
+  const cxFast = () => {
+    const sleeps = [];
+    const cx = { sleeps, spawn: (t) => { Promise.resolve().then(() => t(cx)).catch(() => {}); }, sleep: (ms) => { sleeps.push(ms); return new Promise((r) => setTimeout(r, Math.min(ms, 5))); } };
+    return cx;
+  };
+  const states = (s) => s.written.filter((l) => l.includes('"type":"state"'));
+
+  it('keeps at most one state write in flight; a slow socket coalesces to the latest', async () => {
+    const sock = fakeSocket();
+    const l = new Link({ copy: 'link', hello, runtime: rt, connect: async () => sock });
+    l.offer({ n: 0 });
+    l.start(cxFast());
+    await settle(20);
+    sock.release(); // hello
+    await settle(150);
+    expect(states(sock)).toHaveLength(1);
+    for (let n = 1; n <= 5; n += 1) { l.offer({ n }); await settle(120); }
+    expect(states(sock)).toHaveLength(1); // the first state write is still in flight
+    sock.release();
+    await settle(150);
+    expect(states(sock)).toHaveLength(2);
+    expect(JSON.parse(states(sock)[1]).host).toEqual({ n: 5 });
+    l.close();
+  });
+
+  it('a write failure drops the connection and reconnects even if close() never ends read()', async () => {
+    const socks = [fakeSocket(), fakeSocket()];
+    let i = 0;
+    const l = new Link({ copy: 'link', hello, runtime: rt, connect: async () => socks[i++] });
+    l.start(cxFast());
+    await settle(20);
+    socks[0].release();
+    await settle(20);
+    socks[0].failWrites = true;
+    l.offer({ n: 1 });
+    await settle(150);
+    expect(socks[0].closed).toBe(true);
+    expect(i).toBe(2);
+    expect(socks[1].written[0]).toContain('"type":"hello"');
+    l.close();
+  });
+
+  it('a connection that lasted healthyMs resets the backoff even with no message', async () => {
+    let n = 0;
+    const socks = [];
+    const l = new Link({
+      copy: 'link', hello, runtime: rt, healthyMs: 100,
+      connect: async () => {
+        n += 1;
+        if (n <= 3 || n >= 5) throw new Error('refused');
+        const s = fakeSocket();
+        socks.push(s);
+        return s;
+      },
+    });
+    const cx = cxFast();
+    l.start(cx);
+    await waitFor(() => n === 4);
+    socks[0].release();
+    await settle(150); // longer than healthyMs, and nothing received
+    socks[0].reads.shift()(null); // EOF
+    await waitFor(() => cx.sleeps.length >= 5);
+    expect(cx.sleeps.slice(0, 5)).toEqual([500, 1000, 2000, 500, 1000]);
+    l.close();
+  });
 
   it('offer() is a no-op for the panel copy', () => {
     const l = new Link({ copy: 'panel', hello: () => ({ layout: 'x', app: { version: '1' } }) });

@@ -150,6 +150,36 @@ describe("LinkServer authentication", () => {
     expect(log).toContainEqual({ event: "auth_failed", reason: "timeout" });
   });
 
+  it("drops a complete over-limit line before hello, sent in one chunk", async () => {
+    const { port, log } = await start();
+    const p = await connect(port);
+    p.socket.write(JSON.stringify({ ...hello(), layout: "x".repeat(17 * 1024) }) + "\n");
+    await p.closed;
+    expect(log).toContainEqual({ event: "auth_failed", reason: "too_long" });
+  });
+
+  it("idle unauthenticated sockets can't keep the real mod out: the oldest is evicted", async () => {
+    const { server, port, log } = await start({ maxPending: 4 });
+    const idle = await Promise.all(Array.from({ length: 12 }, () => connect(port)));
+    await tick(60);
+    const p = await linked(server, port);
+    expect(p.isClosed).toBe(false);
+    expect(server.connected()).toBe(true);
+    await tick(60);
+    expect(idle.filter((x) => x.isClosed).length).toBeGreaterThanOrEqual(9);
+    expect(log.filter((e) => e.event === "auth_failed" && e.reason === "evicted").length).toBeGreaterThanOrEqual(9);
+  });
+
+  it("evicting pending sockets never touches authenticated ones", async () => {
+    const { server, port } = await start({ maxPending: 2 });
+    const link = await linked(server, port, "link");
+    const panel = await linked(server, port, "panel");
+    await Promise.all(Array.from({ length: 6 }, () => connect(port)));
+    await tick(60);
+    expect(link.isClosed).toBe(false);
+    expect(panel.isClosed).toBe(false);
+  });
+
   it("drops an oversized preamble before any newline", async () => {
     const { port, log } = await start();
     const p = await connect(port);
@@ -308,6 +338,35 @@ describe("LinkServer run", () => {
     const mb = await p.next((m) => m.type === "run");
     p.send({ type: "result", id: mb.id, ok: false, error: "boom" });
     expect(await b).toEqual({ ok: false, code: "failed", error: "boom", unknown_effect: true });
+  });
+
+  it("a run dropped for backpressure reports no_link with no effect, and nothing is sent", async () => {
+    const { server, port, log } = await start();
+    const p = await linked(server, port);
+    // Simulate a mod that stopped reading: the socket's queued output is over the cap.
+    const conn = [...(server as unknown as { conns: Set<{ socket: { writableLength: number } }> }).conns][0]!;
+    Object.defineProperty(conn.socket, "writableLength", { get: () => 10 * 1024 * 1024 });
+    expect(await server.run("tab.select", { index: 1 })).toEqual({ ok: false, code: "no_link", unknown_effect: false });
+    await p.closed;
+    expect(p.lines.filter((m) => m.type === "run")).toEqual([]);
+    expect(log).toContainEqual({ event: "dropped_peer", copy: "link", reason: "backpressure" });
+  });
+
+  it("sends the checked copy of args, not the caller's object", async () => {
+    const { server, port } = await start();
+    const p = await linked(server, port);
+    let reads = 0;
+    const args = {
+      get index() {
+        reads += 1;
+        return reads === 1 ? 1 : "terminal.open";
+      },
+    };
+    const pending = server.run("tab.select", args as unknown as Record<string, unknown>);
+    const msg = await p.next((m) => m.type === "run");
+    expect(msg.args).toEqual({ index: 1 });
+    p.send({ type: "result", id: msg.id, ok: true });
+    await pending;
   });
 
   it("reports no_link when nothing is linked", async () => {

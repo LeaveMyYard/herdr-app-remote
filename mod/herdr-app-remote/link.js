@@ -20,7 +20,7 @@ export const HEALTHY_MS = 5000;
 export const MAX_LINE = 1024 * 1024;
 const MAX_TOAST = 500;
 
-const LEVELS = { info: 'info', warn: 'warning', error: 'error' };
+const LEVELS = Object.freeze(Object.assign(Object.create(null), { info: 'info', warn: 'warning', error: 'error' }));
 
 /** Reads and checks runtime.json; null when absent or malformed. */
 export async function readRuntime(read = readTextFile, home = appHome) {
@@ -50,14 +50,6 @@ function decodeAscii(bytes) {
   return s;
 }
 
-function concat(a, b) {
-  if (!a.length) return b;
-  const out = new Uint8Array(a.length + b.length);
-  out.set(a, 0);
-  out.set(b, a.length);
-  return out;
-}
-
 export class Link {
   /**
    * @param {object} o
@@ -67,6 +59,7 @@ export class Link {
    * @param {(n: object) => unknown} [o.notify]                herdr's notify
    * @param {() => Promise<{port: number, token: string} | null>} [o.runtime]
    * @param {(host: string, port: number) => Promise<any>} [o.connect]
+   * @param {number} [o.healthyMs]
    */
   constructor(o) {
     this.copy = o.copy;
@@ -75,6 +68,8 @@ export class Link {
     this.notifyFn = o.notify ?? herdrNotify;
     this.runtimeFn = o.runtime ?? (() => readRuntime());
     this.connectFn = o.connect ?? ((host, port) => net.connect(host, port));
+    this.healthyMs = o.healthyMs ?? HEALTHY_MS;
+    this.unblock = null; // ends the reader's pending read() when the connection is dropped
     this.closed = false;
     this.sock = null;
     this.latest = null; // latest offered snapshot, serialized
@@ -113,12 +108,7 @@ export class Link {
   /** Stops for good: closes the socket now and ends every loop. */
   close() {
     this.closed = true;
-    const s = this.sock;
-    this.sock = null;
-    if (s) {
-      try { s.close(); } catch { /* already closed */ }
-    }
-    this.poke();
+    this.drop();
   }
 
   async loop(cx) {
@@ -140,16 +130,18 @@ export class Link {
         this.seq = 0;
         this.lastSentAt = 0;
         this.writes = Promise.resolve();
+        // A dropped connection must end the reader even if close() leaves a read() pending.
+        const dropped = new Promise((r) => { this.unblock = () => r(null); });
         const info = this.helloInfo();
         await this.write(sock, { type: 'hello', v: 1, token: rt.token, copy: this.copy, layout: info.layout, app: info.app });
         if (this.copy === 'link') cx.spawn(async (cx) => this.sender(cx, sock));
-        healthy = await this.reader(sock);
+        healthy = await this.reader(sock, dropped);
       } catch {
         // connect refused, no runtime, write or read failed: retry below
       }
       this.drop();
       if (this.closed) return;
-      if (healthy || Date.now() - started >= HEALTHY_MS) delay = BACKOFF_MS.min;
+      if (healthy || Date.now() - started >= this.healthyMs) delay = BACKOFF_MS.min;
       await cx.sleep(delay);
       delay = Math.min(delay * 2, BACKOFF_MS.max);
     }
@@ -161,6 +153,9 @@ export class Link {
     if (s) {
       try { s.close(); } catch { /* ignore */ }
     }
+    const u = this.unblock;
+    this.unblock = null;
+    if (u) u();
     this.poke();
   }
 
@@ -202,27 +197,32 @@ export class Link {
     }
   }
 
-  /** Reads lines until EOF or error. Resolves true if any message arrived. */
-  async reader(sock) {
-    let buf = new Uint8Array(0);
+  /** Reads lines until EOF, error or drop. Resolves true if any message arrived. */
+  async reader(sock, dropped) {
+    let parts = []; // unterminated bytes, waiting for their newline
+    let size = 0;
     let got = false;
     for (;;) {
-      const bytes = await sock.read();
+      const bytes = await Promise.race([sock.read(), dropped]);
       if (bytes === null || this.sock !== sock) return got;
-      buf = concat(buf, bytes);
       let start = 0;
-      for (let i = 0; i < buf.length; i += 1) {
-        if (buf[i] !== 0x0a) continue;
-        if (i - start > MAX_LINE) return got;
-        const line = decodeAscii(buf.subarray(start, i));
+      for (let i = bytes.indexOf(0x0a); ; i = bytes.indexOf(0x0a, start)) {
+        const end = i < 0 ? bytes.length : i;
+        if (size + end - start > MAX_LINE) return got;
+        if (i < 0) {
+          if (end > start) { parts.push(bytes.subarray(start)); size += end - start; }
+          break;
+        }
+        let line = decodeAscii(bytes.subarray(start, i));
+        if (parts.length) line = parts.map(decodeAscii).join('') + line;
+        parts = [];
+        size = 0;
         start = i + 1;
         if (line.trim() === '') continue;
         got = true;
         this.handle(sock, line);
         if (this.sock !== sock) return got;
       }
-      buf = buf.subarray(start);
-      if (buf.length > MAX_LINE) return got;
     }
   }
 
@@ -240,7 +240,7 @@ export class Link {
       if (typeof msg.id !== 'string' || msg.id.length < 1 || msg.id.length > 128) return;
       this.write(sock, { type: 'result', id: msg.id, ...this.execute(msg.name, msg.args) }).catch(() => {});
     } else if (msg.type === 'notify') {
-      const level = LEVELS[msg.level];
+      const level = typeof msg.level === 'string' ? LEVELS[msg.level] : undefined;
       if (!level || typeof msg.message !== 'string') return;
       try {
         this.notifyFn({ title: 'Remote', body: msg.message.slice(0, MAX_TOAST), level });

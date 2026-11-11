@@ -18,7 +18,17 @@ describe("run allowlist", () => {
     ["tab.select", { id: "tab-1" }],
     ["tab.select", { index: 1 }],
   ])("accepts %s %j", (name, args) => {
-    expect(checkRun(name, args)).toEqual({ ok: true, name });
+    expect(checkRun(name, args)).toEqual({ ok: true, name, args });
+  });
+
+  it("returns a parsed copy of the args, not the caller's object", () => {
+    const input = { index: 1, toJSON: () => ({ argv: ["sh"] }) };
+    const r = checkRun("tab.select", { index: 1 });
+    expect(r.ok && r.args).toEqual({ index: 1 });
+    expect(checkRun("tab.select", input)).toEqual({ ok: false, error: "bad_args" });
+    const plain = { id: "tab-1" };
+    const r2 = checkRun("tab.select", plain);
+    expect(r2.ok && r2.args).not.toBe(plain);
   });
 
   it.each([
