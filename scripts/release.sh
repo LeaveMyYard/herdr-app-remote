@@ -18,7 +18,7 @@ version=${1:-}
 case $version in
   ''|*[!0-9A-Za-z.-]*) echo "usage: scripts/release.sh <version>   (for example 0.1.0 or 0.1.0-rc.1)" >&2; exit 2 ;;
 esac
-printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$' || { echo "usage: scripts/release.sh <version>   (for example 0.1.0 or 0.1.0-rc.1)" >&2; exit 2; }
+printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$' || { echo "usage: scripts/release.sh <version>   (for example 0.1.0 or 0.1.0-rc.1)" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 cd "$root"
 
