@@ -30,6 +30,10 @@ describe("AgentsRich", () => {
     render(<AgentsRich view={view} />);
     expect(screen.getByLabelText("1 open questions")).toHaveTextContent("?1");
   });
+  it("ends with the board's inert New agent row", () => {
+    render(<AgentsRich view={view} />);
+    expect(screen.getByText("New agent")).toBeInTheDocument();
+  });
   it("hides the question total when there are none", () => {
     render(<AgentsRich view={{ ...view, questions: 0 }} />);
     expect(screen.queryByLabelText(/open questions/)).toBeNull();
@@ -200,6 +204,24 @@ describe("App with panorama data", () => {
     window.location.hash = `#/swarm/peek/${encodeURIComponent("gone")}`;
     render(<App data={boardData("peek")} />);
     expect(screen.queryByRole("region", { name: "Peek" })).toBeNull();
+    expect(screen.getByRole("tree", { name: "Swarm" })).toBeInTheDocument();
+  });
+  it("an unmatched root's card opens a Swarm that contains it, and Peek closes back to it", async () => {
+    const loose = { ...swarmTopic.roots[0]!, key: "x1", agent_id: null, space_id: null, live: false, title: "Loose root" };
+    const t = { ...swarmTopic, roots: [...swarmTopic.roots, loose] };
+    window.location.hash = "#/agents";
+    const { unmount } = render(<App data={{ host: boardHost, panorama: t, now: BOARD_NOW }} />);
+    const href = screen.getByRole("link", { name: /Loose root/ }).getAttribute("href");
+    expect(href).toBe("#/swarm/all");
+    unmount();
+    window.location.hash = href!;
+    render(<App data={{ host: boardHost, panorama: t, now: BOARD_NOW }} />);
+    expect(screen.getByText(/All spaces · 4 roots/)).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: /Loose root/ })).toBeInTheDocument();
+  });
+  it("a malformed hash does not blank the app", () => {
+    window.location.hash = "#/swarm/%E0";
+    render(<App data={boardData("swarm")} />);
     expect(screen.getByRole("tree", { name: "Swarm" })).toBeInTheDocument();
   });
   it("without data the app is unchanged: Basic Agents from fixtures", () => {

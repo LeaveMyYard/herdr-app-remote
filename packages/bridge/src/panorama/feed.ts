@@ -87,7 +87,6 @@ const RETRY_MS = 10_000;
 export class FeedReader {
   private contract: Contract | undefined;
   private contractAt = 0;
-  private contractError: string | undefined;
   private lastText: string | undefined;
   private previous: { feed: Feed | null; generated_at: number | null } | undefined;
   private error: string | null = null;
@@ -102,7 +101,7 @@ export class FeedReader {
     await this.ensureContract();
     const c = this.contract;
     if (!c) {
-      // Without a verified contract nothing can be trusted: keep what we had, say why.
+      // Without a verified contract nothing can be trusted (not even the retained feed): the topic goes basic.
       this.error = "contract unavailable";
       return this.view();
     }
@@ -144,15 +143,9 @@ export class FeedReader {
     const r = await loadContract(this.appHome);
     if (r.ok) {
       this.contract = r.contract;
-      this.contractError = undefined;
     } else {
       // A contract that stopped verifying is not used any more.
       this.contract = undefined;
-      this.contractError = r.reason;
     }
-  }
-
-  get contractProblem(): string | undefined {
-    return this.contractError;
   }
 }

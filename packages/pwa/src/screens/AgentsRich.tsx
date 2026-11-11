@@ -15,7 +15,7 @@ function Card({ card }: { card: CardView }) {
             </span>
             <span className="ptitle">{card.title}</span>
             <span className="pmarks">
-              {card.questions > 0 && card.st !== "wait" ? <Tile code="wait" count={card.questions} /> : null}
+              {card.questions > 0 ? <Tile code="wait" count={card.questions} /> : null}
               <Badge code={card.st} h={17} questions={card.questions} />
             </span>
           </div>
@@ -79,6 +79,11 @@ export function AgentsRich({ view }: { view: AgentsView }) {
                   ))}
                 </div>
               ))}
+              <div className="row nf ag-new" aria-hidden="true">
+                <span className="nf ag-new-plus">+</span>
+                <span className="f1 ag-new-l">New agent</span>
+                <span className="ag-new-key">n</span>
+              </div>
             </div>
           </div>
         </div>

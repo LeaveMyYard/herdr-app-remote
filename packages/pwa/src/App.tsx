@@ -59,6 +59,15 @@ function parts(hash: string): string[] {
   return hash.replace(/^#\/?/, "").split("/");
 }
 
+/** A hash from the address bar can be malformed; never let it throw during render. */
+function decode(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
 function useNowSeconds(fixed?: number): number {
   const [now, setNow] = useState(() => fixed ?? Date.now() / 1000);
   useEffect(() => {
@@ -87,7 +96,7 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
   const base = useConnection(connection);
   // A retained feed that is old or failed to read shows the stale banner; a connection problem outranks it.
   const conn: Connection =
-    !connection && base.status === "online" && rich && topic.stale
+    !connection && base.status === "online" && rich && topic.stale && (tab === "agents" || tab === "swarm")
       ? { status: "stale", age: topic.collected_at !== null ? age(topic.collected_at, now) : undefined, reason: topic.error ?? "feed" }
       : base;
   const select = (t: TabId) => {
@@ -96,7 +105,7 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
   };
 
   const route = parts(hash);
-  const peekUid = tab === "swarm" && rich && route[1] === "peek" && route[2] ? decodeURIComponent(route[2]) : null;
+  const peekUid = tab === "swarm" && rich && route[1] === "peek" && route[2] ? decode(route[2]) : null;
   const peeked = peekUid && topic ? findNode(topic, peekUid) : null;
   if (peeked && data && topic) {
     const space = peeked.root.space_id !== null ? data.host.spaces.find((s) => s.id === peeked.root.space_id)?.name : undefined;
@@ -108,7 +117,7 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
           spaceName={space ?? null}
           now={now}
           transcript={data.transcript}
-          closeHref={peeked.root.space_id !== null ? `#/swarm/${encodeURIComponent(peeked.root.space_id)}` : "#/swarm"}
+          closeHref={`#/swarm/${peeked.root.space_id !== null ? encodeURIComponent(peeked.root.space_id) : "all"}`}
           openRootHref={peeked.root.live ? `#/chat/${peeked.root.agent_id ?? ""}` : undefined}
         />
       </div>
@@ -126,7 +135,8 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
         <AgentsBasic host={host} spaces={spaces} agents={agents} />
       );
   } else if (tab === "swarm" && data && rich) {
-    const wanted = route[1] && route[1] !== "peek" ? decodeURIComponent(route[1]) : (data.host.focused.space_id ?? null);
+    const seg = route[1] ? decode(route[1]) : null;
+    const wanted = seg === "all" ? null : seg && seg !== "peek" ? seg : (data.host.focused.space_id ?? null);
     const scope = swarmScope(data.host, topic, wanted);
     const ui = swarmUi ?? { open: Object.fromEntries(scope.roots.map((r) => [r.key, true])), sel: null };
     const notice = topic.aged

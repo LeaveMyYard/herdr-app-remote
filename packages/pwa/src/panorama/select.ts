@@ -143,7 +143,7 @@ export function selectAgents(host: HostState, topic: bridgeApi.PanoramaTopic, ex
     const meta = [spaceName, r.tab_no !== null ? `tab ${r.tab_no}` : "", `${active} active`, `${r.agents.length} agents`].filter(Boolean).join(" · ");
     return {
       key: r.key,
-      href: r.space_id !== null ? `#/swarm/${encodeURIComponent(r.space_id)}` : "#/swarm",
+      href: `#/swarm/${r.space_id !== null ? encodeURIComponent(r.space_id) : "all"}`,
       n: r.tab_no,
       harness: r.harness,
       title: r.title,

@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { bridgeApi } from "@herdr-remote/protocol";
@@ -23,7 +23,7 @@ function setup(h: string, clock = { t: NOW }) {
 }
 
 describe("FeedReader", () => {
-  it("keeps the last good feed through a corrupt, oversized, missing and unreadable feed, with a fixed sentence and no path", async () => {
+  it("keeps the last good feed through an invalid, oversized, deleted and unreadable feed, with a fixed sentence and no path", async () => {
     const h = home(mkFeed([root({ agents: [agent("a")] })]));
     const reader = new FeedReader(h, () => NOW);
     const first = await reader.read();
@@ -34,7 +34,9 @@ describe("FeedReader", () => {
       [() => writeFileSync(feedPath(h), "{not json"), "feed invalid"],
       [() => writeFileSync(feedPath(h), JSON.stringify({ v: 3, roots: [] })), "feed invalid"],
       [() => writeFileSync(feedPath(h), "x".repeat(1_048_577)), "feed too large"],
-      [() => writeFileSync(feedPath(h), JSON.stringify(mkFeed([]))), ""],
+      [() => rmSync(feedPath(h)), "feed missing"],
+      [() => mkdirSync(feedPath(h)), "feed unreadable"],
+      [() => { rmSync(feedPath(h), { recursive: true }); writeFileSync(feedPath(h), JSON.stringify(mkFeed([]))); }, ""],
     ];
     for (const [change, error] of cases) {
       change();
@@ -66,6 +68,18 @@ describe("FeedReader", () => {
 });
 
 describe("panorama topic driver", () => {
+  it("goes basic with the contract error when contract.js stops verifying mid-run", async () => {
+    const h = home();
+    const { hub, driver, clock } = setup(h);
+    await driver.start();
+    expect(topic(hub).mode).toBe("rich");
+    put(h, "mods/panorama/contract.js", CONTRACT + "// tampered");
+    clock.t = NOW + 61_000;
+    writeFileSync(feedPath(h), JSON.stringify(mkFeed([root()], { generated_at: clock.t / 1000 - 1 })));
+    await driver.refresh();
+    expect(topic(hub)).toMatchObject({ mode: "basic", stale: true, error: "contract unavailable", roots: [] });
+  });
+
   it("publishes nothing until the host topic exists", async () => {
     const hub = newHub();
     driver = new PanoramaTopicDriver({ hub, appHome: home(), now: () => NOW, intervalMs: 3_600_000 });
