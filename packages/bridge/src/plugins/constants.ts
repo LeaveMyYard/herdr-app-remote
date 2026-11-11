@@ -14,8 +14,8 @@ export const FEED_STALE_MS = 15_000;
 /** `readTextFile` reads at most this much, so a feed is never bigger (app-feed-v1). */
 export const FEED_MAX_BYTES = 1_048_576;
 
-/** Oldest `hc` the bridge supports (`hc --version`). */
-export const MIN_HC_VERSION = "0.1.0";
+/** Oldest `hc` the bridge supports: the version the rig ran against (`hc --version`: hc 0.1.19). */
+export const MIN_HC_VERSION = "0.1.19";
 
 export const PROBE_TIMEOUT_MS = 10_000;
 
