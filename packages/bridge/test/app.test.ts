@@ -485,8 +485,8 @@ describe("startApp: topics over the link", () => {
     expect(await on.until(resOf("k3"))).toMatchObject({ ok: false, code: "forbidden" });
     expect(calls.filter((c) => c.args[0] === "keys" || c.args[0] === "send")).toEqual([{ cmd: "fake-hc", args: ["keys", "--json", "--", "t3", "shift+tab"] }]);
     const text = app!.security.activity().map((e) => e.text);
-    expect(text).toContain("Phone 1 (2) pressed shift-tab (1 key) in t3");
-    expect(text).toContain("Phone 1 (2) pressed a key in t3: failed");
+    expect(text).toContain("Phone 2 pressed shift-tab (1 key) in t3");
+    expect(text).toContain("Phone 2 pressed a key in t3: failed");
     expect(JSON.stringify(app!.security.activity())).not.toContain("Shift-Tab");
   });
 

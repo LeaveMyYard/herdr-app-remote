@@ -67,7 +67,8 @@ export function typingDemo(state: string | null): { input: ChatInput; now: () =>
       enabled: true,
       until,
       send: ok,
-      keys: { enabled: state !== "off", menu: demoKeysMenu, press: ok },
+      // The ran-out board draws no Keys bar: special keys are off there too.
+      keys: { enabled: state !== "off" && state !== "gone", menu: demoKeysMenu, press: ok },
     },
     now: () => clock,
     sheet: state === "menu" || state === "off",

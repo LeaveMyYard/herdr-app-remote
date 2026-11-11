@@ -124,6 +124,46 @@ describe("Keys sheet (S16b)", () => {
     expect(pressed).toHaveLength(1);
   });
 
+  it.each([
+    [{ ok: false, code: "rate_limited" }, "Couldn't press Esc. Try again."],
+    [{ ok: false, code: "busy" }, "Couldn't press Esc. Try again."],
+    [{ ok: false, code: "timeout", unknown_effect: true }, "Couldn't press Esc. Try again."],
+    [{ ok: false, code: "terminal_finished" }, "Agent 1's terminal is closed."],
+    [{ ok: false, code: "terminal_not_found" }, "Agent 1's terminal is closed."],
+  ] as [SendOutcome, string][])("a failed press %j says it in the approved words, never 'sent'", async (reply, words) => {
+    const { pressed, keys } = keysInput({}, reply);
+    render(<Chat {...props} input={chatInput(keys)} />);
+    const sheet = await openSheet();
+    await userEvent.click(within(sheet).getByText("Esc").closest("button")!);
+    expect(within(sheet).getByRole("status")).toHaveTextContent(words);
+    expect(within(sheet).queryByText(/sent/)).toBeNull();
+    expect(pressed).toHaveLength(1);
+  });
+
+  it("special keys on with typing off: a bar with only the Keys button, and the keys press", async () => {
+    const { pressed, keys } = keysInput();
+    render(<Chat {...props} input={chatInput(keys, { enabled: false })} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    const bar = screen.getByRole("toolbar", { name: "Keys" });
+    expect([...bar.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["Keys: open the special keys menu"]);
+    expect(screen.getByText(/Read-only here/)).toBeInTheDocument();
+    const sheet = await openSheet();
+    await userEvent.click(within(sheet).getByText("Tab").closest("button")!);
+    expect(pressed).toEqual([{ key: "tab", rev: demoKeysMenu.rev }]);
+  });
+
+  it("special keys on after typing ran out: the ran-out footer keeps the Keys bar", () => {
+    const until = T2140;
+    render(<Chat {...props} now={() => until + 60_000} input={chatInput(keysInput().keys, { until })} />);
+    expect(screen.getByText("Typing turned off at 21:40.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keys: open the special keys menu" })).toBeInTheDocument();
+  });
+
+  it("both off: no Keys button at all", () => {
+    render(<Chat {...props} input={chatInput(keysInput({ enabled: false }).keys, { enabled: false })} />);
+    expect(screen.queryByRole("button", { name: "Keys: open the special keys menu" })).toBeNull();
+  });
+
   it("with terminal.keys off: the button is dimmed, keys are drawn but can't be pressed, and the note says where", async () => {
     const { pressed, keys } = keysInput({ enabled: false });
     render(<Chat {...props} input={chatInput(keys)} />);

@@ -6,6 +6,8 @@ import { AnsiText } from "../components/AnsiText";
 import type { AgentStatus } from "../model";
 import { useHostName } from "../bridge/host-name";
 import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
+import { KeysButton } from "./KeysSheet";
+import * as W from "./keys-words";
 
 const HARNESS_ICON = { claude: claudeIcon, codex: codexIcon } as const;
 
@@ -106,6 +108,8 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
   const host = useHostName();
   const { on, ranOut } = useInputOn(input, now);
   const typing = on && input && terminal !== undefined ? { input, terminal } : null;
+  // `terminal.keys` on while typing is off: the Keys button still has a bar of its own.
+  const keysBar = !typing && input?.keys?.enabled && terminal !== undefined ? { keys: input.keys, terminal } : null;
   const [fit, setFit] = useState(loadFit);
   const toggleFit = () => {
     setFit((f) => {
@@ -187,14 +191,23 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
         <footer className="col nf chat-foot chat-foot-on" data-vis-mask="">
           <ChatComposer terminal={typing.terminal} agentName={agent.short ?? agent.name} input={typing.input} now={now} {...(demoSheet ? { demoSheet } : {})} />
         </footer>
-      ) : ranOut !== null ? (
-        <footer className="col nf chat-foot chat-foot-out">
-          <p className="chat-out">{`Typing turned off at ${clockOf(ranOut)}.`}</p>
-          <p className="chat-out-how">{`Turn it on again in Remote on ${host}.`}</p>
-        </footer>
       ) : (
-        <footer className="col nf chat-foot" data-vis-mask="">
-          <p className="chat-ro">Read-only here. Typing to the terminal is off for this device.</p>
+        <footer className={`col nf chat-foot${ranOut !== null ? " chat-foot-out" : ""}${keysBar ? " chat-foot-keys" : ""}`} {...(ranOut === null && !keysBar ? { "data-vis-mask": "" } : {})}>
+          {ranOut !== null ? (
+            <>
+              <p className="chat-out">{W.typingRanOut(clockOf(ranOut))}</p>
+              <p className="chat-out-how">{W.typingRanOutHow(host)}</p>
+            </>
+          ) : (
+            <p className="chat-ro">Read-only here. Typing to the terminal is off for this device.</p>
+          )}
+          {keysBar ? (
+            // Special keys without typing (operator, 2026-11-11): the key bar with only the Keys button.
+            <div role="toolbar" aria-label="Keys" className="mono row nf chat-keys chat-keys-only">
+              <span className="f1" />
+              <KeysButton key={keysBar.terminal} agentName={agent.short ?? agent.name} host={host} keys={keysBar.keys} />
+            </div>
+          ) : null}
         </footer>
       )}
     </>

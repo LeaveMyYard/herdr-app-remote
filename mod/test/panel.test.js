@@ -150,6 +150,7 @@ describe('panel copy', () => {
     click('tab-devices');
     click(`settings-${P2}`);
     expect(text(m)).toContain('Special keys');
+    expect(text(m)).toContain('Lets this phone press Esc, Ctrl-C and the arrow keys in a terminal.');
     click(`cap-${P2}-terminal.keys`);
     expect(conn.lines.filter((l) => l.msg.type === 'panel_act')).toEqual([]);
     expect(find(m.tree, `expiry-${P2}-keys`)).not.toBeNull();

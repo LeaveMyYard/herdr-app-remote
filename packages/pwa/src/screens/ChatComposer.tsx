@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { bridgeApi } from "@herdr-remote/protocol";
 import { useHostName } from "../bridge/host-name";
-import { KeysSheet, type KeysInput } from "./KeysSheet";
+import { KeysButton, type KeysInput } from "./KeysSheet";
+import * as W from "./keys-words";
 
 /** The bridge's answer to `terminal.send`. */
 export interface SendOutcome {
@@ -85,8 +86,8 @@ export const SOON_MS = 10 * 60_000;
 export function typingLine(until: number | null, now: number): { text: string; soon: boolean } | null {
   if (until === null) return null;
   const left = until - now;
-  if (left >= SOON_MS) return { text: `Typing is on until ${clockOf(until)}`, soon: false };
-  return { text: `Typing turns off in ${Math.max(1, Math.ceil(left / 60_000))} min, at ${clockOf(until)}`, soon: true };
+  if (left >= SOON_MS) return { text: W.typingUntil(clockOf(until)), soon: false };
+  return { text: W.typingSoon(Math.max(1, Math.ceil(left / 60_000)), clockOf(until)), soon: true };
 }
 
 /** Re-renders at each minute boundary while `on`, so the countdown moves. */
@@ -105,13 +106,6 @@ function useMinuteTick(on: boolean, now: () => number): void {
     return () => clearTimeout(t);
   }, [on, now]);
 }
-
-const KEYBOARD = (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-    <rect x="2.5" y="6" width="19" height="12" rx="2" />
-    <path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M7 14h10" />
-  </svg>
-);
 
 const CLOCK = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ flex: "none" }}>
@@ -134,8 +128,6 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
   demoSheet?: { open: boolean; pressed: string | null };
 }) {
   const host = useHostName();
-  const [sheet, setSheet] = useState(demoSheet?.open ?? false);
-  const closeSheet = useCallback(() => setSheet(false), []);
   useMinuteTick(input.until !== null, now);
   const line = typingLine(input.until, now());
   const [text, setText] = useState("");
@@ -153,7 +145,6 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
     setText("");
     setAsking(null);
     setNote(null);
-    setSheet(false);
   }, [terminal]);
 
   const go = async (value: string) => {
@@ -247,18 +238,7 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
           /
         </button>
         <span className="f1" />
-        <button
-          type="button"
-          className={`row nf chat-key chat-keys-open${input.keys?.enabled ? "" : " chat-keys-off"}`}
-          aria-label="Keys: open the special keys menu"
-          aria-haspopup="dialog"
-          aria-expanded={sheet}
-          onClick={() => setSheet(true)}
-        >
-          {KEYBOARD}
-          <span className="chat-keys-word">Keys</span>
-          <span className="chat-keys-caret">▴</span>
-        </button>
+        <KeysButton key={terminal} agentName={agentName} host={host} keys={input.keys} demoSheet={demoSheet} />
       </div>
       <form className="row nf chat-form" onSubmit={onSubmit}>
         <label htmlFor="chat-msg" className="chat-sr">
@@ -286,7 +266,6 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
           </svg>
         </button>
       </form>
-      {sheet ? <KeysSheet agentName={agentName} host={host} keys={input.keys} onClose={closeSheet} fallbackWords={(r) => sendWords(r, host)} {...(demoSheet?.pressed ? { demoPressed: demoSheet.pressed } : {})} /> : null}
     </>
   );
 }

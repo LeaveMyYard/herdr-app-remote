@@ -26,8 +26,8 @@ const CAPS = Object.freeze([
   ['inbox.answer', 'Answer questions', 'Answer, draft and dismiss in the inbox'],
   ['navigate', 'Navigate', 'Focus agents, tabs and spaces on this computer'],
   ['terminal.input', 'Terminal input', 'Type text into terminals, then Enter'],
-  // S16b: the same switch as terminal input (asks how long, shows "until"). No description line: the board has none.
-  ['terminal.keys', 'Special keys', ''],
+  // S16b: the same switch as terminal input (asks how long, shows "until"). Wording: operator, 2026-11-11.
+  ['terminal.keys', 'Special keys', 'Lets this phone press Esc, Ctrl-C and the arrow keys in a terminal.'],
   ['push', 'Notifications', 'Receive push notifications'],
 ]);
 

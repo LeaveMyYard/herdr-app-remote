@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { bridgeApi } from "@herdr-remote/protocol";
 import { Icon } from "../components/Icon";
 import { Tile } from "../components/StateMarks";
 import type { SendOutcome } from "./ChatComposer";
+import * as W from "./keys-words";
 
 /** The special-keys menu (S16b) as the phone sees it: whether it may press, and the desktop's menu. */
 export interface KeysInput {
@@ -14,19 +15,24 @@ export interface KeysInput {
   press: (key: string, rev: string) => Promise<SendOutcome>;
 }
 
-/** What a refused or uncertain press means here. Nothing is ever pressed again by itself. */
-export function pressWords(r: SendOutcome, host: string, fallback: (r: SendOutcome) => string): string {
-  if (r.unknown_effect) return fallback(r);
+/**
+ * What a refused or uncertain press means here (design/COPY.md, and the operator's 2026-11-11 answer for every
+ * other failure). Nothing is ever pressed again by itself: "Try again" is the person's own tap.
+ */
+export function pressWords(r: SendOutcome, ctx: { host: string; agent: string; label: string }): string {
   switch (r.code) {
     case "keys_changed":
     case "unknown_key":
-      return `The key list changed on ${host}. Look again.`;
+      return W.keysChanged(ctx.host);
     case "terminal_blocked":
-      return "The agent is waiting on a dialog at the desktop. Nothing was pressed.";
+      return W.KEYS_DIALOG;
     case "forbidden":
-      return `Special keys are off for this phone. Turn them on in Remote on ${host}.`;
+      return W.keysOff(ctx.host);
+    case "terminal_not_found":
+    case "terminal_finished":
+      return W.terminalClosed(ctx.agent);
     default:
-      return fallback(r);
+      return W.pressFailed(ctx.label);
   }
 }
 
@@ -49,13 +55,11 @@ function KeyCell({ entry, disabled, pressed, onPress }: { entry: bridgeApi.KeyEn
  * "Your keys". With `terminal.keys` off the keys are drawn but can't be pressed, and a note says where to turn
  * them on.
  */
-export function KeysSheet({ agentName, host, keys, onClose, fallbackWords, demoPressed }: {
+export function KeysSheet({ agentName, host, keys, onClose, demoPressed }: {
   agentName: string;
   host: string;
   keys: KeysInput | undefined;
   onClose: () => void;
-  /** The composer's words for outcomes the sheet has no own words for. */
-  fallbackWords: (r: SendOutcome) => string;
   /** Demo data only: the id of the key shown as just pressed. */
   demoPressed?: string;
 }) {
@@ -117,7 +121,7 @@ export function KeysSheet({ agentName, host, keys, onClose, fallbackWords, demoP
     }
     setBusy(false);
     if (r.ok) setPressed({ id: e.id, label: e.label });
-    else setNote(pressWords(r, host, fallbackWords));
+    else setNote(pressWords(r, { host, agent: agentName, label: e.label }));
   };
 
   const entries = menu?.keys ?? [];
@@ -137,8 +141,8 @@ export function KeysSheet({ agentName, host, keys, onClose, fallbackWords, demoP
         <span className="nf keys-grip" aria-hidden="true" />
         <div className="row keys-head">
           <div className="col f1 keys-titles">
-            <span className="keys-title">Keys</span>
-            <span className="keys-sub">{on ? `Pressed at once in ${agentName}'s terminal.` : `${agentName}'s terminal`}</span>
+            <span className="keys-title">{W.KEYS_TITLE}</span>
+            <span className="keys-sub">{on ? W.keysSub(agentName) : W.keysSubOff(agentName)}</span>
           </div>
           <button type="button" aria-label="Close" className="row nf keys-close" onClick={onClose}>
             <Icon name="x" size={14} />
@@ -148,7 +152,7 @@ export function KeysSheet({ agentName, host, keys, onClose, fallbackWords, demoP
         {own.length > 0 ? (
           <>
             <div className="row keys-rule">
-              <span>Your keys</span>
+              <span>{W.YOUR_KEYS}</span>
               <span className="f1 keys-line" />
             </div>
             {grid(own)}
@@ -157,7 +161,7 @@ export function KeysSheet({ agentName, host, keys, onClose, fallbackWords, demoP
         {!on ? (
           <div role="status" className="row keys-off">
             <span className="nf keys-off-dot" aria-hidden="true" />
-            <span className="f1">{`Special keys are off for this phone. Turn them on in Remote on ${host}.`}</span>
+            <span className="f1">{W.keysOff(host)}</span>
           </div>
         ) : (
           <>
@@ -168,13 +172,54 @@ export function KeysSheet({ agentName, host, keys, onClose, fallbackWords, demoP
             ) : pressed ? (
               <div role="status" className="row keys-done">
                 <Tile code="done" size={14} still />
-                {`Pressed ${pressed.label}.`}
+                {W.pressedWords(pressed.label)}
               </div>
             ) : null}
-            <div className="keys-foot">{`Change this list in keys.json on ${host}.`}</div>
+            <div className="keys-foot">{W.keysFoot(host)}</div>
           </>
         )}
       </section>
+    </>
+  );
+}
+
+const KEYBOARD = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M7 14h10" />
+  </svg>
+);
+
+/**
+ * The key bar's "Keys ▴" button and the sheet it opens. On the composer's key bar while typing is on, and on a bar
+ * of its own while only `terminal.keys` is on (operator, 2026-11-11).
+ */
+export function KeysButton({ agentName, host, keys, disabled, demoSheet }: {
+  agentName: string;
+  host: string;
+  keys: KeysInput | undefined;
+  disabled?: boolean;
+  /** Demo data only: the sheet open at first, and the key shown as pressed. */
+  demoSheet?: { open: boolean; pressed: string | null } | undefined;
+}) {
+  const [open, setOpen] = useState(demoSheet?.open ?? false);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <>
+      <button
+        type="button"
+        className={`row nf chat-key chat-keys-open${keys?.enabled ? "" : " chat-keys-off"}`}
+        aria-label={W.KEYS_BUTTON_LABEL}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
+        {KEYBOARD}
+        <span className="chat-keys-word">{W.KEYS_BUTTON}</span>
+        <span className="chat-keys-caret">▴</span>
+      </button>
+      {open ? <KeysSheet agentName={agentName} host={host} keys={keys} onClose={close} {...(demoSheet?.pressed ? { demoPressed: demoSheet.pressed } : {})} /> : null}
     </>
   );
 }
