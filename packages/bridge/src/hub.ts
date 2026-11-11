@@ -324,11 +324,21 @@ export class Hub {
   }
 }
 
+/** At most `max` UTF-16 units, cut between code points, so a pair is never split. */
+export function capText(text: string, max: number): string {
+  let out = "";
+  for (const c of text) {
+    if (out.length + c.length > max) break;
+    out += c;
+  }
+  return out;
+}
+
 /** The client's copy of a result: `audit_label` (and anything else) stays on the bridge. */
 export function toRes(id: string, r: ActResult): bridgeApi.Res {
   const out: bridgeApi.Res = r.ok ? { type: "res", id, ok: true } : { type: "res", id, ok: false, code: r.code ?? "failed" };
   if (!r.ok && r.unknown_effect) out.unknown_effect = true;
-  if (typeof r.message === "string" && r.message !== "") out.message = r.message.slice(0, 2000);
+  if (typeof r.message === "string" && r.message !== "") out.message = capText(r.message, 2000);
   if (r.closed !== undefined && (bridgeApi.INBOX_CLOSED as readonly string[]).includes(r.closed)) out.closed = r.closed;
   return out;
 }

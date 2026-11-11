@@ -58,6 +58,9 @@ export const ANSWER = {
   nothingYet: "Nothing to send yet",
   answerOneFirst: "Answer at least one question first.",
   gone: "This group is no longer open.",
+  /** The plugin's own words for a question that closed in an open group (words.js `changeWords`). */
+  questionClosed: (qid: number): string => `Q${qid} closed in this group. Look at the rest again.`,
+  lookAgain: "Look again",
   backToInbox: "Back to the inbox",
   DISMISS: "Dismiss",
   DISMISS_CONFIRM: "Dismiss all?",

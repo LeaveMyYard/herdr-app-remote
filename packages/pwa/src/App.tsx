@@ -204,6 +204,7 @@ export function App({ connection, tabBadges, data, live, act }: AppProps) {
       <div className="hd ph qn">
         {row && row.kind === "group" ? (
           <Question
+            key={row.key}
             row={row as Extract<typeof row, { kind: "group" }>}
             tab={sub === "submit" ? "submit" : Number(sub)}
             host={live ? data?.host : demoHost}

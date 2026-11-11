@@ -3,7 +3,7 @@ import type { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { closedReason, resultWords, type ActFn, type ActResult, type ClosedRows } from "../inbox/act";
 import { GRACE_MS, useArmed, VIEW_ARM_MS } from "../inbox/arm";
 import { age, groupTitle, whereOf, type Of } from "../inbox/model";
-import { ANSWER } from "../inbox/words";
+import { ANSWER, CUT } from "../inbox/words";
 
 type Group = Of<"group">;
 type Q = bridgeApi.InboxQuestion;
@@ -108,11 +108,40 @@ export interface QuestionProps {
 /** PhoneQuestion and PhoneReview (design/): one group of the herdr-inbox, answered through the bridge. */
 export function Question(props: QuestionProps) {
   const { row, tab } = props;
-  const lone = row.questions.length === 1;
+  // Decided when the group opens, as the overlay decides it on the operator's move: a group that drops to one
+  // question while open stays a group (Next and Submit), so Next never turns into Send under the finger.
+  const [lone] = useState(() => row.questions.length === 1);
   if (tab === "submit" && !lone) return <Review {...props} />;
-  const q = row.questions.find((x) => x.id === tab) ?? row.questions[0];
-  if (!q) return null;
+  const q = row.questions.find((x) => x.id === tab);
+  // The question on screen closed elsewhere: say so, and never slide another question (and its draft) under the finger.
+  if (!q) return <ClosedQuestion {...props} lone={lone} qid={typeof tab === "number" ? tab : null} />;
   return <OneQuestion key={`${row.key}/${q.id}`} {...props} q={q} lone={lone} />;
+}
+
+function ClosedQuestion(props: QuestionProps & { lone: boolean; qid: number | null }) {
+  const { row, host, now, lone, qid } = props;
+  const first = row.questions[0];
+  return (
+    <>
+      <Head row={row} host={host} now={now} q={null} />
+      {lone ? null : <Tabs row={row} current={qid ?? 0} />}
+      <main className="col f1 qn-main">
+        <p className="qn-said" role="alert">
+          {qid !== null ? ANSWER.questionClosed(qid) : ANSWER.gone}
+        </p>
+      </main>
+      <div className="row nf qn-foot">
+        <a href="#/inbox" className="row f1 qn-later">
+          {ANSWER.later}
+        </a>
+        {first ? (
+          <a href={hrefOf(row.key, first.id)} className="row qn-next">
+            {ANSWER.lookAgain}
+          </a>
+        ) : null}
+      </div>
+    </>
+  );
 }
 
 function useSend(props: QuestionProps) {
@@ -251,6 +280,11 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
           <span className="mono qn-hint">{q.multi_select ? "pick any" : "pick one"}</span>
         </div>
         <p className="qn-text">{q.question}</p>
+        {q.cut ? (
+          <p className="qn-said" role="note">
+            {CUT}
+          </p>
+        ) : null}
         {q.context ? <p className="qn-context">{q.context}</p> : null}
         <div className="col qn-opts" role="group" aria-label="Options">
           {q.options.map((o, i) => (

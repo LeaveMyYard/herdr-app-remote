@@ -158,6 +158,36 @@ describe("Question: a lone question", () => {
   });
 });
 
+describe("Question: a question that closes under the finger", () => {
+  it("says so, and never slides the next question (or Send) under the finger", async () => {
+    const a = fakeAct();
+    const closed = new ClosedRows();
+    const two = { ...big(), questions: big().questions.filter((q) => q.id !== 125) };
+    const { rerender } = render(<Question row={two} tab={123} host={demoHost} now={DEMO_NOW} act={a.fn} closed={closed} />);
+    wait();
+    // Q123 is answered elsewhere: only Q124 (with its stored draft) is left.
+    const left = { ...two, rev: "rev-2", questions: two.questions.filter((q) => q.id !== 123) };
+    rerender(<Question row={left} tab={123} host={demoHost} now={DEMO_NOW} act={a.fn} closed={closed} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Q123 closed in this group. Look at the rest again.");
+    expect(screen.queryByRole("button", { name: "Send ⏎" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Option X/ })).toBeNull();
+    wait(1_000);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(a.calls).toEqual([]);
+    // Looking again at the one question left: still a group (Next, then Review), never a one-tap Send.
+    rerender(<Question row={left} tab={124} host={demoHost} now={DEMO_NOW} act={a.fn} closed={closed} />);
+    expect(screen.getByRole("button", { name: "Next ⏎" })).toBeInTheDocument();
+    rerender(<Question row={left} tab="submit" host={demoHost} now={DEMO_NOW} act={a.fn} closed={closed} />);
+    expect(screen.getByText("Review your answers")).toBeInTheDocument();
+  });
+
+  it("says when a question's text was cut", () => {
+    const row = { ...lone(), questions: lone().questions.map((q) => ({ ...q, cut: true })) };
+    question(row, 127);
+    expect(screen.getByRole("note")).toHaveTextContent("This text was cut to fit the feed.");
+  });
+});
+
 describe("Question: a group", () => {
   it("stores a draft on Next and moves on; an unchanged answer moves on without a draft", async () => {
     const a = fakeAct();
@@ -276,7 +306,13 @@ describe("Inbox: placeholders and the footer", () => {
     expect(alertRow).not.toHaveAttribute("aria-current");
     await tap(screen.getByRole("button", { name: "Seen" }));
     expect(a.calls).toEqual([]);
+    // Past the footer's own re-arm (GRACE) but within ROW_ARM: the row that just arrived still takes no tap.
+    wait(GRACE_MS + 100);
+    await tap(screen.getByRole("button", { name: "Seen" }));
+    expect(a.calls).toEqual([]);
     wait(ROW_ARM_MS);
+    await tap(screen.getByRole("button", { name: "Seen" }));
+    expect(a.calls.map((c) => c.args.key)).toEqual(["alert:456"]);
     await tap(alertRow);
     expect(alertRow).toHaveAttribute("aria-current", "true");
   });
