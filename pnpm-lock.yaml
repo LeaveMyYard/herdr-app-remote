@@ -32,6 +32,9 @@ importers:
       '@herdr-remote/protocol':
         specifier: workspace:*
         version: link:../protocol
+      es-module-lexer:
+        specifier: 1.7.0
+        version: 1.7.0
       ws:
         specifier: ^8.22.2
         version: 8.22.2
