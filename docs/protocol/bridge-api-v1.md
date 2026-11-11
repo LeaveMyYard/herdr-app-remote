@@ -35,6 +35,7 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 - GETs have no side effects.
 - **The WS upgrade uses a subprotocol, not a header.** A browser can't add headers to a WebSocket upgrade, so the client opens `new WebSocket(url, ["herdr-remote.v1"])`, and the bridge requires that subprotocol where PLAN §2 first said `X-Remote-Api: 1`. Like the header, a cross-site page can't make a simple request carry it, and the exact `Origin` and the `SameSite=Strict` cookie are required as well.
 
+<!-- PENDING-MERGE S5b (PR #24): this section describes pairing as merged on main. S5b adds /pair in Safari, the Home Screen transfer code and POST /api/v1/pair/transfer; update when it lands. -->
 ### Pairing
 
 1. The desktop shows a QR code for `https://<serve>/pair#c=<code>`. The code is 128-bit (22 base64url characters), valid for 5 minutes and single use. Showing a new code invalidates the previous one.
@@ -193,6 +194,7 @@ Payload: `{terminal, lines, truncated?}`. `lines` is an array of lines, each an 
 
 Source: while at least one client is subscribed, the bridge runs `hc read <t> --lines 200` once a second (never overlapping, backing off to 5 s while it fails) and `hc ls --json` on the first read and every tenth one after, to notice a terminal that has closed (`stale` `terminal_not_found`). Nothing runs with no subscriber, and at most 6 chats are read at once (`too_many_chats`). `hc events` is not used: it has not been tested against a live core (PLAN section 8). The `hc ls --json` shape is likewise unverified, so its output is read tolerantly and an unrecognised shape is ignored. The topic needs the `view` capability and sends nothing to the terminal; input is `terminal.send` (S16, below).
 
+<!-- PENDING-MERGE S16b (PR #22): special keys (hc keys, capability terminal.keys, the keys topic) are not on main yet; the key bar note below is true only until it lands. -->
 ### `terminal.send` (S16)
 
 `act terminal.send {terminal, text}` types into a terminal. It needs `terminal.input`. The bridge runs exactly `hc send --json -- <terminal> <text>`, with no shell: hc pastes the text and presses Enter. The `--` matters: without it a text such as `--force` would be read as hc's own flag. `--force` itself is never passed, so hc still refuses to type into a program that is blocked on a dialog.
@@ -309,7 +311,7 @@ A non-zero exit outside the contract, or bad stdout, is reported as `res {ok: fa
 - **New.** The toast marks of the feed protocol: the first good feed announces nothing; after that a row above the marks is `new` for 60 s.
 - **Unknown words.** An unknown row kind is published as `{key, kind, actions: [], new}`; an unknown delivery state as `known: false` with no actions; unknown severity, alert kind and asker host read as `warning`, `agent` and `unknown`. Remote rows are read-only (`actions: []`).
 
-The driver is not started by `createBridgeServer` yet (nor is `PluginsTopicDriver`); whichever slice wires startup constructs it with `{hub, appHome, run}` and calls `start()`.
+`startApp` (`packages/bridge/src/app/index.ts`) constructs the driver with `{hub, appHome, run, binaries}` and starts it, along with `PluginsTopicDriver`, `PanoramaTopicDriver`, `UsageTopicDriver` and `ChatTopicDriver`; `createBridgeServer` alone starts none of them.
 
 ## Inbox acts (S11)
 
@@ -330,4 +332,4 @@ The driver is not started by `createBridgeServer` yet (nor is `PluginsTopicDrive
 - **Results.** The plugin's own `readResult` reads the verb. Success is `ok: true` with the plugin's words for `queued`, `held` and skipped questions in `message`; a result with no token (the row is gone) adds `closed` (`answered`, `dismissed`, `acked`, `hidden`). A refusal is `ok: false` with the inbox's code (`stale`, `already_sending`, `invalid`, `read_only`, `busy`, `not_migrated`, `error`), the plugin's `refusalWords` as `message`, and for `stale` the inbox's `closed` word. Any other exit, bad stdout, a result naming another row, or a run past 8 s is `code: unknown_effect, unknown_effect: true`: the phone says so and the feed is reloaded; nothing is repeated.
 - **Tokens after a verb.** The token of the bridge's last result is used for the row until a feed written after that result that lists the row, or a later `app show`, arrives (app-commands-v1; a left-out row never arrives in a feed). Until then the verb's effect is applied to the bridge's copy of the row (a draft stored or cleared, answered or dismissed questions gone), so the `rev`, the phone's view and the audit label all describe what the new token covers. The new `rev` is published before the `res` is sent, and the feed is read again. One verb runs at a time.
 - **Touch.** The PWA keeps the inbox's own arm delays (`model/data.js`): a screen takes no action tap for 400 ms (`VIEW_ARM`) after it appears; after a change the operator did not cause (its row or the footer's row changed, a refusal came back) taps are dropped for 500 ms (`GRACE`); a row that has just arrived takes no tap for 1 s (`ROW_ARM`); a confirming tap (Dismiss) is armed on its own.
-- **Known limitation (app-commands-v1).** `exec` has no stdin, so the answer (`--detail`) is on the verb's command line while it runs, for up to its 5 s budget. Any local user can read it from the process list then, although the feed is 0600. The bridge adds no other copy: it is not logged, and it never leaves the bridge in a result.
+- **Known limitation (app-commands-v1).** `exec` has no stdin, so the answer (`--detail`) is on the verb's command line while it runs, for up to its 8 s budget. Any local user can read it from the process list then, although the feed is 0600. The bridge adds no other copy: it is not logged, and it never leaves the bridge in a result.

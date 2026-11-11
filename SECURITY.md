@@ -1,0 +1,88 @@
+# Security
+
+herdr-app-remote lets a phone read, and optionally act on, a herdr-app running on your computer. This page says what it defends against, how, and which risks it accepts. The wire-level details are in [docs/protocol/bridge-api-v1.md](docs/protocol/bridge-api-v1.md) and [docs/protocol/mod-link-v1.md](docs/protocol/mod-link-v1.md); the design is in `docs/PLAN.md` section 2.
+
+## What is protected
+
+- Control of your agents and terminals: typing into a terminal, answering an agent's question, switching what herdr-app shows.
+- What your agents are doing: names, states, question titles, terminal contents.
+- Your tailnet's other services: this tool must not turn `tailscale serve` or the bridge into a way in.
+
+## Threat model
+
+In scope:
+
+- another device on your tailnet, or a different tailnet user, reaching the bridge;
+- a web page in a browser on your phone or computer attacking the bridge (CSRF, DNS rebinding, cross-site WebSocket);
+- a stolen or lost phone;
+- a request that arrives through Tailscale Funnel (the public internet);
+- a bug that would make the phone a generic remote shell.
+
+Out of scope (see "Accepted risks"): anything running as your own user on the computer, root, and a compromised Tailscale account or node.
+
+## How it is defended
+
+**Loopback only.** The bridge's two listeners (the API and the mod link) bind to `127.0.0.1`. The tailnet reaches the API only through `tailscale serve --bg --https=8443 http://127.0.0.1:47391`.
+
+**Funnel never.** No command the bridge runs enables Funnel. The bridge checks `tailscale serve status --json` at start and every 30 s. While Funnel is on for the serve port, or for any handler that forwards to the API port, every request (even `/healthz`) answers `503 funnel` and live sockets are closed. Before the first verdict the bridge answers `503 starting`, and `503 funnel_unknown` while it cannot tell; after one, an unreadable check keeps the last verdict, so once Funnel was seen on, only a clean "off" serves again.
+
+**Request guards**, in this order. Steps 1 to 3 apply to every request except `GET /healthz`; steps 4 to 6 apply to the WebSocket upgrade and to every non-GET request (step 6 except `POST /api/v1/pair`). A plain GET has no side effects, so the app shell and `GET /api/v1/me` need no cookie:
+
+1. Remote access is not paused (`503 paused`).
+2. `Host` equals the serve name exactly (DNS-rebinding guard).
+3. `Tailscale-User-Login` equals the desktop owner's login. Tagged devices send none and are refused. This is a precondition, never the credential: any local process can forge the header on 127.0.0.1.
+4. For the WebSocket upgrade and every non-GET request: `Origin` equals `https://<serve name>`.
+5. Non-GET requests carry `X-Remote-Api: 1`; the WebSocket upgrade offers the subprotocol `herdr-remote.v1` instead, since browsers cannot set headers on it.
+6. The device cookie names an approved device of the current owner login.
+
+Host, identity and Origin failures all answer the same `403 forbidden`, so a probe learns nothing about which check failed. GET requests have no side effects. The CSP is `default-src 'self'` with no inline script; terminal and feed text is always rendered as text, never as HTML.
+
+**Pairing and the cookie.** The desktop shows a one-time code (128 bits, 5 minutes, single use; a new code invalidates the old one). A phone that posts it becomes `pending` and receives a cookie, but it can do nothing until you approve it on the desktop. The cookie is `__Host-hr-device`, `HttpOnly; Secure; SameSite=Strict; Path=/`, holding a random 256-bit token; only its sha256 is stored (`devices.json`, mode 0600). Failed codes are rate-limited (10 a minute, global), at most 3 requests may be pending, and a pending request expires after 10 minutes. The phone never chooses its own name: the bridge calls it "Phone 1", "Phone 2", and the approval toast never shows a name. Revoking a device closes its sockets at once.
+
+*The Home Screen transfer code described in PR #24 is pending merge; until then the Home Screen app pairs separately.*
+
+<!-- PENDING-MERGE S5b (PR #24): add the Home Screen transfer code here once merged (one-time, bound to the paired device, 10 minutes, a second token for the same device, voided by revoke/pause/view off/serve change). Until then the cookie is the only credential and the Home Screen app pairs separately. -->
+
+**Capabilities**, checked by the bridge on every action (the phone's own view of them is only a hint):
+
+| capability | default | allows |
+|---|---|---|
+| `view` | on after approval | reading topics |
+| `inbox.answer` | on | the inbox verbs: draft, answer, dismiss, ack, retry, stop showing |
+| `navigate` | off | `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
+| `terminal.input` | **off** | `terminal.send` (`hc send`); desktop-only switch, with an optional expiry |
+| `terminal.keys` *(pending PR #22)* | **off** | special keys from a fixed menu (`hc keys`); desktop-only switch, with an optional expiry |
+| `push` | off | push subscriptions |
+
+*`terminal.keys` is not on main yet (pending PR #22); until it merges there are five capabilities.*
+
+<!-- PENDING-MERGE S16b (PR #22): `terminal.keys` is not on main yet. Until it merges, main has the first five capabilities; update this table once it lands, and add the matching accepted risk (special keys are on `hc keys`' command line while a press runs). -->
+
+`terminal.input` and `terminal.keys` can be switched on only from the desktop Remote panel, for a chosen time or without limit; when the time is up the bridge turns them off by itself. There is no generic `run`, no `exec`, no arbitrary `herdr-app do`: any other action is refused and logged. The mod re-checks its own small allowlist (the four `navigate` commands) before running anything. `hc send` is called with `--` so text such as `--force` cannot be read as a flag, and never with `--force`.
+
+**Rate limits**, per approved device: 20 WebSocket upgrades a minute, 30 actions per 10 s, 6 `terminal.send` per 10 s. A refusal is logged once per filled window.
+
+**Audit without free text.** `activity.jsonl` (mode 0600, rotated at 1 MiB, three old files kept) records pairing, approvals, capability changes, pause, connections and every action with its outcome. It stores identifiers and lengths only: "Phone 1 sent 12 chars to t3". It never stores what you typed or an answer's text. For an inbox answer it records the option label the bridge looked up itself ("Phone 1 answered Q119 (Option B)"); a label sent by the phone is never logged. Push audit lines carry identifiers, never titles or endpoints. If the log cannot be written, the panel says so, and `terminal.send` is refused until it can.
+
+**Secrets stay on the computer.** The phone holds only its cookie. Inbox row tokens stay in the bridge, and each action is bound to the row version the phone was shown. Push uses VAPID keys in `vapid.json` (0600) and encrypted payloads; push endpoints are limited to the known push services. Push payloads show question titles ("Agent 1: Question Title 123") and a fixed word, never question text.
+
+**Serve is handled with care.** Start serving refuses if the port already has a handler; Stop serving removes only a handler this bridge created and recorded; a serve config that someone else made is never changed. The bridge never runs `tailscale set`; for the Linux operator error it shows the command for you to run.
+
+**Pause** refuses everything except `/healthz` and closes live sockets.
+
+## Accepted risks
+
+These are known and accepted for v1.
+
+- **The mod does not authenticate the bridge.** The bridge proves nothing back to the mod. If a bridge dies and leaves `runtime.json`, another local process could bind the stale port, receive the link token and host state, and show text as a toast. The mod only trusts a runtime file that names the installed bundle hash and a live pid, and its `run` commands stay limited to the navigate allowlist, so nothing outside that list can run. A process that binds the port while the real bridge is alive, or a reused pid, still gets through. A challenge-response handshake is a candidate for v2.
+- **Inbox answer text is on a command line for up to 8 seconds (the verb's time limit).** herdr-inbox's verbs take the answer as `--detail ...` (its protocol has no stdin form), so while a verb runs any local user can read it in the process list. The bridge adds no other copy.
+- **Terminal input is on `hc send`'s command line** while a send runs (up to 15 s, because `hc` holds a send while someone types at the desktop), visible to local users the same way. `hc` has no stdin form for send.
+- **Serve config is global to your Tailscale node.** `tailscale serve` has no compare-and-set. A handler mounted on `:8443` between the bridge's read and its command could be replaced by Start or removed by Stop. The window is a process spawn wide, and nothing else can make the bridge change a config it did not create. Other tools that use `tailscale serve` on the same port will collide, and the bridge refuses rather than overrides.
+- **Anything running as your user can do what the bridge can.** A local process with your user rights can read `runtime.json` (mode 0600), `devices.json` and the audit log, and talk to the panel channel. The cookie, the identity header and the token do not defend against it, and `tailscale serve`'s headers can be forged on loopback. Local malware is out of scope.
+- **The tailnet is a trust boundary.** The owner login check means another user of the same tailnet is refused, but a compromised Tailscale account, or an admin of your tailnet, is not defended against.
+- **A lost phone** is protected by the phone's own lock and by revoking it from the desktop; the cookie is long-lived (400 days) and is not bound to the device hardware.
+- **iOS** kills background sockets and can let push subscriptions lapse; the app reconnects when it comes back, and never retries an action by itself when its outcome is unknown.
+
+## Reporting a problem
+
+Please do not post details of a vulnerability in a public issue. Use GitHub's private vulnerability reporting on this repository if it is available, or open an issue that asks for a private channel and contains no details.
