@@ -1,0 +1,75 @@
+{
+  "type": "panel",
+  "seq": 1,
+  "view": {
+    "status": "setup",
+    "url": null,
+    "checks": [
+      {
+        "id": "serve",
+        "label": "Not serving yet",
+        "detail": "Set up Tailscale to let a phone connect",
+        "state": "off"
+      },
+      {
+        "id": "bridge",
+        "label": "Bridge running",
+        "detail": "up 3m",
+        "state": "ok"
+      }
+    ],
+    "devices": [],
+    "plugins": [],
+    "activity": [],
+    "pairing": null,
+    "setup": {
+      "step": 4,
+      "steps": [
+        {
+          "id": "installed",
+          "state": "done",
+          "title": "Tailscale installed",
+          "detail": "Found tailscale 1.76.1 on this computer"
+        },
+        {
+          "id": "signed_in",
+          "state": "done",
+          "title": "Signed in to a tailnet",
+          "detail": "example-tailnet · this computer is desk-1"
+        },
+        {
+          "id": "https",
+          "state": "done",
+          "title": "HTTPS on the tailnet",
+          "detail": "Needed for the Home Screen app and push"
+        },
+        {
+          "id": "serving",
+          "state": "current",
+          "title": "Share herdr on the tailnet",
+          "detail": "Runs tailscale serve for the bridge. Only devices on your tailnet can reach it.",
+          "problem": {
+            "code": "operator",
+            "message": "Tailscale lets only its operator change serve settings. Run this once in a terminal, then try again.",
+            "fix": "sudo tailscale set --operator=$USER",
+            "url": "https://evil.example/"
+          }
+        },
+        {
+          "id": "phone",
+          "state": "todo",
+          "title": "Add your phone",
+          "detail": "Install Tailscale on the phone and sign in to the same tailnet, then scan the QR code."
+        }
+      ],
+      "serving": "off",
+      "port": 8443,
+      "url": null,
+      "login": null,
+      "can_start": true,
+      "can_stop": false,
+      "busy": false,
+      "checked_at": 1762862400000
+    }
+  }
+}

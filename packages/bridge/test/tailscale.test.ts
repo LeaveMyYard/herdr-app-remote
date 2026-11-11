@@ -16,7 +16,7 @@ import {
   portUse,
   versionBelow,
 } from "../src/tailscale/cli.js";
-import { SERVE_RECORD, Setup } from "../src/tailscale/setup.js";
+import { SERVE_RECORD, Setup, SetupClosedError, type SetupAction } from "../src/tailscale/setup.js";
 
 const FAKE = fileURLToPath(new URL("./fake-tailscale.mjs", import.meta.url));
 const FIX = fileURLToPath(new URL("./fixtures/tailscale/", import.meta.url));
@@ -28,8 +28,8 @@ const HOST = `${DNS}:8443`;
 
 const dirs: string[] = [];
 const setups: Setup[] = [];
-afterEach(() => {
-  for (const s of setups.splice(0)) s.close();
+afterEach(async () => {
+  for (const s of setups.splice(0)) await s.close();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -40,6 +40,7 @@ interface Rig {
   setup: Setup;
   ids: (ServeIdentity | null)[];
   states: bridgeApi.SetupTopic[];
+  actions: SetupAction[];
   conf(c: Record<string, string>): void;
   serve(doc: unknown): void;
   serveDoc(): unknown;
@@ -61,6 +62,7 @@ function rig(opts: { conf?: Record<string, string>; serve?: string; serveTimeout
   const ids: (ServeIdentity | null)[] = [];
   const states: bridgeApi.SetupTopic[] = [];
   const phone = { on: false };
+  const actions: SetupAction[] = [];
   const dataDir = join(dir, "data");
   const setup = new Setup({
     run,
@@ -70,6 +72,7 @@ function rig(opts: { conf?: Record<string, string>; serve?: string; serveTimeout
     hasPhone: () => phone.on,
     onIdentity: (id) => ids.push(id),
     onState: (s) => states.push(s),
+    onAction: (a) => actions.push(a),
     ...(opts.serveTimeoutMs ? { serveTimeoutMs: opts.serveTimeoutMs } : {}),
     ...(opts.onFunnel ? { onFunnel: opts.onFunnel } : {}),
   });
@@ -81,6 +84,7 @@ function rig(opts: { conf?: Record<string, string>; serve?: string; serveTimeout
     setup,
     ids,
     states,
+    actions,
     conf,
     serve,
     serveDoc: () => JSON.parse(readFileSync(join(dir, "serve.json"), "utf8")) as unknown,
@@ -281,14 +285,44 @@ describe("Start serving", () => {
     expect(r.ids).toEqual([]);
   });
 
-  it.each<[string, Record<string, string>]>([
-    ["HTTPS off", { status: "status-https-off.json" }],
-    ["signed out", { status: "status-needs-login.json" }],
-    ["tailscale unreadable", { version: "garbage" }],
-  ])("refuses before steps 1-3 are done (%s), and runs nothing", async (_n, c) => {
+  it.each<[string, Record<string, string>, bridgeApi.SetupProblemCode]>([
+    ["HTTPS off", { status: "status-https-off.json" }, "https_off"],
+    ["MagicDNS off", { status: "status-magicdns-off.json" }, "magicdns_off"],
+    ["signed out", { status: "status-needs-login.json" }, "needs_login"],
+    ["tagged", { status: "status-tagged.json" }, "tagged"],
+    ["too old", { version: "version-old.txt" }, "too_old"],
+    ["tailscale unreadable", { version: "garbage" }, "unknown"],
+  ])("refuses before steps 1-3 are done (%s) with the blocking step's code, and runs nothing", async (_n, c, code) => {
     const r = rig({ conf: c });
-    expect((await r.setup.start()).ok).toBe(false);
+    const res = await r.setup.start();
+    // The refusal names the step that blocks (the panel shows that step's problem), never a generic failure.
+    expect(res).toMatchObject({ ok: false, code, problem: { code } });
+    expect(r.setup.state.steps.find((x) => x.state === "current")?.problem?.code).toBe(code);
     expect(mutating(r.calls())).toEqual([]);
+    expect(r.actions).toEqual([{ op: "start", ok: false, code }]);
+  });
+
+  it("not installed: refused with not_installed", async () => {
+    const r = rig({ bin: "/nonexistent/s14/tailscale" });
+    expect(await r.setup.start()).toMatchObject({ ok: false, code: "not_installed" });
+  });
+
+  it("served by our command but the record can't be written: `failed`, with the command that stops it, and never removed by herdr", async () => {
+    const r = rig();
+    writeFileSync(r.dataDir, "not a directory"); // the data dir can't be created: writing the record fails
+    const res = await r.setup.start();
+    expect(res).toMatchObject({ ok: false, code: "failed", problem: { code: "failed", fix: "tailscale serve --https=8443 off" } });
+    expect(mutating(r.calls())).toEqual([START]);
+    // It works (served exactly as ours), but herdr does not treat it as its own.
+    expect(r.setup.state.serving).toBe("identical");
+    expect(r.setup.state.can_stop).toBe(false);
+    expect(r.ids).toEqual([{ host: HOST, login: "user-1@example" }]);
+    expect(await r.setup.stop()).toMatchObject({ ok: false, code: "not_ours" });
+    expect(mutating(r.calls())).toEqual([START]);
+    expect(r.actions).toEqual([
+      { op: "start", ok: false, code: "failed" },
+      { op: "stop", ok: false, code: "not_ours" },
+    ]);
   });
 
   it("an exact handler that appears while our command failed is not adopted as ours", async () => {
@@ -382,6 +416,38 @@ describe("Stop serving", () => {
     expect(await r.setup.stop()).toMatchObject({ ok: false, code: "operator", problem: { fix: OPERATOR_FIX } });
     expect(r.setup.state.serving).toBe("ours");
     expect(r.ids).toEqual([{ host: HOST, login: "user-1@example" }]);
+  });
+});
+
+describe("audit and shutdown", () => {
+  it("every Start and Stop reports its outcome as codes only; checks report nothing", async () => {
+    const r = rig();
+    await r.setup.check();
+    expect(await r.setup.start()).toEqual({ ok: true });
+    expect(await r.setup.stop()).toEqual({ ok: true });
+    r.conf({ set: "operator" });
+    await r.setup.start();
+    expect(r.actions).toEqual([
+      { op: "start", ok: true },
+      { op: "stop", ok: true },
+      { op: "start", ok: false, code: "operator" },
+    ]);
+    for (const a of r.actions) expect(Object.keys(a).sort()).toEqual(a.ok ? ["ok", "op"] : ["code", "ok", "op"]);
+  });
+
+  it("close waits for a Start in flight, then refuses new operations", async () => {
+    const r = rig({ conf: { set: "disabled" }, serveTimeoutMs: 800 });
+    const p = r.setup.start();
+    await new Promise((res) => setTimeout(res, 100)); // the serve command is running
+    expect(r.setup.state.busy).toBe(true);
+    await r.setup.close();
+    // Finished and reported before close resolved.
+    expect(r.actions).toEqual([{ op: "start", ok: false, code: "serve_disabled" }]);
+    expect(r.setup.state.busy).toBe(false);
+    expect(await p).toMatchObject({ ok: false, code: "serve_disabled" });
+    await expect(r.setup.start()).rejects.toBeInstanceOf(SetupClosedError);
+    await expect(r.setup.check()).rejects.toBeInstanceOf(SetupClosedError);
+    expect(r.actions).toEqual([{ op: "start", ok: false, code: "serve_disabled" }]);
   });
 });
 

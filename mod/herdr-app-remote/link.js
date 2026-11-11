@@ -21,6 +21,11 @@ export const MAX_LINE = 1024 * 1024;
 const MAX_TOAST = 500;
 /** A panel act that gets no `panel_res` in this long is reported as timed out. */
 export const ACT_TIMEOUT_MS = 10000;
+/**
+ * Start and Stop serving may wait on `tailscale serve` (cut off by the bridge after 20 s) between two rounds
+ * of reads, so `setup.*` acts get longer; the panel shows the bridge's busy state meanwhile.
+ */
+export const SETUP_ACT_TIMEOUT_MS = 90000;
 /** The key command that shows the Remote panel (main.js handles `open`). */
 const OPEN_ACTION = 'herdr-app-remote.open';
 
@@ -191,7 +196,7 @@ export class Link {
 
   /**
    * The panel copy asks the bridge for a desktop-only operation (approve, revoke, a capability, pause,
-   * a pairing code: `PANEL_ACT_ARGS` in mod-link.ts). The bridge validates it against its own strict
+   * a pairing code, Tailscale setup: `PANEL_ACT_ARGS` in mod-link.ts). The bridge validates it against its own strict
    * allowlist; this only carries it. Resolves `{ok, code?}`; never rejects.
    */
   act(cx, kind, args) {
@@ -202,7 +207,7 @@ export class Link {
     return new Promise((resolve) => {
       this.acts.set(id, resolve);
       cx.spawn(async (cx) => {
-        await cx.sleep(ACT_TIMEOUT_MS);
+        await cx.sleep(kind.startsWith('setup.') ? SETUP_ACT_TIMEOUT_MS : ACT_TIMEOUT_MS);
         if (this.acts.delete(id)) resolve({ ok: false, code: 'timeout' });
       });
       this.write(sock, { type: 'panel_act', id, kind, args }).catch(() => {

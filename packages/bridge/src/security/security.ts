@@ -228,6 +228,21 @@ export class Security {
     this.changed();
   }
 
+  /**
+   * A Tailscale "Start serving" or "Stop serving" finished (S14b). The line is built from the operation and a
+   * fixed problem code only: never CLI output, a host name or anything else free-form.
+   */
+  auditServe(a: { op: "start" | "stop"; ok: boolean; code?: string }): void {
+    const code = a.code !== undefined && /^[a-z_]{1,32}$/.test(a.code) ? a.code : "failed";
+    const text = a.ok
+      ? a.op === "start"
+        ? "Started serving on the tailnet"
+        : "Stopped serving on the tailnet"
+      : `${a.op === "start" ? "Start" : "Stop"} serving failed (${code})`;
+    this.bestEffort(() => this.audit({ event: `serve.${a.op}`, text, ...(a.ok ? { ok: true } : { ok: false, code }) }));
+    this.changed();
+  }
+
   // ---- request guard ----
 
   /** The `guard` for `createBridgeServer`. */

@@ -200,6 +200,145 @@ describe('panel copy', () => {
   });
 });
 
+const SETUP_FIXTURE = JSON.parse(readFileSync(fileURLToPath(new URL('../../fixtures/mod-link/bridge-to-mod/panel-setup.json', import.meta.url)), 'utf8'));
+const HTTPS_OFF = JSON.parse(readFileSync(fileURLToPath(new URL('../../fixtures/bridge-api/setup/https-off.json', import.meta.url)), 'utf8'));
+
+/** A not-yet-serving view: the Setup view, at step 4 with the operator problem unless overridden. */
+function setupView(setup = {}) {
+  const v = JSON.parse(JSON.stringify(SETUP_FIXTURE.view));
+  Object.assign(v.setup, setup);
+  return v;
+}
+async function pushSetup(v, want = 'Set up remote access') {
+  FakeBridge.send(conn, { type: 'panel', seq: 1, view: v });
+  for (let i = 0; i < 100 && !text(m).includes(want); i += 1) await settle(10);
+  await settle(20);
+}
+const acts = () => conn.lines.filter((l) => l.msg.type === 'panel_act').map((l) => l.msg);
+
+describe('setup view (DesktopSetup)', () => {
+  it('sanitize keeps the setup state; the shared fixture validates', () => {
+    expect(modLink.PanelView.safeParse(SETUP_FIXTURE.view).success).toBe(true);
+    const s = sanitize(SETUP_FIXTURE.view).setup;
+    expect(s).toMatchObject({ step: 4, can_start: true, can_stop: false, busy: false });
+    expect(s.steps[3].problem).toMatchObject({ code: 'operator', fix: 'sudo tailscale set --operator=$USER' });
+    expect(sanitize(FIXTURE.view).setup).toBeNull();
+  });
+
+  it('sanitize drops a problem URL outside the Tailscale admin, unknown codes and odd step lists', () => {
+    const bad = JSON.parse(JSON.stringify(SETUP_FIXTURE.view));
+    bad.setup.steps[3].problem.url = 'https://evil.example/admin/dns';
+    expect(sanitize(bad).setup.steps[3].problem.url).toBeNull();
+    bad.setup.steps[3].problem.url = 'file:///etc/passwd';
+    expect(sanitize(bad).setup.steps[3].problem.url).toBeNull();
+    bad.setup.steps[3].problem.code = 'rm -rf';
+    expect(sanitize(bad).setup.steps[3].problem).toBeNull();
+    expect(sanitize({ ...SETUP_FIXTURE.view, setup: { ...SETUP_FIXTURE.view.setup, steps: [] } }).setup).toBeNull();
+    expect(sanitize({ ...SETUP_FIXTURE.view, setup: { ...SETUP_FIXTURE.view.setup, can_start: 'yes' } }).setup.can_start).toBe(false);
+  });
+
+  it('draws the five steps with the board copy, replacing the tabs', async () => {
+    await pushSetup(setupView(HTTPS_OFF));
+    const t = text(m);
+    expect(t).toContain('Set up remote access');
+    expect(t).toContain('step 3 of 5');
+    expect(t).toContain('Use herdr from your phone over your private Tailscale network. Each step is checked by itself.');
+    for (const title of ['Tailscale installed', 'Signed in to a tailnet', 'HTTPS on the tailnet', 'Share herdr on the tailnet', 'Add your phone']) expect(t).toContain(title);
+    expect(t).toContain('HTTPS certificates are off for this tailnet.');
+    expect(t).toContain('Open Tailscale admin › DNS');
+    expect(t).toContain('Turn on MagicDNS and HTTPS Certificates there. Checking again every 5 s…');
+    expect(t).toContain('Check now');
+    expect(t).toContain('Start serving');
+    expect(find(m.tree, 'tabs')).toBeNull();
+    expect(find(m.tree, 'pause')).toBeNull();
+    // Done steps get the check mark, the current one its number.
+    expect(find(m.tree, 'mark-installed').children[0].type).toBe('svg');
+    expect(texts(find(m.tree, 'mark-https'))).toEqual(['3']);
+  });
+
+  it('Open Tailscale admin opens only the admin page; nothing is sent to the bridge', async () => {
+    await pushSetup(setupView(HTTPS_OFF));
+    click('open-admin');
+    expect(m.opened).toEqual(['https://login.tailscale.com/admin/dns']);
+    await settle(30);
+    expect(acts()).toEqual([]);
+  });
+
+  it('Start serving is disabled (no click handler) until the bridge offers it', async () => {
+    await pushSetup(setupView(HTTPS_OFF));
+    expect(find(m.tree, 'setup-start').handlers.on_click).toBeUndefined();
+    await pushSetup(setupView({ busy: true }), 'Checking…');
+    expect(find(m.tree, 'setup-start').handlers.on_click).toBeUndefined();
+  });
+
+  it('Check now and Start serving send exactly the argument-free acts', async () => {
+    await pushSetup(setupView());
+    click('setup-check');
+    const a = await FakeBridge.next(conn, (x) => x.type === 'panel_act');
+    expect(a).toMatchObject({ kind: 'setup.check', args: {} });
+    expect(modLink.checkPanelAct(a.kind, a.args).ok).toBe(true);
+    FakeBridge.send(conn, { type: 'panel_res', id: a.id, ok: true });
+    for (let i = 0; i < 100 && text(m).includes('Checking…'); i += 1) await settle(10);
+    click('setup-start');
+    const b = await FakeBridge.next(conn, (x) => x.type === 'panel_act' && x.kind === 'setup.start');
+    expect(b.args).toEqual({});
+    expect(modLink.checkPanelAct(b.kind, b.args).ok).toBe(true);
+    // While it runs, a second click sends nothing more.
+    await settle(20);
+    expect(text(m)).toContain('Starting…');
+    expect(find(m.tree, 'setup-start').handlers.on_click).toBeUndefined();
+    FakeBridge.send(conn, { type: 'panel_res', id: b.id, ok: false, code: 'operator' });
+    await settle(50);
+    // The step explains a setup refusal itself: no second message in the footer.
+    expect(find(m.tree, 'error')).toBeNull();
+    expect(acts()).toEqual([]); // nothing beyond the two acts read above
+  });
+
+  it('the operator fix is shown to copy, and never sent or run', async () => {
+    await pushSetup(setupView());
+    expect(texts(find(m.tree, 'fix-command'))).toEqual(['sudo tailscale set --operator=$USER']);
+    expect(text(m)).toContain('herdr never runs this for you.');
+    click('fix-copy');
+    expect(m.clipboard).toBe('sudo tailscale set --operator=$USER');
+    await settle(30);
+    expect(acts()).toEqual([]);
+    expect(world.ran).toEqual([]);
+  });
+
+  it('a transport failure on a setup act is still reported', async () => {
+    await pushSetup(setupView());
+    click('setup-check');
+    const a = await FakeBridge.next(conn, (x) => x.type === 'panel_act');
+    FakeBridge.send(conn, { type: 'panel_res', id: a.id, ok: false, code: 'no_setup' });
+    for (let i = 0; i < 100 && !find(m.tree, 'error'); i += 1) await settle(10);
+    expect(text(m)).toContain('This bridge does not manage Tailscale serve.');
+  });
+
+  it('Serving: the tabs return, and Stop serving asks once more before it sends setup.stop', async () => {
+    const v = view({ setup: { ...setupView().setup, step: 6, serving: 'ours', can_start: false, can_stop: true } });
+    await push(v);
+    expect(find(m.tree, 'tabs')).not.toBeNull();
+    click('stop-serving');
+    await settle(30);
+    expect(acts()).toEqual([]);
+    expect(text(m)).toContain('Phones lose access until you start again.');
+    click('stop-no');
+    expect(find(m.tree, 'stop-confirm')).toBeNull();
+    click('stop-serving');
+    click('stop-yes');
+    const a = await FakeBridge.next(conn, (x) => x.type === 'panel_act');
+    expect(a).toMatchObject({ kind: 'setup.stop', args: {} });
+    FakeBridge.send(conn, { type: 'panel_res', id: a.id, ok: false, code: 'not_ours' });
+    for (let i = 0; i < 100 && !find(m.tree, 'error'); i += 1) await settle(10);
+    expect(text(m)).toContain('herdr did not set up this serve handler');
+  });
+
+  it('no Stop serving for a handler herdr did not create', async () => {
+    await push(view({ setup: { ...setupView().setup, step: 6, serving: 'identical', can_start: false, can_stop: false } }));
+    expect(find(m.tree, 'stop-serving')).toBeNull();
+  });
+});
+
 describe('link copy', () => {
   it('ignores a panel view and panel_res, and never sends panel_act', async () => {
     await m.close();

@@ -1,5 +1,6 @@
-// The Remote panel's views (design/DesktopRemote.dc.html): Status, Devices, Plugins and Activity,
-// drawn from the PanelView the bridge pushes to the `panel` copy (docs/protocol/mod-link-v1.md).
+// The Remote panel's views (design/DesktopRemote.dc.html): Status, Devices, Plugins and Activity, and
+// the Setup view (design/DesktopSetup.dc.html) while the bridge is not serving yet, drawn from the
+// PanelView the bridge pushes to the `panel` copy (docs/protocol/mod-link-v1.md).
 //
 // Everything here is plain functions of data: `sanitize` checks what came over the link, `renderPanel`
 // builds the element tree and calls back into `on` for every click. Text from the bridge is drawn as
@@ -33,9 +34,48 @@ const STATUS = new Set(['serving', 'paused', 'setup', 'blocked']);
 const CHECK = new Set(['ok', 'warn', 'bad', 'off']);
 const PLUGIN = new Set(['ready', 'missing', 'too_old', 'broken', 'stale', 'not_running']);
 
+const SETUP_STEP_IDS = ['installed', 'signed_in', 'https', 'serving', 'phone'];
+const STEP_STATE = new Set(['done', 'current', 'todo']);
+const SERVING = new Set(['ours', 'identical', 'off', 'foreign', 'funnel', 'unknown']);
+const PROBLEMS = new Set([
+  'not_installed', 'too_old', 'daemon_down', 'needs_login', 'stopped', 'tagged', 'magicdns_off', 'https_off',
+  'port_taken', 'funnel_on', 'operator', 'serve_disabled', 'not_ours', 'failed', 'unknown', 'no_device',
+]);
+/** The only pages a setup problem may open: the Tailscale admin (bridge-api SetupProblem.url). */
+const ADMIN_PREFIX = 'https://login.tailscale.com/';
+
 const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
 const num = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
 const list = (v, max) => (Array.isArray(v) ? v.slice(0, max) : []);
+
+/** The Setup part of a view, or null. Only known codes and steps; a URL only into the Tailscale admin. */
+export function sanitizeSetup(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.steps) || raw.steps.length !== 5) return null;
+  const steps = [];
+  for (let i = 0; i < 5; i += 1) {
+    const st = raw.steps[i];
+    if (!st || st.id !== SETUP_STEP_IDS[i] || !STEP_STATE.has(st.state)) return null;
+    const p = st.problem;
+    const problem = p && typeof p === 'object' && PROBLEMS.has(p.code)
+      ? {
+        code: p.code,
+        message: str(p.message, 300),
+        fix: typeof p.fix === 'string' && p.fix ? p.fix.slice(0, 200) : null,
+        url: typeof p.url === 'string' && p.url.startsWith(ADMIN_PREFIX) && p.url.length <= 300 && !/\s/.test(p.url) ? p.url : null,
+      }
+      : null;
+    steps.push({ id: st.id, state: st.state, title: str(st.title, 80), detail: str(st.detail, 200), problem });
+  }
+  const step = Number.isInteger(raw.step) && raw.step >= 1 && raw.step <= 6 ? raw.step : 1;
+  return {
+    step, steps,
+    serving: SERVING.has(raw.serving) ? raw.serving : 'unknown',
+    port: Number.isInteger(raw.port) && raw.port > 0 && raw.port < 65536 ? raw.port : null,
+    can_start: raw.can_start === true,
+    can_stop: raw.can_stop === true,
+    busy: raw.busy === true,
+  };
+}
 
 /**
  * Checks a `panel` view from the link and returns a clean copy, or null when it isn't one. The bridge
@@ -71,6 +111,7 @@ export function sanitize(raw) {
     })),
     activity: list(raw.activity, 100).filter((a) => a && num(a.ts) !== null).map((a) => ({ ts: a.ts, text: str(a.text, 200) })),
     pairing,
+    setup: sanitizeSetup(raw.setup),
   };
 }
 
@@ -115,6 +156,29 @@ export const ACT_ERRORS = Object.freeze({
   timeout: "The bridge didn't answer.",
   bad_args: 'The bridge refused that request.',
   unsupported_action: 'The bridge refused that request.',
+  no_setup: 'This bridge does not manage Tailscale serve.',
+});
+
+/** Kinds whose failures the Setup view already explains in the step itself (the problem box). */
+export const SETUP_KINDS = Object.freeze(['setup.check', 'setup.start', 'setup.stop']);
+
+/** The message for a failed panel act, or null when the view already shows why. */
+export function actError(kind, code) {
+  if (SETUP_KINDS.includes(kind) && PROBLEMS.has(code)) {
+    // Stop serving is drawn on the Status tab, which has no problem box: say what happened there.
+    if (kind === 'setup.stop') return STOP_ERRORS[code] ?? 'Tailscale did not stop serving herdr.';
+    return null;
+  }
+  return ACT_ERRORS[code] ?? `That didn't work (${String(code).slice(0, 40)}).`;
+}
+
+const STOP_ERRORS = Object.freeze({
+  not_ours: 'herdr did not set up this serve handler, so it will not remove it.',
+  funnel_on: 'Funnel was turned on outside herdr, so herdr will not remove this handler.',
+  operator: 'Tailscale lets only its operator change serve settings: run sudo tailscale set --operator=$USER once, then try again.',
+  unknown: "Could not read Tailscale's serve settings. Nothing was changed.",
+  not_installed: 'Tailscale is not installed on this computer.',
+  daemon_down: 'The Tailscale service is not running on this computer.',
 });
 
 // ---- colors ----
@@ -184,6 +248,124 @@ export function qrElement(c, rows) {
   );
 }
 
+// ---- setup (design/DesktopSetup.dc.html) ----
+
+/** The board's step marks: done (green), current (amber), later (outlined). */
+const MARK = Object.freeze({
+  done: { bg: '#2c6b4c', fg: '#e3f2e9', border: '#6c967350' },
+  current: { bg: '#f2a93b', fg: '#1b1203', border: '#ffb54750' },
+});
+
+/** A fixed line under a problem, by code (never text from the bridge). */
+const PROBLEM_HELP = Object.freeze({
+  https_off: 'Turn on MagicDNS and HTTPS Certificates there.',
+  magicdns_off: 'Turn on MagicDNS and HTTPS Certificates there.',
+  serve_disabled: 'Enable Serve for this tailnet there.',
+  operator: 'herdr never runs this for you.',
+  needs_login: 'Run it in a terminal on this computer.',
+  stopped: 'Run it in a terminal on this computer.',
+  not_ours: 'herdr never runs this for you.',
+  funnel_on: 'herdr never runs this for you.',
+  failed: 'herdr never runs this for you.',
+});
+/** Problems the periodic checks can clear by themselves (the person fixes something elsewhere). */
+const RECHECKED = new Set(['not_installed', 'too_old', 'daemon_down', 'needs_login', 'stopped', 'tagged', 'magicdns_off', 'https_off', 'port_taken', 'funnel_on', 'unknown']);
+
+export function adminLabel(url) {
+  return /\/admin\/dns\/?$/.test(url) ? 'Open Tailscale admin › DNS' : 'Open Tailscale admin';
+}
+
+function problemBox(m, c, p, on) {
+  const help = [PROBLEM_HELP[p.code], RECHECKED.has(p.code) ? 'Checking again every 5 s…' : null].filter(Boolean).join(' ');
+  return v_flex().id(`problem-${p.code}`).gap(8).mt(6).px(12).py(10).rounded(8).bg('#252524').border(1).border_color('#4a4334').children([
+    div().text_size(12).text_color(c.warn).child(p.message),
+    p.fix
+      // Shown to copy and run by hand; nothing here ever runs it.
+      ? h_flex().id('fix').gap(8).pl(10).pr(6).py(6).rounded(7).bg(c.canvas).border(1).border_color(c.border).children([
+        div().id('fix-command').flex_1().min_w(0).font_family('JetBrains Mono').text_size(11.5).child(p.fix),
+        button(c, 'fix-copy', m.copied ? 'Copied' : 'Copy', (_e, cx) => on.copy(cx, p.fix)),
+      ])
+      : div(),
+    p.url
+      ? div().id('open-admin').flex().items_center().justify_center().h(28).rounded(7).bg(c.foreground).text_color(c.surface)
+        .text_size(12).font_medium().hover((s) => s.bg(c.muted))
+        .on_click((_e, cx) => on.openUrl(cx, p.url))
+        .child(adminLabel(p.url))
+      : div(),
+    help ? div().text_size(11.5).text_color(c.muted).child(help) : div(),
+  ]);
+}
+
+function stepRow(m, c, st, i, on) {
+  const mark = MARK[st.state];
+  const last = i === 4;
+  return h_flex().id(`step-${st.id}`).items_start().gap(10).children([
+    v_flex().w(20).flex_none().items_center().h_full().children([
+      div().id(`mark-${st.id}`).w(20).h(20).flex_none().flex().items_center().justify_center().rounded(5).border(1)
+        .bg(mark ? mark.bg : c.surface).border_color(mark ? mark.border : c.input).text_color(mark ? mark.fg : c.muted)
+        .text_size(10.5).font_bold()
+        .child(st.state === 'done' ? svg('mods/herdr-app-remote/check.svg').w(12).h(12) : String(i + 1)),
+      last ? div() : div().w(1.5).flex_1().min_h(12).bg(c.input),
+    ]),
+    v_flex().flex_1().min_w(0).gap(3).pb(14).children([
+      div().font_medium().text_color(st.state === 'todo' ? c.muted : c.foreground).child(st.title),
+      div().text_size(12).text_color(c.dim).child(st.detail),
+      st.state === 'current' && st.problem && st.problem.code !== 'no_device' ? problemBox(m, c, st.problem, on) : div(),
+    ]),
+  ]);
+}
+
+/** The whole panel while not serving yet: the five steps, Check now and Start serving. */
+function setupPanel(m, c, on) {
+  const s = m.view.setup;
+  const shown = Math.min(s.step, 5);
+  const header = v_flex().flex_none().gap(4).px(14).py(12).border_b(1).border_color(c.border).children([
+    h_flex().gap(8).children([
+      div().flex_1().font_semibold().child('Set up remote access'),
+      div().id('step-of').text_size(11).text_color(c.dim).child(`step ${shown} of 5`),
+    ]),
+    div().text_size(12).text_color(c.muted).child('Use herdr from your phone over your private Tailscale network. Each step is checked by itself.'),
+  ]);
+  const startable = s.can_start && !s.busy && !m.pendingSetup;
+  const start = startable
+    ? button(c, 'setup-start', 'Start serving', (_e, cx) => on.act(cx, 'setup.start', {}), { grow: true, height: 30 })
+    // Disabled: drawn like the board's, and with no click handler at all.
+    : div().id('setup-start').flex().flex_1().items_center().justify_center().h(30).px(12).rounded(7).border(1).border_color(c.input)
+      .bg(c.surface).text_color(c.dim).text_size(12.5)
+      .child(m.pendingSetup === 'setup.start' ? 'Starting…' : 'Start serving');
+  const checking = s.busy || m.pendingSetup === 'setup.check';
+  const footer = v_flex().flex_none().border_t(1).border_color(c.border).children([
+    m.error ? div().id('error').px(14).pt(8).text_size(11.5).text_color(c.ansi1).child(m.error) : div(),
+    h_flex().h(48).px(14).gap(8).children([
+      button(c, 'setup-check', checking ? 'Checking…' : 'Check now', (_e, cx) => on.act(cx, 'setup.check', {}), { grow: true, height: 30 }),
+      start,
+    ]),
+  ]);
+  return v_flex().id('remote-panel').size_full().bg(c.surface).text_color(c.foreground).text_size(13).children([
+    header,
+    v_flex().id('setup-steps').flex_1().min_h(0).overflow_y_scrollbar().p(14).gap(4).children(s.steps.map((st, i) => stepRow(m, c, st, i, on))),
+    footer,
+  ]);
+}
+
+/** Stop serving on the Status tab: only when this bridge created the handler, and only after a second click. */
+function stopServing(m, c, on) {
+  const s = m.view.setup;
+  if (!s || !s.can_stop) return div();
+  if (m.confirmStop) {
+    return v_flex().id('stop-confirm').gap(8).px(12).py(10).rounded(8).bg(tint(c.foreground, '08')).border(1).border_color(c.border).children([
+      div().text_size(12).child('Stop serving herdr on the tailnet? Phones lose access until you start again.'),
+      h_flex().gap(6).children([
+        button(c, 'stop-yes', 'Stop serving', (_e, cx) => { on.askStop(cx, false); on.act(cx, 'setup.stop', {}); }, { danger: true }),
+        button(c, 'stop-no', 'Cancel', (_e, cx) => on.askStop(cx, false)),
+      ]),
+    ]);
+  }
+  return h_flex().children([
+    button(c, 'stop-serving', m.pendingSetup === 'setup.stop' || s.busy ? 'Working…' : 'Stop serving', (_e, cx) => on.askStop(cx, true), { danger: true }),
+  ]);
+}
+
 // ---- tabs ----
 
 function statusTab(m, c, on) {
@@ -205,6 +387,7 @@ function statusTab(m, c, on) {
           k.detail ? div().text_size(11.5).text_color(c.dim).child(k.detail) : div(),
         ]),
       ])),
+    stopServing(m, c, on),
   ]);
 }
 
@@ -327,10 +510,15 @@ const BADGE = Object.freeze({
   serving: ['Serving', 'ok'], paused: ['Paused', 'warn'], setup: ['Set up needed', 'dim'], blocked: ['Blocked', 'ansi1'],
 });
 
+/** The Setup view replaces the tabs while the bridge runs setup and is not serving (or paused, or blocked). */
+export const showsSetup = (view) => Boolean(view && view.status === 'setup' && view.setup);
+
 /**
- * The whole panel. `m`: {view|null, tab, expanded, expiryFor, copied, error, connected, now, theme}.
+ * The whole panel. `m`: {view|null, tab, expanded, expiryFor, copied, error, connected, now, theme,
+ *   confirmStop, pendingSetup (the setup.* kind in flight, or null)}.
  * `on`: act(cx, kind, args), setTab(cx, id), expand(cx, id|null), askExpiry(cx, id|null),
- *       toggleCap(cx, device, cap), setTerminalInput(cx, device, minutes|null), copy(cx, text).
+ *       toggleCap(cx, device, cap), setTerminalInput(cx, device, minutes|null), copy(cx, text),
+ *       openUrl(cx, url), askStop(cx, bool).
  */
 export function renderPanel(m, on) {
   const c = palette(m.theme);
@@ -350,6 +538,7 @@ export function renderPanel(m, on) {
         .child(m.connected ? 'Waiting for the bridge…' : 'The bridge is not running. It starts with the Remote layout.'),
     );
   }
+  if (showsSetup(view)) return setupPanel(m, c, on);
   const pendingCount = view.devices.filter((d) => d.state === 'pending').length;
   const label = (id, name) => (id === 'devices' && view.devices.length ? `${name} ${view.devices.length}` : name);
   const tabs = h_flex().id('tabs').mx(14).mt(10).p(2).gap(2).rounded(7).bg(c.canvas).flex_none().children(
