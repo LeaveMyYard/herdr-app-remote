@@ -38,7 +38,7 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 ### Pairing
 
 1. The desktop shows a QR code for `https://<serve>/pair#c=<code>`. The code is 128-bit (22 base64url characters), valid for 5 minutes and single use. Showing a new code invalidates the previous one.
-2. The installed Home Screen app posts `POST /api/v1/pair` with JSON `{code, name?}` (`Content-Type: application/json`, at most 1 KiB).
+2. The installed Home Screen app posts `POST /api/v1/pair` with JSON `{code, name?}` (`name` is ignored: the bridge names the device) (`Content-Type: application/json`, at most 1 KiB).
    - `202 {device}`: the device is now `pending`. The response sets the device cookie: `__Host-hr-device=<256-bit token>; Path=/; Max-Age=34560000; HttpOnly; Secure; SameSite=Strict`. The cookie grants nothing until the desktop approves the device.
    - `403 {error: "bad_code"}`: the code is unknown, expired or already used. Every failure looks the same.
    - `429 {error: "rate_limited"}` after 10 failed codes within a minute; `429 {error: "too_many_pending"}` while 3 requests are already pending (the code isn't consumed). The rate limit is global, not per client. Requests sent at the same moment can exceed it slightly, which doesn't matter against a 128-bit code. A local process that forges the headers can use it to block pairing, but that process could already do worse.
