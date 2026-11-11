@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@herdr-remote/protocol": "workspace:*",
+    "es-module-lexer": "1.7.0",
     "uqr": "^0.1.3",
     "ws": "^8.22.2",
     "zod": "^3.25.76"
