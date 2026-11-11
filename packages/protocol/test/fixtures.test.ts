@@ -16,6 +16,7 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "bridge-api/server": bridgeApi.ServerMessage,
   "bridge-api/meta": bridgeApi.Meta,
   "bridge-api/plugins": bridgeApi.PluginsTopic,
+  "bridge-api/panorama": bridgeApi.PanoramaTopic,
 };
 
 function walk(dir: string): string[] {

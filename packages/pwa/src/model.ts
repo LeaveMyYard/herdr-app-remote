@@ -10,6 +10,12 @@ export const TABS: readonly { id: TabId; label: string }[] = [
   { id: "usage", label: "Usage" },
 ];
 
+/** A state tile: a status code and, for the finished tile or a needs tile, a count. */
+export interface TileSpec {
+  code: bridgeApi.AgentCode;
+  count?: number | undefined;
+}
+
 export interface Space {
   id: string;
   name: string;
@@ -22,6 +28,8 @@ export interface Space {
   behind?: number;
   detached?: boolean;
   selected?: boolean;
+  /** Needs-you and working tiles on the space row (Agents with herdr-panorama only). */
+  tiles?: TileSpec[];
 }
 
 export type AgentStatus = "needs-you" | "working" | "done" | "idle";
@@ -29,9 +37,11 @@ export type AgentStatus = "needs-you" | "working" | "done" | "idle";
 export interface BasicAgent {
   id: string;
   name: string;
-  harness: "claude" | "codex";
+  /** `claude` and `codex` have their own icon; any other harness gets the generic one. */
+  harness: string;
+  /** Empty when unknown (the host topic carries no tab number). */
   tab: string;
-  /** Pre-formatted age, for example "26m". */
+  /** Pre-formatted age, for example "26m"; empty when unknown. */
   age: string;
   status: AgentStatus;
   spaceId: string;
@@ -53,9 +63,9 @@ export type ConnectionStatus = "online" | "connecting" | "offline" | "stale";
 export interface Connection {
   status: ConnectionStatus;
   /** For "stale": how old the data is, pre-formatted ("2m"). */
-  age?: string;
+  age?: string | undefined;
   /** For "stale": the bridge's reason (`stale {reason}` in the bridge API), for example "layout_without_remote". */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 export interface HostInfo {
