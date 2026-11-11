@@ -310,6 +310,24 @@ describe("attack: CSRF", () => {
     (await greeted(cookie)).ws.close();
   });
 
+  it("oversized and malformed pairing bodies are refused without hurting the server", async () => {
+    await start();
+    const uncaught: unknown[] = [];
+    const onErr = (e: unknown) => uncaught.push(e);
+    process.on("uncaughtException", onErr);
+    try {
+      const big = await http("POST", "/api/v1/pair", OK_POST, JSON.stringify({ code: "x".repeat(64 * 1024) })).catch(() => ({ status: -1 }));
+      expect([413, -1]).toContain(big.status);
+      expect((await http("POST", "/api/v1/pair", OK_POST, "{bad")).status).toBe(400);
+      expect((await http("POST", "/api/v1/pair", OK_POST, "[1]")).status).toBe(400);
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      process.off("uncaughtException", onErr);
+    }
+    expect(uncaught).toEqual([]);
+    expect((await pair(sec.issueCode().code)).status).toBe(202);
+  });
+
   it("preflight and other non-GET methods are refused", async () => {
     await start();
     expect((await http("OPTIONS", "/api/v1/pair", { ...OK_GET, Origin: "https://evil.example" })).status).toBe(403);
@@ -515,6 +533,19 @@ describe("capabilities", () => {
     expect(await sec.act(client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
     expect(closes).toEqual([CLOSE_REVOKED]);
     expect(acts).toHaveLength(1);
+  });
+
+  it("an act from a device of a previous owner login, or still pending, is refused", async () => {
+    await start();
+    const { id } = await pairedDevice();
+    const client = { principal: { deviceId: id }, send: () => undefined, close: () => undefined };
+    sec.setServe({ host: SERVE, login: "user-2@example" });
+    expect(await sec.act(client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
+    sec.setServe({ host: SERVE, login: OWNER });
+    const r = await pair(sec.issueCode().code);
+    const pendingId = (JSON.parse(r.body) as { device: { id: string } }).device.id;
+    expect(await sec.act({ ...client, principal: { deviceId: pendingId } }, "inbox.ack", {})).toMatchObject({ ok: false, code: "unpaired" });
+    expect(acts).toHaveLength(0);
   });
 });
 

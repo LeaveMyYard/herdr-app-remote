@@ -6,6 +6,59 @@ The API between the PWA (and other clients) and the bridge. Source of truth: `pa
 
 `GET /api/v1/meta` returns `{api: 1, bridge: "<version>"}`.
 
+`GET /healthz` returns `ok`. It is the only path exempt from the guards below, and it reveals nothing.
+
+### Request guards
+
+The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`. Every request except `GET /healthz` must pass these checks, in this order:
+
+| check | applies to | failure |
+|---|---|---|
+| Remote access isn't paused | everything | `503 paused` |
+| `Host` is exactly the serve name (sent once) | everything | `403 forbidden` |
+| `Tailscale-User-Login` is exactly the desktop owner's login (sent once) | everything | `403 forbidden` |
+| `Origin` is exactly `https://<serve name>`, and `X-Remote-Api: 1` is present | the WS upgrade and every non-GET request | `403 forbidden` |
+| the `__Host-hr-device` cookie names an approved device of the current owner login | the WS upgrade and every non-GET request except `POST /api/v1/pair` | `401 unpaired` |
+| the device has `view` | the WS upgrade | `403 forbidden` |
+
+- `Tailscale-User-Login` is a precondition, never the credential: any local process can forge it. The cookie is the credential.
+- Tagged devices send no identity headers, so they are refused.
+- Host, identity and Origin failures all answer the same `403 forbidden`, without saying which check failed.
+- GETs have no side effects.
+
+### Pairing
+
+1. The desktop shows a QR code for `https://<serve>/pair#c=<code>`. The code is 128-bit (22 base64url characters), valid for 5 minutes and single use. Showing a new code invalidates the previous one.
+2. The installed Home Screen app posts `POST /api/v1/pair` with JSON `{code, name?}` (`Content-Type: application/json`, at most 1 KiB).
+   - `202 {device}`: the device is now `pending`. The response sets the device cookie: `__Host-hr-device=<256-bit token>; Path=/; Max-Age=34560000; HttpOnly; Secure; SameSite=Strict`. The cookie grants nothing until the desktop approves the device.
+   - `403 {error: "bad_code"}`: the code is unknown, expired or already used. Every failure looks the same.
+   - `429 {error: "rate_limited"}` after 10 failed codes within a minute; `429 {error: "too_many_pending"}` while 3 requests are already pending (the code isn't consumed).
+   - `415 json_required`, `413 too_large`, `400 bad_json` for malformed bodies.
+3. The desktop panel and a toast ask "Approve Phone 1?". A request not approved within 10 minutes is dropped.
+4. The app polls `GET /api/v1/me` until `device.state` is `approved`, then opens the WebSocket.
+
+`GET /api/v1/me` returns `200 {device: {id, name, login, state, caps, terminal_input_until, created_at, approved_at, last_seen, live}}` for the cookie's device, or `401 {error: "unpaired"}`. `caps` maps each capability to whether it is in effect now.
+
+Only the token's sha256 is stored, in `devices.json` (mode 0600, in a 0700 directory). Devices are revoked and renamed on the desktop only. A revoked device's sockets are closed at once.
+
+### Capabilities
+
+Checked by the bridge for every `act`:
+
+| capability | default after approval | `act` kinds |
+|---|---|---|
+| `view` | on | none: needed for the WebSocket itself (all read topics) |
+| `inbox.answer` | on | `inbox.draft`, `inbox.answer`, `inbox.dismiss`, `inbox.ack` |
+| `navigate` | off | `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
+| `terminal.input` | off; turned on from the desktop only, can expire | `terminal.send` |
+| `push` | off | `push.subscribe`, `push.unsubscribe` |
+
+There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other kind is refused and logged.
+
+### Audit
+
+`activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers, option labels and lengths only, for example "Phone 1 sent 12 chars to t3" or "Phone 1 answered Q119 (Option B)".
+
 ## WebSocket `/api/v1/ws`
 
 One JSON object per text frame, each with a `type`.
@@ -48,7 +101,22 @@ Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plug
 - A `stale` is cleared by the next `snap` of that topic (the bridge never patches across a stale period). A subscriber to a topic with no state yet receives no `snap` until the first one exists (for `host`, only `stale` `reconnecting` before the first link hello).
 - `sub` always answers with the topic's current state, so re-subscribing is the recovery for a seq gap. `hello.resume` is honoured on the first `sub` of each topic: already current gets nothing, a gap within the bridge's last 64 patches is replayed, anything else gets a `snap`.
 - A client that sends anything before `hello`, a second `hello`, invalid JSON, a binary frame or a frame over 64 KiB is closed.
-- `act` answers `res {ok: false, code: "unsupported_action"}` until a slice registers a handler.
+- A connection may hold at most 64 topic subscriptions. A `sub` that would exceed this closes it with code 1008 ("too many topics").
+- Frames from one connection are handled strictly in order. A slow `act` delays that connection's later `ping` and `sub` until its `res` is sent.
+
+### Action results and close codes
+
+`res` codes from the security layer:
+
+| code | meaning |
+|---|---|
+| `unsupported_action` | not on the allowlist, or no slice handles it yet |
+| `forbidden` | the device lacks the capability (an expired `terminal.input` counts as off) |
+| `unpaired` | the device was revoked, or isn't approved; the socket is closed too |
+| `paused` | remote access is paused |
+| `internal_error` | the handler threw; always with `unknown_effect: true` |
+
+WebSocket close codes: `4001` the device was revoked, `4002` remote access was paused, `4003` `view` was turned off. A client that gets one of these should not reconnect on its own.
 
 ### Plugin states
 

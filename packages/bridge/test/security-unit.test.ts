@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
-import jsQR from "jsqr";
+import jsQRModule from "jsqr";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuditLog, describeAct, cleanLabel } from "../src/security/audit.js";
 import { ACTION_CAPS, defaultCaps, hasCap } from "../src/security/caps.js";
@@ -17,6 +17,10 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
+
+// jsqr is CommonJS with an ES-style default export: unwrap whichever shape loads.
+type JsQR = (data: Uint8ClampedArray, w: number, h: number) => { data: string } | null;
+const jsQR: JsQR = ((jsQRModule as unknown as { default?: JsQR }).default ?? jsQRModule) as unknown as JsQR;
 
 const fakeReq = (raw: string[]) => ({ rawHeaders: raw }) as unknown as IncomingMessage;
 
