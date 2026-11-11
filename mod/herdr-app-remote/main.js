@@ -106,7 +106,8 @@ export default class Remote extends View {
     const first = props()?.tab;
     this.tab = TABS.some(([id]) => id === first) ? first : 'status';
     this.expanded = null; // device id whose access switches are open
-    this.expiryFor = null; // device id being asked how long terminal input stays on
+    this.expiryFor = null; // device id being asked how long terminal input (or special keys) stays on
+    this.expiryCap = null; // which of the two
     this.copied = false;
     this.error = null;
     this.confirmStop = false; // Stop serving asks once more before it acts
@@ -118,7 +119,7 @@ export default class Remote extends View {
     this.on = {
       setTab: (cx, id) => { this.tab = id; this.error = null; this.confirmStop = false; cx.notify(); },
       expand: (cx, id) => { this.expanded = id; this.expiryFor = null; cx.notify(); },
-      askExpiry: (cx, id) => { this.expiryFor = id; cx.notify(); },
+      askExpiry: (cx, id, cap = 'terminal.input') => { this.expiryFor = id; this.expiryCap = id ? cap : null; cx.notify(); },
       copy: (cx, text) => {
         cx.write_to_clipboard(text);
         this.copied = true;
@@ -131,14 +132,15 @@ export default class Remote extends View {
       openUrl: (cx, url) => {
         if (typeof url === 'string' && url.startsWith('https://login.tailscale.com/')) cx.open_url(url);
       },
-      // Turning terminal input on asks for an expiry first; every other switch flips at once.
+      // Turning terminal input or special keys on asks for an expiry first; every other switch flips at once.
       toggleCap: (cx, d, cap) => {
-        if (cap === 'terminal.input' && !d.caps[cap]) return this.on.askExpiry(cx, d.id);
+        if ((cap === 'terminal.input' || cap === 'terminal.keys') && !d.caps[cap]) return this.on.askExpiry(cx, d.id, cap);
         return this.act(cx, 'device.cap', { id: d.id, cap, on: !d.caps[cap] });
       },
-      setTerminalInput: (cx, d, minutes) => {
+      setTerminalInput: (cx, d, minutes, cap = 'terminal.input') => {
         this.expiryFor = null;
-        return this.act(cx, 'device.cap', { id: d.id, cap: 'terminal.input', on: true, ...(minutes ? { minutes } : {}) });
+        this.expiryCap = null;
+        return this.act(cx, 'device.cap', { id: d.id, cap, on: true, ...(minutes ? { minutes } : {}) });
       },
     };
   }
@@ -184,7 +186,7 @@ export default class Remote extends View {
     }
     if (this.role === 'panel') {
       return renderPanel({
-        view: this.view, tab: this.tab, expanded: this.expanded, expiryFor: this.expiryFor, copied: this.copied,
+        view: this.view, tab: this.tab, expanded: this.expanded, expiryFor: this.expiryFor, expiryCap: this.expiryCap, copied: this.copied,
         error: this.error, connected: this.connected, now: Date.now(), theme: theme(),
         confirmStop: this.confirmStop, pendingSetup: this.pendingSetup,
       }, this.on);

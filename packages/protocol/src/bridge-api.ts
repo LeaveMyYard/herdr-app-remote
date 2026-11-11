@@ -18,9 +18,9 @@ export const PLUGIN_NAMES = ["panorama", "inbox", "usage", "hc", "host"] as cons
 export const PluginName = z.enum(PLUGIN_NAMES);
 export type PluginName = z.infer<typeof PluginName>;
 
-/** `host`, `plugins`, `panorama`, `inbox`, `usage`, `setup` or `chat:<t>`. */
+/** `host`, `plugins`, `panorama`, `inbox`, `usage`, `setup`, `keys` or `chat:<t>`. */
 export const Topic = z.union([
-  z.enum(["host", "plugins", "panorama", "inbox", "usage", "setup"]),
+  z.enum(["host", "plugins", "panorama", "inbox", "usage", "setup", "keys"]),
   z.string().regex(/^chat:.+$/),
 ]);
 export type Topic = z.infer<typeof Topic>;
@@ -549,7 +549,8 @@ export function chatTerminal(topic: string): string | null {
 
 /**
  * `terminal.send` (S16, capability `terminal.input`): `hc send` pastes `text` into the terminal and presses Enter.
- * That is all it can do (checked in the rig against hc 0.1.19): it has no special keys, so there is no key `act`.
+ * That is all it can do (checked in the rig against hc 0.1.19): it has no special keys. Those are `terminal.keys`
+ * (S16b, below), a separate capability that presses only entries of the desktop's key menu.
  * An empty `text` presses Enter alone.
  */
 export const TERMINAL_SEND_MAX_CHARS = 4000;
@@ -569,6 +570,148 @@ export const TerminalSendArgs = z
   })
   .strict();
 export type TerminalSendArgs = z.infer<typeof TerminalSendArgs>;
+
+// ---- terminal keys (S16b): the special-keys menu ----
+//
+// `terminal.keys` (capability `terminal.keys`, separate from `terminal.input`) presses one entry of the desktop's
+// key menu: the phone names the entry by id, and the bridge runs `hc keys` with the key tokens the desktop's config
+// gave that entry. The phone never sends key names. The grammar below is a strict subset of what `hc keys` accepts
+// (hc 0.1.19, checked in the rig), chosen so that no token types plain text on its own: every one sends a control
+// byte or an ESC-prefixed sequence. An `alt` letter or digit is ESC followed by that printable character, so a program
+// that does not read ESC+x as Alt sees the character; the menu is the desktop's own file, so that is its choice.
+
+/** Named keys, in hc's lowercase spelling. `space` is not here: alone it types a space (see {@link isKeyToken}). */
+export const KEY_NAMES = [
+  "esc", "enter", "tab", "backspace", "delete", "insert", "home", "end", "pageup", "pagedown",
+  "up", "down", "left", "right",
+  "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+] as const;
+/** Modifiers, in the one order a token may list them. */
+export const KEY_MODIFIERS = ["ctrl", "alt", "shift"] as const;
+/** Keys per menu entry. */
+export const KEYS_MAX_PER_ENTRY = 8;
+/** Entries in the menu. */
+export const KEYS_MAX_ENTRIES = 32;
+/** A label's length in code points. */
+export const KEY_LABEL_MAX = 24;
+/** A menu entry's id: what the phone sends and what Activity records. */
+export const KEY_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+/** A key menu revision: 16 hex digits. */
+export const KEYS_REV = /^[0-9a-f]{16}$/;
+
+const NAMED: ReadonlySet<string> = new Set(KEY_NAMES);
+
+/**
+ * One key token in canonical form: optional modifiers in the order `ctrl`, `alt`, `shift` (each at most once),
+ * joined by `+`, then the base key:
+ * - a named key ({@link KEY_NAMES}), with any modifiers (`esc`, `shift+tab`, `ctrl+left`, `alt+enter`);
+ * - a letter `a`-`z` with `ctrl` and/or `alt` and never `shift` (`ctrl+c`, `alt+b`): a bare or shifted letter is text.
+ *   `ctrl+i` and `ctrl+m` alone are refused, as hc refuses them (they are `tab` and `enter`; `ctrl+alt+i` is fine);
+ * - a digit `0`-`9` with `alt` only (`alt+1`): the rig showed `ctrl+0` types a plain `0`;
+ * - `space` with `ctrl` and/or `alt` and never `shift`: a bare or shifted space is text.
+ * Anything else, including hc's other spellings (`Escape`, `Ctrl+C`, `pgup`), is refused.
+ */
+export function isKeyToken(token: unknown): boolean {
+  if (typeof token !== "string" || token.length > 24) return false;
+  const parts = token.split("+");
+  const base = parts.pop()!;
+  let last = -1;
+  const mods = new Set<string>();
+  for (const m of parts) {
+    const i = (KEY_MODIFIERS as readonly string[]).indexOf(m);
+    if (i <= last) return false;
+    last = i;
+    mods.add(m);
+  }
+  if (NAMED.has(base)) return true;
+  const ctrl = mods.has("ctrl");
+  const alt = mods.has("alt");
+  const shift = mods.has("shift");
+  if (/^[a-z]$/.test(base) || base === "space") return (ctrl || alt) && !shift && !(ctrl && !alt && (base === "i" || base === "m"));
+  if (/^[0-9]$/.test(base)) return alt && !ctrl && !shift;
+  return false;
+}
+
+/** Every token {@link isKeyToken} accepts (the rig presses each one through the real `hc keys`). */
+export function allKeyTokens(): string[] {
+  const mods = ["", "ctrl+", "alt+", "shift+", "ctrl+alt+", "ctrl+shift+", "alt+shift+", "ctrl+alt+shift+"];
+  const out: string[] = [];
+  for (const m of mods) for (const k of KEY_NAMES) out.push(`${m}${k}`);
+  for (const m of ["ctrl+", "alt+", "ctrl+alt+"]) for (const k of [..."abcdefghijklmnopqrstuvwxyz", "space"]) if (isKeyToken(`${m}${k}`)) out.push(`${m}${k}`);
+  for (const d of "0123456789") out.push(`alt+${d}`);
+  return out;
+}
+
+/**
+ * Characters a key label may not hold: controls (Cc), format characters (Cf: zero-width, bidi marks and overrides,
+ * U+061C, U+FEFF, interlinear annotation, tag characters), line and paragraph separators, and the invisible U+034F.
+ */
+export const KEY_LABEL_UNSAFE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u034f]/u;
+
+/** A menu label: shown on the phone as text, never as HTML. 1 to 24 code points, no surrounding spaces. */
+export const KeyLabel = z
+  .string()
+  .refine((s) => s.length > 0 && s === s.trim(), { message: "a label is not empty and has no surrounding spaces" })
+  .refine((s) => [...s].length <= KEY_LABEL_MAX, { message: `a label has at most ${KEY_LABEL_MAX} characters` })
+  .refine((s) => !KEY_LABEL_UNSAFE.test(s), { message: "a label holds no control, separator, zero-width or bidi characters" });
+
+export const KeyToken = z.string().refine(isKeyToken, { message: "not an allowed key token" });
+
+export const KeyEntry = z
+  .object({
+    id: z.string().regex(KEY_ID),
+    label: KeyLabel,
+    /** The tokens `hc keys` presses, in order. */
+    keys: z.array(KeyToken).min(1).max(KEYS_MAX_PER_ENTRY),
+  })
+  .strict();
+export type KeyEntry = z.infer<typeof KeyEntry>;
+
+/**
+ * The menu when the desktop has no `keys.json` (labels from the PhoneKeys board). The phone draws these first and
+ * any other entry under "Your keys".
+ */
+export const DEFAULT_KEYS: readonly KeyEntry[] = [
+  { id: "esc", label: "Esc", keys: ["esc"] },
+  { id: "tab", label: "Tab", keys: ["tab"] },
+  { id: "shift-tab", label: "Shift-Tab", keys: ["shift+tab"] },
+  { id: "ctrl-c", label: "Ctrl-C", keys: ["ctrl+c"] },
+  { id: "up", label: "\u2191", keys: ["up"] },
+  { id: "down", label: "\u2193", keys: ["down"] },
+  { id: "left", label: "\u2190", keys: ["left"] },
+  { id: "right", label: "\u2192", keys: ["right"] },
+];
+
+/** Whether an entry is one of {@link DEFAULT_KEYS} as it is (same id and keys). */
+export function isDefaultKey(e: { id: string; keys: readonly string[] }): boolean {
+  const d = DEFAULT_KEYS.find((x) => x.id === e.id);
+  return d !== undefined && d.keys.length === e.keys.length && d.keys.every((k, i) => k === e.keys[i]);
+}
+
+/**
+ * `keys` topic: the desktop's key menu. `rev` changes whenever the menu does; a `terminal.keys` act names the `rev`
+ * it was shown, so a press from a menu that has since changed is refused instead of pressing something else.
+ */
+export const KeysTopic = z
+  .object({
+    rev: z.string().regex(KEYS_REV),
+    keys: z
+      .array(KeyEntry)
+      .max(KEYS_MAX_ENTRIES)
+      .refine((a) => new Set(a.map((e) => e.id)).size === a.length, { message: "entry ids are unique" }),
+  })
+  .strict();
+export type KeysTopic = z.infer<typeof KeysTopic>;
+
+/** `act terminal.keys` (capability `terminal.keys`): press menu entry `key`, as shown at `rev`, in `terminal`. */
+export const TerminalKeysArgs = z
+  .object({
+    terminal: z.string().regex(TERMINAL_ID),
+    key: z.string().regex(KEY_ID),
+    rev: z.string().regex(KEYS_REV),
+  })
+  .strict();
+export type TerminalKeysArgs = z.infer<typeof TerminalKeysArgs>;
 
 export const Welcome = z.object({
   type: z.literal("welcome"),
@@ -684,6 +827,7 @@ const TOPIC_PAYLOADS: Partial<Record<string, z.ZodTypeAny>> = {
 
   inbox: InboxTopic,
   setup: SetupTopic,
+  keys: KeysTopic,
 };
 
 export const Snap = z

@@ -26,6 +26,8 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "bridge-api/push-payload": bridgeApi.PushPayload,
   "bridge-api/push-subscribe": bridgeApi.PushSubscribeArgs,
   "bridge-api/push-info": bridgeApi.PushInfo,
+  "bridge-api/keys": bridgeApi.KeysTopic,
+  "bridge-api/terminal-keys": bridgeApi.TerminalKeysArgs,
   "install/receipt": install.InstallReceipt,
 };
 

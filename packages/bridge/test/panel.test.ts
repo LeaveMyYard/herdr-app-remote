@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { modLink } from "@herdr-remote/protocol";
 import { Hub, LinkServer } from "../src/index.js";
 import { PanelDriver } from "../src/panel/driver.js";
 import { defaultCaps } from "../src/security/caps.js";
@@ -143,6 +144,20 @@ describe("panel acts", () => {
     expect(d.terminal_input_until).toBeGreaterThanOrEqual(before + 3_600_000);
     expect(await act(p, "device.cap", { id: APPROVED, cap: "terminal.input", on: false })).toMatchObject({ ok: true });
     expect(security.devices().find((x) => x.id === APPROVED)!.caps["terminal.input"]).toBe(false);
+  });
+
+  it("terminal.keys (S16b) turns on with an expiry from the panel, shows in the view, and off again", async () => {
+    const p = await open("panel");
+    const before = Date.now();
+    expect(await act(p, "device.cap", { id: APPROVED, cap: "terminal.keys", on: true, minutes: 480 })).toMatchObject({ ok: true });
+    const row = driver.view().devices.find((x) => x.id === APPROVED)!;
+    expect(row.caps["terminal.keys"]).toBe(true);
+    expect(row.caps["terminal.input"]).toBe(false);
+    expect(row.terminal_keys_until).toBeGreaterThanOrEqual(before + 480 * 60_000);
+    expect(modLink.PanelView.safeParse(driver.view()).success).toBe(true);
+    expect(await act(p, "device.cap", { id: APPROVED, cap: "terminal.keys", on: false, minutes: 5 })).toMatchObject({ ok: false, code: "bad_args" });
+    expect(await act(p, "device.cap", { id: APPROVED, cap: "terminal.keys", on: false })).toMatchObject({ ok: true });
+    expect(driver.view().devices.find((x) => x.id === APPROVED)!).toMatchObject({ caps: { "terminal.keys": false }, terminal_keys_until: null });
   });
 
   it("a failing Activity log shows as a bad Status check, and clears when it writes again", async () => {

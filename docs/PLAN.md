@@ -88,6 +88,7 @@ Sources:
 | `inbox.answer` | on | inbox verbs only: draft, answer, dismiss, ack, retry, stop-showing |
 | `navigate` | off | allowlist: `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
 | `terminal.input` | **off**; desktop-only toggle, can expire | `hc send` |
+| `terminal.keys` | **off**; desktop-only toggle, can expire | `hc keys`, only the entries of the desktop's key menu (S16b) |
 | `push` | off | push subscriptions |
 
 There is no generic `run`, no `exec`, and no arbitrary `herdr-app do`. Anything else is refused and logged.
@@ -411,7 +412,7 @@ Defaults taken until the operator says otherwise:
 
 ## 8. Unverified risks
 
-- **hc:** `hc events` hasn't been tested against a live core. `hc send` was checked in the rig (S16, hc 0.1.19): it pastes text and presses Enter, and has no special keys (those are `hc keys`, not exposed), so the key bar is text-only: ⏎ and `/`. Refusals come as JSON on stderr.
+- **hc:** `hc events` hasn't been tested against a live core. `hc send` was checked in the rig (S16, hc 0.1.19): it pastes text and presses Enter, and has no special keys, so the key bar's own keys are text-only: ⏎ and `/`. Special keys are `hc keys` (S16b, also checked in the rig): it accepts single printable characters too, so the bridge allows only a strict subset of key tokens, from the desktop's key menu, each sending a control byte or an ESC-prefixed sequence (an `alt` letter is ESC then the letter). Refusals come as JSON on stderr.
 - **Tailscale serve:**
   - Identity headers: the exact set, their absence for tagged nodes, and local forgery (hence the cookie).
   - On Linux it needs `tailscale set --operator=$USER`.

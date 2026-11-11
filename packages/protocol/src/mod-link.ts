@@ -43,8 +43,10 @@ export type Pong = z.infer<typeof Pong>;
 
 // ---- panel (the desktop Remote panel, copy "panel" only) ----
 
-/** The capabilities the panel can switch (all five; `view` and the rest are desktop-only decisions). */
-export const PanelCap = z.enum(["view", "inbox.answer", "navigate", "terminal.input", "push"]);
+/** The capabilities the panel can switch (all six; `view` and the rest are desktop-only decisions). */
+export const PanelCap = z.enum(["view", "inbox.answer", "navigate", "terminal.input", "terminal.keys", "push"]);
+/** The capabilities a grant can give a time limit to (`minutes`). */
+export const EXPIRING_CAPS: readonly PanelCap[] = ["terminal.input", "terminal.keys"];
 export type PanelCap = z.infer<typeof PanelCap>;
 
 const DeviceId = z.string().regex(/^d-[0-9a-f]{16}$/);
@@ -52,7 +54,7 @@ const DeviceId = z.string().regex(/^d-[0-9a-f]{16}$/);
 /**
  * What the panel may ask the bridge to do: the desktop-only operations of the security layer, nothing else
  * (no `run`, no exec). Exactly these kinds with exactly these argument shapes; extra keys are refused. A
- * `panel_act` from the `link` copy is dropped. `minutes` (1 to 10080) is how long `terminal.input` stays on;
+ * `panel_act` from the `link` copy is dropped. `minutes` (1 to 10080) is how long `terminal.input` or `terminal.keys` stays on;
  * the bridge turns it into an expiry on its own clock, so none means no expiry.
  */
 export const PANEL_ACT_ARGS = {
@@ -62,7 +64,7 @@ export const PANEL_ACT_ARGS = {
   "device.cap": z
     .object({ id: DeviceId, cap: PanelCap, on: z.boolean(), minutes: z.number().int().min(1).max(10_080).optional() })
     .strict()
-    .refine((a) => a.minutes === undefined || (a.cap === "terminal.input" && a.on), { message: "minutes only applies when turning terminal.input on" }),
+    .refine((a) => a.minutes === undefined || (EXPIRING_CAPS.includes(a.cap) && a.on), { message: "minutes only applies when turning terminal.input or terminal.keys on" }),
   "remote.pause": z.object({}).strict(),
   "remote.resume": z.object({}).strict(),
   /** Shows a fresh pairing code (QR) for adding a phone. */
@@ -152,9 +154,20 @@ export const PanelDevice = z
     name: Short(32),
     login: Short(120),
     state: z.enum(["pending", "approved"]),
-    /** Effective capabilities right now (an expired `terminal.input` reads false). */
-    caps: z.object({ view: z.boolean(), "inbox.answer": z.boolean(), navigate: z.boolean(), "terminal.input": z.boolean(), push: z.boolean() }).strict(),
+    /** Effective capabilities right now (an expired `terminal.input` or `terminal.keys` reads false). */
+    caps: z
+      .object({
+        view: z.boolean(),
+        "inbox.answer": z.boolean(),
+        navigate: z.boolean(),
+        "terminal.input": z.boolean(),
+        /** S16b; optional so a panel view from an older bridge still reads (as off). */
+        "terminal.keys": z.boolean().optional(),
+        push: z.boolean(),
+      })
+      .strict(),
     terminal_input_until: Epoch.nullable(),
+    terminal_keys_until: Epoch.nullable().optional(),
     created_at: Epoch,
     last_seen: Epoch.nullable(),
     /** Open connections right now. */

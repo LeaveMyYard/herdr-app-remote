@@ -1,6 +1,7 @@
 // Fake data only (design board PhoneChat). Replaced by the `chat:<t>` and `inbox` topics once the bridge client lands.
-import type { bridgeApi } from "@herdr-remote/protocol";
+import { bridgeApi } from "@herdr-remote/protocol";
 import type { ChatAgent, ChatQuestion } from "./screens/Chat";
+import type { ChatInput } from "./screens/ChatComposer";
 
 const rule: bridgeApi.ChatLine = [{ t: "─".repeat(32), fg: "#383a3d" }];
 
@@ -26,7 +27,7 @@ export const chatTopic: bridgeApi.ChatTopic = {
   ],
 };
 
-export const chatAgent: ChatAgent = { name: "Agent 1 · Parser rewrite", folder: "~/code/alpha", harness: "claude", status: "working" };
+export const chatAgent: ChatAgent = { name: "Agent 1 · Parser rewrite", short: "Agent 1", folder: "~/code/alpha", harness: "claude", status: "working" };
 
 export const chatQuestion: ChatQuestion = { id: "Q123", href: "#/inbox" };
 
@@ -34,3 +35,43 @@ export const chatQuestion: ChatQuestion = { id: "Q123", href: "#/inbox" };
 export const chats: Record<string, { agent: ChatAgent; topic: bridgeApi.ChatTopic; question?: ChatQuestion }> = {
   "a-1": { agent: chatAgent, topic: chatTopic, question: chatQuestion },
 };
+
+/** The PhoneKeys board's states (`?fixture=chat&typing=<state>`): fake data, no bridge. */
+export type TypingDemo = "bar" | "menu" | "off" | "soon" | "gone";
+
+/** Today at 21:40 on this device's clock, the board's expiry. */
+function at2140(): number {
+  const d = new Date();
+  d.setHours(21, 40, 0, 0);
+  return d.getTime();
+}
+
+/** The board's key menu: the default keys, then two of the desktop's own. */
+export const demoKeysMenu: bridgeApi.KeysTopic = {
+  rev: "0123456789abcdef",
+  keys: [
+    ...bridgeApi.DEFAULT_KEYS,
+    { id: "accept", label: "Accept ✓", keys: ["alt+1"] },
+    { id: "clear-line", label: "Clear line", keys: ["ctrl+u"] },
+  ],
+};
+
+/** Input, clock and sheet for one PhoneKeys state. */
+export function typingDemo(state: string | null): { input: ChatInput; now: () => number; sheet: boolean; pressed: string | null } | null {
+  if (state !== "bar" && state !== "menu" && state !== "off" && state !== "soon" && state !== "gone") return null;
+  const until = at2140();
+  const clock = state === "soon" ? until - 4 * 60_000 + 1 : state === "gone" ? until + 60_000 : until - 3 * 3_600_000;
+  const ok = async () => ({ ok: true });
+  return {
+    input: {
+      enabled: true,
+      until,
+      send: ok,
+      // The ran-out board draws no Keys bar: special keys are off there too.
+      keys: { enabled: state !== "off" && state !== "gone", menu: demoKeysMenu, press: ok },
+    },
+    now: () => clock,
+    sheet: state === "menu" || state === "off",
+    pressed: state === "menu" ? "ctrl-c" : null,
+  };
+}

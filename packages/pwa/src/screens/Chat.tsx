@@ -4,12 +4,17 @@ import claudeIcon from "../assets/claude.svg";
 import codexIcon from "../assets/codex.svg";
 import { AnsiText } from "../components/AnsiText";
 import type { AgentStatus } from "../model";
-import { ChatComposer, type ChatInput } from "./ChatComposer";
+import { useHostName } from "../bridge/host-name";
+import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
+import { KeysButton } from "./KeysSheet";
+import * as W from "./keys-words";
 
 const HARNESS_ICON = { claude: claudeIcon, codex: codexIcon } as const;
 
 export interface ChatAgent {
   name: string;
+  /** The name in sentences ("Agent 1's terminal") when `name` carries more (the demo's "Agent 1 · Parser rewrite"). */
+  short?: string;
   /** Folder, already shortened with `~`. */
   folder: string;
   harness: "claude" | "codex";
@@ -36,11 +41,21 @@ export interface ChatProps {
   /** The terminal the composer sends to; required for the composer to show. */
   terminal?: string | undefined;
   now?: () => number;
+  /** Demo data only (the PhoneKeys board's states): the Keys sheet open at first, and the key shown as pressed. */
+  demoSheet?: { open: boolean; pressed: string | null };
 }
 
-/** Whether the composer shows: on, and not past its expiry. Re-renders when the expiry passes. */
-function useInputOn(input: ChatInput | undefined, now: () => number): boolean {
+/**
+ * Whether the composer shows: on, and not past its expiry. Re-renders when the expiry passes. `ranOut` is when a
+ * grant this screen saw running out did (the board's "Typing turned off at 21:40"), or null.
+ */
+function useInputOn(input: ChatInput | undefined, now: () => number): { on: boolean; ranOut: number | null } {
   const until = input?.enabled ? input.until : null;
+  // The last limit seen while typing was on: after it passes, /api/v1/me reads off with no limit at all.
+  const seen = useRef<number | null>(null);
+  if (input?.enabled) seen.current = until;
+  // Turned off from the desktop before its time: that is not running out.
+  else if (seen.current !== null && now() < seen.current) seen.current = null;
   const [, bump] = useState(0);
   useEffect(() => {
     if (until === null) return;
@@ -49,7 +64,9 @@ function useInputOn(input: ChatInput | undefined, now: () => number): boolean {
     const t = setTimeout(() => bump((n) => n + 1), Math.min(left, 2 ** 31 - 1));
     return () => clearTimeout(t);
   }, [until, now]);
-  return !!input?.enabled && (until === null || now() < until);
+  const on = !!input?.enabled && (until === null || now() < until);
+  const last = seen.current;
+  return { on, ranOut: !on && last !== null && now() >= last ? last : null };
 }
 
 /** What each `stale` reason means for this screen. An unknown reason still says the text may be old. */
@@ -87,9 +104,12 @@ function Status({ status }: { status: AgentStatus }) {
  * The chat: the terminal's text, an inbox banner when a question waits, and a footer. With `terminal.input` on, the
  * footer is the key bar and composer (S16); otherwise it says typing is off.
  */
-export function Chat({ agent, topic, stale, question, backHref = "#/agents", input, terminal, now = Date.now }: ChatProps) {
-  const on = useInputOn(input, now);
+export function Chat({ agent, topic, stale, question, backHref = "#/agents", input, terminal, now = Date.now, demoSheet }: ChatProps) {
+  const host = useHostName();
+  const { on, ranOut } = useInputOn(input, now);
   const typing = on && input && terminal !== undefined ? { input, terminal } : null;
+  // `terminal.keys` on while typing is off: the Keys button still has a bar of its own.
+  const keysBar = !typing && input?.keys?.enabled && terminal !== undefined ? { keys: input.keys, terminal } : null;
   const [fit, setFit] = useState(loadFit);
   const toggleFit = () => {
     setFit((f) => {
@@ -169,11 +189,25 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
       ) : null}
       {typing ? (
         <footer className="col nf chat-foot chat-foot-on" data-vis-mask="">
-          <ChatComposer terminal={typing.terminal} agentName={agent.name} input={typing.input} />
+          <ChatComposer terminal={typing.terminal} agentName={agent.short ?? agent.name} input={typing.input} now={now} {...(demoSheet ? { demoSheet } : {})} />
         </footer>
       ) : (
-        <footer className="col nf chat-foot" data-vis-mask="">
-          <p className="chat-ro">Read-only here. Typing to the terminal is off for this device.</p>
+        <footer className={`col nf chat-foot${ranOut !== null ? " chat-foot-out" : ""}${keysBar ? " chat-foot-keys" : ""}`} {...(ranOut === null && !keysBar ? { "data-vis-mask": "" } : {})}>
+          {ranOut !== null ? (
+            <>
+              <p className="chat-out">{W.typingRanOut(clockOf(ranOut))}</p>
+              <p className="chat-out-how">{W.typingRanOutHow(host)}</p>
+            </>
+          ) : (
+            <p className="chat-ro">Read-only here. Typing to the terminal is off for this device.</p>
+          )}
+          {keysBar ? (
+            // Special keys without typing (operator, 2026-11-11): the key bar with only the Keys button.
+            <div role="toolbar" aria-label="Keys" className="mono row nf chat-keys chat-keys-only">
+              <span className="f1" />
+              <KeysButton key={keysBar.terminal} agentName={agent.short ?? agent.name} host={host} keys={keysBar.keys} />
+            </div>
+          ) : null}
         </footer>
       )}
     </>

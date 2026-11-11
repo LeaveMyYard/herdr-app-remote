@@ -49,3 +49,41 @@
 .hd .chat-btn-go{background:var(--t-foreground);color:var(--t-background);border-color:transparent}
 .chat-ro{margin:0;font-size:12.5px;color:var(--t-dim)}
 .chat-pick{padding:8px}
+/* PhoneKeys (S16b): the typing-time line, the Keys button, the Keys sheet and the ran-out footer. */
+.chat-expiry{gap:6px;padding:8px 14px 0;font-size:12px;color:var(--t-muted)}
+.chat-expiry-soon{color:var(--dock-need)}
+.hd .chat-keys-open{padding:0 12px;gap:6px;justify-content:center}
+.chat-keys-word{font-family:Inter,system-ui,sans-serif}
+.chat-keys-caret{color:var(--t-muted)}
+.hd .chat-keys-off{color:var(--t-dim)}
+.chat-foot-out{height:auto;gap:4px;padding:14px 16px 38px;border-top:1px solid var(--t-border)}
+.chat-out{margin:0;font-size:14px;color:var(--t-foreground)}
+.chat-out-how{margin:0;font-size:13px;color:var(--t-muted)}
+.keys-scrim{position:fixed;inset:0;z-index:3;background:#00000080}
+.keys-sheet{font-family:Inter,system-ui,sans-serif;position:fixed;left:0;right:0;bottom:0;z-index:4;padding:8px 16px 34px;gap:12px;border-radius:16px 16px 0 0;background:var(--t-popover);border-top:1px solid #ffffff1f;box-shadow:0 -12px 32px #00000080}
+.keys-grip{align-self:center;width:36px;height:5px;border-radius:3px;background:var(--t-input)}
+.keys-head{gap:8px}
+.keys-titles{gap:2px}
+.keys-title{font-size:17px;font-weight:600;color:var(--t-foreground)}
+.keys-sub{font-size:12.5px;color:var(--t-muted)}
+.hd .keys-close{width:44px;height:44px;margin-right:-10px;justify-content:center;color:var(--t-muted)}
+.keys-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.hd .keys-cell{height:56px;justify-content:center;align-items:center;gap:2px;border-radius:9px;border:1px solid var(--t-border);background:var(--t-raised);color:var(--t-foreground);min-width:0}
+.hd .keys-warn{color:var(--t-blocked);border-color:#633734}
+.hd .keys-pressed{border-color:var(--t-accent);background:var(--t-selected)}
+.hd .keys-cell:disabled{color:var(--t-dim);border-color:var(--t-border)}
+.keys-label{font-size:15px;font-weight:500;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 4px}
+.keys-token{font-size:10.5px;color:var(--t-dim);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 4px}
+.keys-rule{gap:8px;font-size:11.5px;color:var(--t-dim);padding-top:2px}
+.keys-line{height:1px;background:var(--t-border)}
+.keys-done{gap:6px;font-size:12.5px;color:var(--t-muted)}
+.keys-note{margin:0;font-size:12.5px;color:var(--t-working)}
+.keys-foot{font-size:12px;color:var(--t-dim);line-height:1.45}
+.keys-off{align-items:flex-start;gap:8px;padding:10px 12px;border-radius:8px;background:#252220;border:1px solid #514028;font-size:13px;line-height:1.45;color:var(--t-foreground)}
+.keys-off-dot{width:7px;height:7px;margin-top:6px;border-radius:4px;background:var(--dock-need)}
+.keys-sheet:focus{outline:none}
+/* Special keys without typing: the read-only line, then a bar with only the Keys button. */
+.chat-foot-keys{height:auto;min-height:139px;padding:14px 0 26px;gap:6px}
+.chat-foot-keys .chat-ro{padding:0 16px}
+.chat-foot-keys.chat-foot-out{padding:14px 0 30px}
+.chat-foot-keys.chat-foot-out .chat-out,.chat-foot-keys.chat-foot-out .chat-out-how{padding:0 16px}

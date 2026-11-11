@@ -3,7 +3,8 @@ import { Banner } from "./components/Banner";
 import { HomePrompt, HomePromptBell } from "./pair/HomePrompt";
 import { TabBar } from "./components/TabBar";
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
-import { chats } from "./chat-fixtures";
+import { chats, typingDemo } from "./chat-fixtures";
+import { HostNameProvider } from "./bridge/host-name";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
 import { TABS, type Connection, type PluginRow, type Space, type TabBadges, type TabId } from "./model";
 import { age } from "./panorama/format";
@@ -246,18 +247,21 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
   const chatAgent = tab === "chat" && route[1] ? chatList.find((a) => a.id === decode(route[1] ?? "")) : undefined;
   if (chatAgent) {
     const demo = data ? undefined : chats[chatAgent.id];
-    return (
-      <div className="hd ph">
-        <Chat
+    // The PhoneKeys board's states, on demo data only (`?fixture=chat&typing=menu`).
+    const typed = demo && !live ? typingDemo(new URLSearchParams(window.location.search).get("typing")) : null;
+    const chat = (
+      <Chat
           agent={demo?.agent ?? { name: chatAgent.name, folder: chatAgent.tab, harness: chatAgent.harness === "codex" ? "codex" : "claude", status: chatAgent.status }}
           topic={live ? live.chat?.topic : demo?.topic}
           stale={live?.chat?.stale ?? undefined}
-          question={demo?.question}
-          input={live?.chat?.input}
-          terminal={live?.chat?.terminal}
+          question={typed ? undefined : demo?.question}
+          input={typed ? typed.input : live?.chat?.input}
+          terminal={typed ? demo?.topic.terminal : live?.chat?.terminal}
+          {...(typed ? { now: typed.now, demoSheet: { open: typed.sheet, pressed: typed.pressed } } : {})}
         />
-      </div>
     );
+    // The board's computer is "desk-1"; live data gets its name from LiveApp's provider.
+    return <div className="hd ph">{typed ? <HostNameProvider name="desk-1">{chat}</HostNameProvider> : chat}</div>;
   }
 
   let screen: ReactNode;

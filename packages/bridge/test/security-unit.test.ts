@@ -45,6 +45,14 @@ describe("capabilities", () => {
     expect([c.view, c["inbox.answer"], c.navigate, c["terminal.input"], c.push]).toEqual([true, true, false, false, false]);
   });
 
+  it("terminal.keys expires on its own clock (S16b), whatever terminal.input says", () => {
+    const c = { ...defaultCaps(), "terminal.keys": true, "terminal.keys.until": 1000, "terminal.input": true, "terminal.input.until": null };
+    expect(hasCap(c, "terminal.keys", 999)).toBe(true);
+    expect(hasCap(c, "terminal.keys", 1000)).toBe(false);
+    expect(hasCap({ ...c, "terminal.keys.until": null }, "terminal.keys", 1e15)).toBe(true);
+    expect(hasCap({ ...c, "terminal.keys": false, "terminal.keys.until": null }, "terminal.keys", 0)).toBe(false);
+  });
+
   it("terminal.input expires", () => {
     const c = { ...defaultCaps(), "terminal.input": true, "terminal.input.until": 1000 };
     expect(hasCap(c, "terminal.input", 999)).toBe(true);
@@ -69,6 +77,12 @@ describe("audit redaction", () => {
     const t = describeAct("terminal.send", { terminal: "t3", text: "hello world!" });
     expect(t).toBe("sent 12 chars to t3");
     expect(describeAct("terminal.send", { terminal: "t3", text: SECRET })).not.toContain("secret");
+  });
+
+  it("a key press names only the entry the bridge resolved, never the client's id", () => {
+    expect(describeAct("terminal.keys", { terminal: "t3", key: "ctrl-c", rev: "0123456789abcdef" }, "ctrl-c (1 key)")).toBe("pressed ctrl-c (1 key) in t3");
+    expect(describeAct("terminal.keys", { terminal: "t3", key: "secretword", rev: "x" })).toBe("pressed a key in t3");
+    expect(describeAct("terminal.keys", { terminal: SECRET, key: SECRET })).toBe("pressed a key in a terminal");
   });
 
   it("inbox answers log the bridge-resolved option label, never client text", () => {

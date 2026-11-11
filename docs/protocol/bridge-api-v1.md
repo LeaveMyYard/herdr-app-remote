@@ -50,7 +50,7 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 
 PLAN §2 says the phone gets its cookie "on approval". Setting it at pairing time instead is deliberate: the cookie is worthless until approval, and the bridge never has to hold a plaintext token while it waits for the desktop.
 
-`GET /api/v1/me` returns `200 {device: {id, name, login, state, caps, terminal_input_until, created_at, approved_at, last_seen, live}}` for the cookie's device, or `401 {error: "unpaired"}`. `caps` maps each capability to whether it is in effect now.
+`GET /api/v1/me` returns `200 {device: {id, name, login, state, caps, terminal_input_until, terminal_keys_until, created_at, approved_at, last_seen, live}}` for the cookie's device, or `401 {error: "unpaired"}`. `caps` maps each capability to whether it is in effect now.
 
 Only the token's sha256 is stored, in `devices.json` (mode 0600, in a 0700 directory). Devices are revoked and renamed on the desktop only. A revoked device's sockets are closed at once, before the change is written to disk, so a failed write can't leave a revoked device streaming. A change of serve name or owner login closes every live socket.
 
@@ -90,11 +90,14 @@ Checked by the bridge for every `act`:
 | `inbox.answer` | on | `inbox.draft`, `inbox.answer`, `inbox.dismiss`, `inbox.ack`, `inbox.retry`, `inbox.stop_showing` |
 | `navigate` | off | `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
 | `terminal.input` | off; turned on from the desktop only, can expire | `terminal.send` |
+| `terminal.keys` | off; turned on from the desktop only, can expire (S16b) | `terminal.keys` |
 | `push` | off | `push.subscribe`, `push.unsubscribe` |
 
 There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other kind is refused and logged.
 
 `terminal.input` is turned on from the desktop's Remote panel, with no limit or for a chosen time. When the time is up the bridge turns it off by itself: in `devices.json`, in Activity ("Phone 1: terminal.input expired") and in the panel. A grant that ran out while the bridge was down is turned off when it starts. Every check also compares the time, so an expired grant is refused even before that happens.
+
+`terminal.keys` (S16b) works the same way, with its own expiry (`terminal.keys.until` in `devices.json`, `terminal_keys_until` in `/api/v1/me`; "Phone 1: terminal.keys expired"). The two are independent: typing text never implies pressing Ctrl-C, and the reverse. Losing one kills only that one's work in flight; losing the device, `view`, the serve identity or serving (pause, Funnel) kills both. A `devices.json` written before S16b has no `terminal.keys` and reads as off. The reverse does not hold: a bridge from before S16b refuses to start on a `devices.json` written by this one (its schema is strict), so there is no downgrade. The desktop Remote panel turns it on with a "Special keys" switch ("Lets this phone press Esc, Ctrl-C and the arrow keys in a terminal.") that works like the terminal input one: it asks 1 hour, 8 hours or No limit first (`device.cap {cap: "terminal.keys", minutes?}` on the mod link) and shows "until 21:40" while a limit runs.
 
 ### Rate limits
 
@@ -105,6 +108,7 @@ Per approved device, on top of the pairing limit above:
 | WebSocket upgrades | 20 per minute | `429 rate_limited` on the upgrade |
 | `act`s of any kind and outcome | 30 per 10 s | `res` `rate_limited` |
 | `terminal.send` (counted once the capability allows it) | 6 per 10 s | `res` `rate_limited` |
+| `terminal.keys` (counted once the capability allows it) | 10 per 10 s | `res` `rate_limited` |
 
 A refusal for a limit is written to Activity once per filled window, not once per attempt, so a looping client can't flood the log. The windows slide: the next attempt is allowed once the oldest counted one is older than the window.
 
@@ -112,7 +116,7 @@ A refusal for a limit is written to Activity once per filled window, not once pe
 
 `activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers and lengths only, plus, for an answer, the option label the bridge resolved from its own inbox data. A label sent by the client is never logged. Examples: "Phone 1 sent 12 chars to t3", "Phone 1 answered Q119 (Option B)".
 
-A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send` alone is refused (`audit_unavailable`) while the log is failing, because its audit line is its whole safeguard; the refusal's own line is the probe that clears the flag.
+A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send` and `terminal.keys` alone are refused (`audit_unavailable`) while the log is failing, because their audit line is their whole safeguard; the refusal's own line is the probe that clears the flag.
 
 ### Web Push (S17)
 
@@ -160,7 +164,7 @@ One JSON object per text frame, each with a `type`.
 
 ### Topics
 
-`host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`.
+`host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`, `keys` (S16b).
 
 Payload schemas defined so far: `host` is `HostState` (see mod-link v1), `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`, `usage` is `UsageTopic` (below), `panorama` and `setup` are described below. The other payloads are defined by their slices; until then `snap.data` is open.
 
@@ -227,12 +231,42 @@ Source: while at least one client is subscribed, the bridge runs `hc read <t> --
 `act terminal.send {terminal, text}` types into a terminal. It needs `terminal.input`. The bridge runs exactly `hc send --json -- <terminal> <text>`, with no shell: hc pastes the text and presses Enter. The `--` matters: without it a text such as `--force` would be read as hc's own flag. `--force` itself is never passed, so hc still refuses to type into a program that is blocked on a dialog.
 
 - `terminal` must match `TERMINAL_ID`. `text` is at most 4000 characters and may hold newlines and tabs but no other control character (ESC above all), no DEL and no C1 control (`TerminalSendArgs` in the protocol package); `\r` is refused, so a client sends `\n`. An empty `text` presses Enter alone. Anything else is `bad_args`, and hc doesn't run.
-- That is all `hc send` can do: checked in the rig against hc 0.1.19, it has no special keys (Esc, Tab, Ctrl-C, arrows). Those belong to a separate `hc keys`, which is not exposed. The PWA's key bar therefore has only ⏎ (an empty send) and `/` (which types a slash into the composer and sends nothing).
+- That is all `hc send` can do: checked in the rig against hc 0.1.19, it has no special keys (Esc, Tab, Ctrl-C, arrows). Those are `hc keys`, exposed only as `terminal.keys` (S16b, below), a capability of its own. The PWA's key bar has ⏎ (an empty send) and `/` (which types a slash into the composer and sends nothing); the special-keys menu opened from it waits on an approved design.
 - One send runs at a time per device; a second while one runs is `busy`. A send that times out (15 s; hc holds a send until nobody has typed at the desktop for about 3 s) holds the device for one more second while hc is killed.
 - A send still held by hc when the device loses the right to type (revoked, paused, `terminal.input` or `view` turned off, expired, serve identity changed, Funnel turned on) is killed at once and answers `cancelled` with `unknown_effect`: hc may already have handed the text to its core, which is not verified. This is the exception to "an act that is already running still completes".
 - Results: `ok` when hc exits 0 with a JSON object. hc prints a refusal as `{"error":{"kind":…}}` on stderr; the kinds that mean nothing was typed map to `terminal_not_found` (`not_found`, `machine_unknown`, `needs_target`), `terminal_finished` (`finished`), `terminal_blocked` (`blocked`: the program is on a dialog) and `send_refused` (`usage`, `invalid_params`, `status_mismatch`). The send errors come from `hc schema` (hc 0.1.19); `not_found`, `finished` and `usage` were also seen in the rig, `blocked` was not (the rig has no program on a dialog). `unavailable` and `config` stay unknown effects: the schema doesn't say whether anything was typed first. `hc_missing` when hc isn't installed. Anything else (another exit, another kind, bad output, `timeout`) may have typed: `send_failed` or `timeout` with `unknown_effect`. The PWA says so and re-reads the chat; it never sends again by itself.
 - Activity records the length only: "Phone 1 sent 12 chars to t3". The text is never logged, echoed in a `res`, or kept.
 - The PWA asks before the first send to each terminal while it is open ("Type this into Agent 1's terminal?"); the bridge doesn't depend on that.
+
+### `terminal.keys` and the `keys` topic (S16b)
+
+Special keys (Esc, Tab, Shift-Tab, Ctrl-C, arrows) are pressed from a menu the desktop defines. The phone names a menu entry; it never sends key names, so the menu is the whole of what a phone can press.
+
+**The menu** is `data/herdr-app-remote/keys.json` (made 0600 when read), next to `devices.json`:
+
+```json
+{ "v": 1, "keys": [
+  { "label": "Esc", "keys": ["esc"] },
+  { "id": "accept", "label": "Accept", "keys": ["down", "enter"] }
+] }
+```
+
+- Without the file the default menu is used: Esc (`esc`), Tab (`tab`), Shift-Tab (`shift+tab`), Ctrl-C (`ctrl+c`), ↑, ↓, ←, → (ids `esc`, `tab`, `shift-tab`, `ctrl-c`, `up`, `down`, `left`, `right`; `DEFAULT_KEYS` in the protocol package, labels from the PhoneKeys board). Nothing is written. `"keys": []` is an empty menu.
+- Each entry: `label`, 1 to 24 characters with no surrounding spaces and no control, format (zero-width, bidi, tag), line or paragraph separator character, shown on the phone as text; `keys`, 1 to 8 key tokens pressed in order; `id` optional (`KEY_ID`: `[a-z0-9][a-z0-9_-]{0,31}`), by default the tokens with `+` read as `-`, joined by `_` (`ctrl+c` is `ctrl-c`, `up up` is `up_up`). Ids are unique. At most 32 entries; at most 64 KiB; no other field anywhere.
+- **Key tokens** (`isKeyToken` in the protocol package) are a strict subset of what `hc keys` accepts, chosen so that no token types plain text on its own (each sends a control byte or an ESC-prefixed sequence): modifiers `ctrl`, `alt`, `shift` in that order, each at most once, joined by `+`, then the key. A named key (`esc`, `enter`, `tab`, `backspace`, `delete`, `insert`, `home`, `end`, `pageup`, `pagedown`, `up`, `down`, `left`, `right`, `f1` to `f12`) takes any modifiers. A letter takes `ctrl` and/or `alt`, never `shift` (`ctrl+i` and `ctrl+m` alone are refused, as hc refuses them: they are `tab` and `enter`); a digit takes `alt` alone; `space` takes `ctrl` and/or `alt`. So `a`, `shift+a`, `1`, `space` (text) and `ctrl+0` (the rig showed it types `0`) are refused, as are hc's other spellings (`Escape`, `Ctrl+C`, `pgup`) and `super`/`cmd`/`meta` (the rig showed `super+x` types `x`). The rig presses every allowed token through the real `hc keys` and checks that each one sends a control byte or an escape sequence. (An `alt` token sends ESC and then its letter; a program that does not read that as Alt may see the letter. Like the rest of the file, that is the desktop's choice.)
+- A file that fails any of this, or is not a regular file (a symlink is never followed), or can't be read, is not used and is not fatal: it is moved to `keys.json.damaged` (0600, replacing an older one) and the default menu is in force. Activity says "Key menu file is invalid (invalid at keys[1].keys[0]): set aside as keys.json.damaged, the default menu is in use" and the bridge logs `keys_config`; the reason and place are fixed words and indices, never the file's content.
+- The file is looked at (a stat) every 5 s and before every press; an edit is published at once. A file changed less than a second ago is left for the next look, so an editor that saves in place is not caught half-written (and set aside). Until then the menu in force stays.
+
+**The `keys` topic** (`KeysTopic`): `{rev, keys: [{id, label, keys}]}`. `rev` (16 hex digits) is a hash of the entries: any change to an id, label or key gives a new one. Needs only `view`, like every topic.
+
+**`act terminal.keys {terminal, key, rev}`** (`TerminalKeysArgs`) presses entry `key` of the menu shown at `rev` in `terminal`. It needs `terminal.keys`.
+
+- `terminal` must match `TERMINAL_ID`, `key` must match `KEY_ID`, `rev` 16 hex digits, and nothing else is accepted: else `bad_args`. A `rev` that is not the menu now in force is `keys_changed` (an edited menu can never make an old button press new keys); an id not in it is `unknown_key`. hc doesn't run for any of these.
+- The bridge runs exactly `hc keys --json -- <terminal> <token>...` with the entry's tokens (checked once more right before), with no shell.
+- One press runs at a time per device (`busy`). Like `hc send`, `hc keys` waits for typing at the desktop to pause; it times out after 15 s (`timeout`, `unknown_effect`) and holds the device one more second while hc is killed. A press still held when the device loses `terminal.keys` (or the device, `view`, the serve identity, serving) is killed: `cancelled` with `unknown_effect`.
+- Results: `ok` when hc exits 0 with a JSON object (`{"status":null,"turn":0}` in the rig). Refusals on stderr: `terminal_not_found` (`not_found`, `machine_unknown`, `needs_target`), `terminal_finished` (`finished`), `terminal_blocked` (`blocked`: not listed for keys by `hc schema` 0.1.19, mapped like `hc send`'s in case it appears), `keys_refused` (`invalid_params`, `usage`). The rig showed hc checks every key name before pressing any (`left bogus` pressed nothing), so `invalid_params` is a clean refusal. `unavailable` and anything else is `keys_failed` with `unknown_effect`; `hc_missing` when hc isn't installed. The errors come from `hc schema` (hc 0.1.19); `not_found`, `finished`, `invalid_params` and `usage` were also seen in the rig.
+- Activity names the entry the bridge resolved, by id and key count, never its label or tokens: "Phone 1 pressed ctrl-c (1 key) in t3". A press refused before the entry is resolved reads "Phone 1 pressed a key in t3: refused" (no capability) or "...: failed" (`bad_args`, `keys_changed`, `unknown_key`); the id the client sent is never logged.
+- **The PWA** (design/PhoneKeys): the key bar's "Keys ▴" button opens the Keys sheet, so no special key is on the bar itself where it could be tapped by accident. The sheet draws the default keys first and any other entry under "Your keys", each with its label and tokens (as text); Ctrl-C is drawn in the blocked colour. A tap presses at once ("Pressed Ctrl-C."): there is no confirmation step, since opening the sheet already is one. With `terminal.keys` off the button is dimmed and the sheet shows the keys greyed with "Special keys are off for this phone. Turn them on in Remote on desk-1." The `keys` topic is subscribed only while a chat is open; `keys_changed` re-reads it ("The key list changed on desk-1. Look again."), `forbidden` re-reads `/api/v1/me`, and an unknown effect re-reads the chat. A press that may have happened (an unknown effect) says "Ctrl-C may have been pressed. Check the terminal before you press it again.", any other refused press "Couldn't press Ctrl-C. Try again.", and a closed terminal "Agent 1's terminal is closed." Nothing is pressed again by itself. With `terminal.keys` on and typing off, the read-only footer keeps a key bar with only the Keys button (operator, 2026-11-11). Above the key bar, a limited `terminal.input` shows "Typing is on until 21:40", or in amber under 10 minutes "Typing turns off in 4 min, at 21:40"; when it runs out with the chat open the footer says "Typing turned off at 21:40. / Turn it on again in Remote on desk-1."
 
 ### Resume and consistency
 
@@ -251,7 +285,7 @@ Source: while at least one client is subscribed, the bridge runs `hc read <t> --
 ### The PWA's client (`packages/pwa/src/bridge/client.ts`)
 
 - Before each connect it asks `GET /api/v1/me`, because a browser can't see why an upgrade was refused: `401` shows "not paired" and retries every 10 s, `403` stops ("no longer accepts this phone"), `503` retries every 10 s, a network error retries with backoff.
-- It sends `hello` (with `resume` once it knows an epoch), then one `sub` for every topic the screens want. `usage` is asked for only once the Usage tab has been opened (it polls the desktop's CLI while subscribed), and `chat:<terminal>` only while that chat is open. There is no `unsub`, so 10 s after the last topic is given up (and with no `act` in flight) the client replaces its socket quietly: the resume `hello` subscribes only what is still wanted, and the bridge stops reading the closed chat.
+- It sends `hello` (with `resume` once it knows an epoch), then one `sub` for every topic the screens want. `usage` is asked for only once the Usage tab has been opened (it polls the desktop's CLI while subscribed), and `chat:<terminal>` and `keys` only while a chat is open. There is no `unsub`, so 10 s after the last topic is given up (and with no `act` in flight) the client replaces its socket quietly: the resume `hello` subscribes only what is still wanted, and the bridge stops reading the closed chat.
 - A seq gap asks once for a fresh `snap`; later patches of that topic are dropped until it arrives. Any frame on a greeted socket shows the client as online again, whatever the browser's `offline` event said.
 - Reconnects use backoff from 0.5 s, doubling, to 10 s. `visibilitychange` (to visible) and `online` reconnect at once; with a socket still open they send a `ping` and reconnect if no frame arrives within 5 s. A socket silent for 45 s is replaced.
 - An `act` in flight when the socket goes resolves `connection_lost` with `unknown_effect`, and is never resent. An `act` while not connected resolves `offline` and sends nothing.
@@ -264,12 +298,12 @@ Source: while at least one client is subscribed, the bridge runs `hc read <t> --
 | code | meaning |
 |---|---|
 | `unsupported_action` | not on the allowlist, or no slice handles it yet |
-| `forbidden` | the device lacks the capability (an expired `terminal.input` counts as off) |
+| `forbidden` | the device lacks the capability (an expired `terminal.input` or `terminal.keys` counts as off) |
 | `unpaired` | the device was revoked, or isn't approved; the socket is closed too |
 | `paused` | remote access is paused |
 | `internal_error` | the handler threw; always with `unknown_effect: true` |
 | `rate_limited` | the device is over a rate limit (see Rate limits) |
-| `audit_unavailable` | `terminal.send` while Activity can't be written |
+| `audit_unavailable` | `terminal.send` or `terminal.keys` while Activity can't be written |
 
 The device is re-checked before every `act`, so a revoke or pause refuses the next one. An `act` that is already running when it lands still completes.
 

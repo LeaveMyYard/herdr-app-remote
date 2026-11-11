@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatAgent, chatTopic } from "../src/chat-fixtures";
@@ -6,6 +7,9 @@ import { fetchTerminalInput, terminalInputOf } from "../src/bridge/me";
 import { HostNameProvider } from "../src/bridge/host-name";
 import { Chat } from "../src/screens/Chat";
 import { forgetConfirmations, sendWords, textProblem, type ChatInput, type SendOutcome } from "../src/screens/ChatComposer";
+
+/** Every chat here is on "desk-1", the board's computer. */
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ({ children }: { children: ReactNode }) => <HostNameProvider name="desk-1">{children}</HostNameProvider> });
 
 // Fake data only.
 function input(over: Partial<ChatInput> = {}, reply: SendOutcome = { ok: true }) {
@@ -33,11 +37,11 @@ describe("Chat composer (terminal.input)", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("shows the composer and only the keys hc send can press", () => {
+  it("shows the composer, the keys hc send can press, and the Keys menu button (special keys only in the sheet)", () => {
     render(<Chat {...props} input={input().input} />);
     expect(box()).toHaveAttribute("placeholder", "Type to the terminal…");
     const keys = screen.getByRole("toolbar", { name: "Keys" });
-    expect([...keys.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["Enter", "Type a slash"]);
+    expect([...keys.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["Enter", "Type a slash", "Keys: open the special keys menu"]);
     for (const k of ["Esc", "Tab", "⇧Tab", "Ctrl-C", "↑", "↓"]) expect(screen.queryByRole("button", { name: k })).toBeNull();
     expect(screen.queryByText(/Read-only here/)).toBeNull();
   });
@@ -47,7 +51,7 @@ describe("Chat composer (terminal.input)", () => {
     render(<Chat {...props} input={i} />);
     await userEvent.type(box(), "hello agent");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(confirm()).toHaveTextContent("Type this into Agent 1 · Parser rewrite's terminal?");
+    expect(confirm()).toHaveTextContent("Type this into Agent 1's terminal?");
     expect(confirm()).toHaveTextContent("Asked once for each terminal while the app is open.");
     expect(sent).toEqual([]);
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -151,16 +155,40 @@ describe("Chat composer (terminal.input)", () => {
     expect(sendWords({ ok: false, code: "something_new" }, "desk-1")).toBe("Not sent.");
   });
 
-  it("goes read-only by itself when the expiry passes", () => {
+  it("goes read-only by itself when the expiry passes, saying when it turned off", () => {
     vi.useFakeTimers();
-    let now = 1_000_000;
-    render(<Chat {...props} now={() => now} input={input({ until: now + 60_000 }).input} />);
+    const until = new Date(2026, 10, 11, 21, 40).getTime();
+    let now = until - 60_000;
+    render(<Chat {...props} now={() => now} input={input({ until }).input} />);
     expect(box()).toHaveAttribute("placeholder", "Type to the terminal…");
     act(() => {
       now += 60_000;
       vi.advanceTimersByTime(60_000);
     });
     expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("Typing turned off at 21:40.")).toBeInTheDocument();
+    expect(screen.getByText("Turn it on again in Remote on desk-1.")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("turned off from the desktop before its time is the plain read-only footer, not 'turned off at'", () => {
+    const until = new Date(2026, 10, 11, 21, 40).getTime();
+    const now = until - 3_600_000;
+    const { rerender } = render(<Chat {...props} now={() => now} input={input({ until }).input} />);
+    rerender(<Chat {...props} now={() => now} input={{ ...input().input, enabled: false, until: null }} />);
+    expect(screen.getByText(/Read-only here/)).toBeInTheDocument();
+    expect(screen.queryByText(/Typing turned off at/)).toBeNull();
+  });
+
+  it("an early turn-off is not later shown as running out when the old limit passes", () => {
+    vi.useFakeTimers();
+    const until = new Date(2026, 10, 11, 21, 40).getTime();
+    let now = until - 3_600_000;
+    const { rerender } = render(<Chat {...props} now={() => now} input={input({ until }).input} />);
+    rerender(<Chat {...props} now={() => now} input={{ ...input().input, enabled: false, until: null }} />);
+    now = until + 60_000;
+    rerender(<Chat {...props} now={() => now} input={{ ...input().input, enabled: false, until: null }} />);
+    expect(screen.queryByText(/Typing turned off at/)).toBeNull();
     expect(screen.getByText(/Read-only here/)).toBeInTheDocument();
   });
 
@@ -176,11 +204,11 @@ describe("fetchTerminalInput (/api/v1/me)", () => {
 
   it("reads 200, says off for 401 and 403, and keeps what it had (null) for anything else", async () => {
     reply(200, { device: { caps: { "terminal.input": true }, terminal_input_until: null } });
-    expect(await fetchTerminalInput()).toEqual({ enabled: true, until: null });
+    expect(await fetchTerminalInput()).toEqual({ enabled: true, until: null, keys: { enabled: false, until: null } });
     reply(401);
-    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null });
+    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null, keys: { enabled: false, until: null } });
     reply(403);
-    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null });
+    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null, keys: { enabled: false, until: null } });
     reply(503);
     expect(await fetchTerminalInput()).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
@@ -190,10 +218,14 @@ describe("fetchTerminalInput (/api/v1/me)", () => {
 
 describe("terminalInputOf (/api/v1/me)", () => {
   it("reads the capability and expiry, and anything odd as off", () => {
-    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: 5 } })).toEqual({ enabled: true, until: 5 });
-    expect(terminalInputOf({ device: { caps: { "terminal.input": "yes" } } })).toEqual({ enabled: false, until: null });
-    expect(terminalInputOf(null)).toEqual({ enabled: false, until: null });
-    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: "soon" } })).toEqual({ enabled: true, until: null });
+    const off = { enabled: false, until: null };
+    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: 5 } })).toEqual({ enabled: true, until: 5, keys: off });
+    expect(terminalInputOf({ device: { caps: { "terminal.input": "yes" } } })).toEqual({ ...off, keys: off });
+    expect(terminalInputOf(null)).toEqual({ ...off, keys: off });
+    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: "soon" } })).toEqual({ enabled: true, until: null, keys: off });
+    // terminal.keys (S16b) is read on its own.
+    expect(terminalInputOf({ device: { caps: { "terminal.keys": true }, terminal_keys_until: 9 } })).toEqual({ ...off, keys: { enabled: true, until: 9 } });
+    expect(terminalInputOf({ device: { caps: { "terminal.keys": 1 }, terminal_keys_until: "x" } })).toEqual({ ...off, keys: off });
   });
 });
 

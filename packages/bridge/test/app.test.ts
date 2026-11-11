@@ -31,8 +31,13 @@ const ok = (stdout: string): RunResult => ({ code: 0, stdout, stderr: "" });
 /** Replays fixed outputs and records every command. Nothing is spawned. */
 /** When set, `hc send` waits for its abort signal instead of answering (a send held while the desktop is typed on). */
 let holdSends = false;
+/** Likewise for `hc keys`. */
+let holdKeys = false;
 const fakeRun: Runner = async (cmd, args, opts) => {
   calls.push({ cmd, args });
+  if (cmd === "fake-hc" && args[0] === "keys" && holdKeys)
+    return new Promise((resolve) => opts.signal?.addEventListener("abort", () => resolve({ code: null, stdout: "", stderr: "", error: "aborted" })));
+  if (cmd === "fake-hc" && args[0] === "keys") return ok('{"status":null,"turn":0}\n');
   if (cmd === "fake-hc" && args[0] === "send" && holdSends)
     return new Promise((resolve) => opts.signal?.addEventListener("abort", () => resolve({ code: null, stdout: "", stderr: "", error: "aborted" })));
   if (cmd === "fake-tailscale") return tsStatus;
@@ -50,6 +55,7 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "bridge-app-"));
   calls = [];
   holdSends = false;
+  holdKeys = false;
   tsStatus = ok("{}");
   link = new LinkServer({ token: TOKEN });
   await link.listen();
@@ -136,7 +142,7 @@ function http(method: string, path: string, headers: Headers, body?: string) {
   });
 }
 
-async function paired(caps: { navigate?: boolean; terminal?: boolean } = {}): Promise<string> {
+async function paired(caps: { navigate?: boolean; terminal?: boolean; keys?: boolean } = {}): Promise<string> {
   const { code } = app!.security.issueCode();
   const r = await http("POST", "/api/v1/pair", OK_POST, JSON.stringify({ code, name: "Phone 1" }));
   expect(r.status).toBe(202);
@@ -144,6 +150,7 @@ async function paired(caps: { navigate?: boolean; terminal?: boolean } = {}): Pr
   app!.security.approve(id);
   if (caps.navigate) app!.security.setCap(id, "navigate", true);
   if (caps.terminal) app!.security.setCap(id, "terminal.input", true);
+  if (caps.keys) app!.security.setCap(id, "terminal.keys", true);
   const sc = r.headers["set-cookie"];
   return (Array.isArray(sc) ? sc[0]! : sc!).split(";")[0]!;
 }
@@ -450,6 +457,133 @@ describe("startApp: topics over the link", () => {
     const held = calls.filter((c) => c.args[0] === "send");
     expect(held).toHaveLength(1);
     expect(app!.security.activity().some((e) => e.text.includes("sent 4 chars to t3: result unknown"))).toBe(true);
+  });
+
+  it("terminal.keys presses a menu entry's keys only with terminal.keys; Activity names the entry, never the label", async () => {
+    await start();
+    const off = await phone(await paired({ terminal: true }));
+    send(off, { type: "hello", api: 1 });
+    send(off, { type: "sub", topics: ["keys"] });
+    const snap = await off.until(snapOf("keys"));
+    const menu = bridgeApi.KeysTopic.parse(snap.data);
+    expect(menu.keys.map((k) => k.id)).toEqual(["esc", "tab", "shift-tab", "ctrl-c", "up", "down", "left", "right"]);
+    send(off, { type: "act", id: "k0", kind: "terminal.keys", args: { terminal: "t3", key: "ctrl-c", rev: menu.rev } });
+    expect(await off.until(resOf("k0"))).toMatchObject({ ok: false, code: "forbidden" });
+    expect(calls.some((c) => c.args[0] === "keys")).toBe(false);
+
+    const on = await phone(await paired({ keys: true }));
+    send(on, { type: "hello", api: 1 });
+    send(on, { type: "act", id: "k1", kind: "terminal.keys", args: { terminal: "t3", key: "shift-tab", rev: menu.rev } });
+    const r = await on.until(resOf("k1"));
+    expect(r).toMatchObject({ ok: true });
+    // audit_label stays on the bridge.
+    expect(JSON.stringify(r)).not.toContain("audit");
+    send(on, { type: "act", id: "k2", kind: "terminal.keys", args: { terminal: "t3", key: "esc", rev: "0123456789abcdef" } });
+    expect(await on.until(resOf("k2"))).toMatchObject({ ok: false, code: "keys_changed" });
+    // A device with terminal.keys alone can't type text.
+    send(on, { type: "act", id: "k3", kind: "terminal.send", args: { terminal: "t3", text: "hello" } });
+    expect(await on.until(resOf("k3"))).toMatchObject({ ok: false, code: "forbidden" });
+    expect(calls.filter((c) => c.args[0] === "keys" || c.args[0] === "send")).toEqual([{ cmd: "fake-hc", args: ["keys", "--json", "--", "t3", "shift+tab"] }]);
+    const text = app!.security.activity().map((e) => e.text);
+    expect(text).toContain("Phone 2 pressed shift-tab (1 key) in t3");
+    expect(text).toContain("Phone 2 pressed a key in t3: failed");
+    expect(JSON.stringify(app!.security.activity())).not.toContain("Shift-Tab");
+  });
+
+  it("an edited keys.json is published; a damaged one is set aside, said in Activity and the log, and never used", async () => {
+    const events: unknown[] = [];
+    const dataDir = join(home, "data/herdr-app-remote");
+    await import("node:fs/promises").then((fs) => fs.mkdir(dataDir, { recursive: true }));
+    await import("node:fs/promises").then((fs) => fs.writeFile(join(dataDir, "keys.json"), '{"v":1,"keys":[{"label":"secret words","keys":["hello"]}]}'));
+    await start({ log: (e) => events.push(e) });
+    expect(events).toContainEqual({ event: "keys_config", state: "damaged", reason: "invalid", where: "keys[0].keys[0]", setAside: true });
+    expect(app!.security.activity().map((e) => e.text)).toContain("Key menu file is invalid (invalid at keys[0].keys[0]): set aside as keys.json.damaged, the default menu is in use");
+    expect(JSON.stringify(app!.security.activity())).not.toContain("secret");
+    expect(JSON.stringify(events)).not.toContain("secret");
+    const before = bridgeApi.KeysTopic.parse(app!.hub.get("keys"));
+    expect(before.keys).toHaveLength(8);
+
+    await import("node:fs/promises").then((fs) => fs.writeFile(join(dataDir, "keys.json"), '{"v":1,"keys":[{"label":"Ctrl-D","keys":["ctrl+d"]}]}'));
+    // A file changed under a second ago is left alone (an in-place save may be half-written).
+    await new Promise((r) => setTimeout(r, 1_200));
+    const p = await phone(await paired({ keys: true }));
+    send(p, { type: "hello", api: 1 });
+    // A press from the menu as it was is refused, and the press itself picks up the edit at once.
+    send(p, { type: "act", id: "e1", kind: "terminal.keys", args: { terminal: "t3", key: "esc", rev: before.rev } });
+    expect(await p.until(resOf("e1"))).toMatchObject({ ok: false, code: "keys_changed" });
+    const after = bridgeApi.KeysTopic.parse(app!.hub.get("keys"));
+    expect(after.keys).toEqual([{ id: "ctrl-d", label: "Ctrl-D", keys: ["ctrl+d"] }]);
+    expect(events).toContainEqual({ event: "keys_config", state: "loaded", entries: 1 });
+    expect(calls.some((c) => c.args[0] === "keys")).toBe(false);
+  });
+
+  it("turning terminal.keys off kills a press held by hc, and leaves a held send alone", async () => {
+    await start();
+    holdKeys = true;
+    holdSends = true;
+    // Two sockets of the same device: acts on one socket run one at a time, so the press and the send must be held
+    // on separate sockets to be in flight together.
+    const cookie = await paired({ terminal: true, keys: true });
+    const pk = await phone(cookie);
+    const ps = await phone(cookie);
+    send(pk, { type: "hello", api: 1 });
+    send(ps, { type: "hello", api: 1 });
+    const rev = bridgeApi.KeysTopic.parse(app!.hub.get("keys")).rev;
+    send(pk, { type: "act", id: "hk", kind: "terminal.keys", args: { terminal: "t3", key: "ctrl-c", rev } });
+    send(ps, { type: "act", id: "hs", kind: "terminal.send", args: { terminal: "t3", text: "held" } });
+    const end = Date.now() + 2000;
+    while (!(calls.some((c) => c.args[0] === "keys") && calls.some((c) => c.args[0] === "send")) && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+    expect(calls.filter((c) => c.args[0] === "keys" || c.args[0] === "send").map((c) => c.args[0]).sort()).toEqual(["keys", "send"]);
+    const id = app!.security.devices().find((d) => d.caps["terminal.keys"])!.id;
+    app!.security.setCap(id, "terminal.keys", false);
+    expect(await pk.until(resOf("hk"))).toMatchObject({ ok: false, code: "cancelled", unknown_effect: true });
+    await new Promise((r) => setTimeout(r, 100));
+    // The send is still held: losing terminal.keys did not touch it.
+    expect(ps.msgs.some(resOf("hs"))).toBe(false);
+    // And the reverse: a new press is held, then losing terminal.input kills the send only.
+    app!.security.setCap(id, "terminal.keys", true);
+    // The killed press holds the device for TIMEOUT_HOLD_MS while hc dies.
+    await new Promise((r) => setTimeout(r, 1_100));
+    send(pk, { type: "act", id: "hk2", kind: "terminal.keys", args: { terminal: "t3", key: "esc", rev } });
+    const end2 = Date.now() + 2000;
+    while (calls.filter((c) => c.args[0] === "keys").length < 2 && Date.now() < end2) await new Promise((r) => setTimeout(r, 10));
+    expect(calls.filter((c) => c.args[0] === "keys")).toHaveLength(2);
+    app!.security.setCap(id, "terminal.input", false);
+    expect(await ps.until(resOf("hs"))).toMatchObject({ ok: false, code: "cancelled" });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(pk.msgs.some(resOf("hk2"))).toBe(false);
+    app!.security.revoke(id);
+    expect(app!.security.activity().map((e) => e.text)).toContain("Phone 1 pressed ctrl-c (1 key) in t3: result unknown");
+  });
+
+  it("revoking the device, or Funnel turning on, kills a press held by hc", async () => {
+    await start();
+    holdKeys = true;
+    const rev = bridgeApi.KeysTopic.parse(app!.hub.get("keys")).rev;
+    const held = async (cookie: string, aid: string) => {
+      const p = await phone(cookie);
+      send(p, { type: "hello", api: 1 });
+      const n = calls.filter((c) => c.args[0] === "keys").length;
+      send(p, { type: "act", id: aid, kind: "terminal.keys", args: { terminal: "t3", key: "ctrl-c", rev } });
+      const end = Date.now() + 2000;
+      while (calls.filter((c) => c.args[0] === "keys").length === n && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+      return p;
+    };
+    const unknown = (n: number) => app!.security.activity().filter((e) => e.text.endsWith("pressed ctrl-c (1 key) in t3: result unknown")).length === n;
+    // Revoke: the socket closes and the held hc keys is killed (its Activity line says the result is unknown).
+    await held(await paired({ keys: true }), "r1");
+    const id = app!.security.devices().find((d) => d.caps["terminal.keys"])!.id;
+    app!.security.revoke(id);
+    const end1 = Date.now() + 2000;
+    while (!unknown(1) && Date.now() < end1) await new Promise((r) => setTimeout(r, 10));
+    expect(unknown(1)).toBe(true);
+    // Funnel: every press held is killed.
+    await held(await paired({ keys: true }), "f1");
+    tsStatus = funnelOn(`${SERVE}:8443`);
+    await app!.checkFunnel();
+    const end2 = Date.now() + 2000;
+    while (!unknown(2) && Date.now() < end2) await new Promise((r) => setTimeout(r, 10));
+    expect(unknown(2)).toBe(true);
   });
 
   it("stop() closes the API listener and leaves the link server to its owner", async () => {

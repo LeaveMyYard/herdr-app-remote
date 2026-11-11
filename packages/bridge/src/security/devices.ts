@@ -13,6 +13,9 @@ const CapsSchema = z
     navigate: z.boolean(),
     "terminal.input": z.boolean(),
     "terminal.input.until": z.number().int().nullable(),
+    // Added by S16b: a devices.json written before it has neither, and reads as off.
+    "terminal.keys": z.boolean().default(false),
+    "terminal.keys.until": z.number().int().nullable().default(null),
     push: z.boolean(),
   })
   .strict();
