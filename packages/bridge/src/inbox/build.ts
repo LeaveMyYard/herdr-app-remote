@@ -61,9 +61,13 @@ export interface BuildEnv {
 }
 
 /** One feed entry as a topic row. A row that cannot be built reads as an unknown row: its key, and no actions. */
-export function buildRow(entry: Obj, env: BuildEnv): bridgeApi.InboxRow {
+export function buildRow(entry: Obj, env: BuildEnv): bridgeApi.InboxRow | undefined {
   const base = { key: str(entry.key), actions: arr(entry.actions).filter((a): a is string => typeof a === "string"), new: env.isNew(str(entry.key)) };
-  const unknown = (): bridgeApi.InboxRow => ({ key: base.key, kind: str(entry.kind), actions: [], new: base.new });
+  // A row that cannot be built reads as an unknown row; one with no usable key or a known kind that fails the schema is dropped.
+  const unknown = (): bridgeApi.InboxRow | undefined => {
+    const r = bridgeApi.InboxRow.safeParse({ key: base.key, kind: str(entry.kind), actions: [], new: base.new });
+    return r.success ? r.data : undefined;
+  };
   const { modules } = env;
   let row: unknown;
   try {
@@ -231,7 +235,7 @@ export function buildTopic(input: TopicInput, env: BuildEnv): bridgeApi.InboxTop
   let at = entries.map((e) => e.kind).lastIndexOf("group") + 1;
   if (at === 0) at = entries.findIndex((e) => e.kind !== "alert" && e.kind !== "remote_alert");
   if (at < 0) at = entries.length;
-  const rows = [...entries.slice(0, at), ...extra, ...entries.slice(at)].map((e) => buildRow(e, env));
+  const rows = [...entries.slice(0, at), ...extra, ...entries.slice(at)].map((e) => buildRow(e, env)).filter((r): r is bridgeApi.InboxRow => r !== undefined);
   const hidden = env.modules.leftOut(feed);
   return {
     plugin: "ready",
@@ -243,7 +247,8 @@ export function buildTopic(input: TopicInput, env: BuildEnv): bridgeApi.InboxTop
     incomplete: COUNTS(feed, env.modules, input.unlisted),
     // `entries: []` is an empty inbox only when the feed is ok and nothing was left out; a shown row counts as a row.
     empty: rows.length === 0 && hidden === 0,
-    waiting: rows.filter((r) => r.kind === "group").length,
+    // Left-out groups the bridge has not opened still wait: they count (so the header and badge never say "nothing").
+    waiting: rows.filter((r) => r.kind === "group").length + Math.max(feed.omitted.groups - extra.length, 0),
     alerts: rows.filter((r) => r.kind === "alert").length,
     entries: rows,
   };

@@ -40,14 +40,18 @@ describe("Inbox", () => {
 
   it("marks an old feed, with its age, and still shows the rows", () => {
     view("stale");
-    expect(screen.getByRole("status")).toHaveTextContent("The feed can't be read. Showing the last good copy, 5m old.");
+    expect(screen.getByRole("status")).toHaveTextContent("The inbox feed can't be read (unreadable): this is the last good copy, 5m old. It may be out of date.");
     expect(screen.getByText("Alert Title 456")).toBeInTheDocument();
   });
 
   it("says what the feed left out, and never shows the empty state while anything is left out", () => {
     view("left-out-only");
     expect(screen.getByRole("status")).toHaveTextContent("Still open, and not listed here: 1 question, 1 group. 1 question is not shown yet");
-    expect(screen.queryByText("Nothing is waiting for you")).toBeNull();
+    expect(screen.queryByText("No open questions")).toBeNull();
+    // left-out questions still wait: the header, the count and the badge never say "nothing"
+    expect(screen.getByText("1 waiting")).toBeInTheDocument();
+    expect(screen.getByText("1 group")).toBeInTheDocument();
+    expect(inboxBadge(topic("left-out-only"))).toBe("?1");
   });
 
   it("repeats the feed's own error lines", () => {
@@ -58,33 +62,32 @@ describe("Inbox", () => {
 
   it("shows the empty state only for an empty inbox", () => {
     view("empty");
-    expect(screen.getByText("Nothing is waiting for you")).toBeInTheDocument();
-    expect(screen.getByText("Nothing waiting")).toBeInTheDocument();
+    expect(screen.getAllByText("No open questions")).toHaveLength(2);
   });
 
   it("says the inbox is unavailable, not empty, when there is no feed", () => {
     view("unavailable");
-    expect(screen.getByText("The inbox isn't available")).toBeInTheDocument();
-    expect(screen.getByText(/This is not an empty inbox/)).toBeInTheDocument();
-    expect(screen.queryByText("Nothing is waiting for you")).toBeNull();
+    expect(screen.getAllByText("Inbox unavailable").length).toBeGreaterThan(0);
+    expect(screen.getByText(/There is no inbox feed to read \(missing\)/)).toBeInTheDocument();
+    expect(screen.queryByText("No open questions")).toBeNull();
   });
 
   it("explains an inbox that is too old", () => {
     view("too-old");
-    expect(screen.getByText(/too old for the app/)).toBeInTheDocument();
+    expect(screen.getByText("herdr-inbox is too old for the app.")).toBeInTheDocument();
   });
 
   it("shows words it does not know as a key, with nothing offered", () => {
     view("unknown");
     const row = screen.getByText("wat:1").closest("button")!;
-    expect(row).toHaveTextContent("This version can't show this row.");
-    expect(screen.getByText("Machine 1 · read only")).toBeInTheDocument();
+    expect(row).toHaveTextContent("wat:1");
+    expect(screen.getByText("Machine 1")).toBeInTheDocument();
   });
 
   it("folds two or more gone-agent answers into one row, and keeps that set fixed", () => {
     const t = topic("failed");
     const { rerender } = render(<Inbox topic={t} host={demoHost} now={DEMO_NOW} />);
-    expect(screen.getByText("2 answers can't be delivered")).toBeInTheDocument();
+    expect(screen.getByText("2 answers whose agents are gone")).toBeInTheDocument();
     expect(screen.queryByText("Question Title 120")).toBeNull();
     // the busy (pending) answer is no failure: it reads as delivery at work
     expect(screen.getByText("Question Title 119").closest("button")).toHaveTextContent("⏳");
@@ -92,14 +95,31 @@ describe("Inbox", () => {
     const extra = { ...t.entries.find((e) => e.key === "failed:120")!, key: "failed:122", question_id: 122, question: "Question Title 122" };
     rerender(<Inbox topic={{ ...t, entries: [...t.entries, extra as never] }} host={demoHost} now={DEMO_NOW} />);
     expect(screen.getByText("Question Title 122")).toBeInTheDocument();
-    expect(screen.getByText("2 answers can't be delivered")).toBeInTheDocument();
+    expect(screen.getByText("2 answers whose agents are gone")).toBeInTheDocument();
+  });
+
+  it("keeps the summary when the batch shrinks to one, so the answer never disappears", () => {
+    const t = topic("failed");
+    const { rerender } = render(<Inbox topic={t} host={demoHost} now={DEMO_NOW} />);
+    rerender(<Inbox topic={{ ...t, entries: t.entries.filter((e) => e.key !== "failed:121") }} host={demoHost} now={DEMO_NOW} />);
+    expect(screen.getByText("1 answer whose agent is gone")).toBeInTheDocument();
+    rerender(<Inbox topic={{ ...t, entries: t.entries.filter((e) => !e.key.startsWith("failed:12")) }} host={demoHost} now={DEMO_NOW} />);
+    expect(screen.queryByText(/whose agent/)).toBeNull();
+  });
+
+  it("puts the summary right after the failed rows", () => {
+    const t = topic("failed");
+    const remote = topic("unknown").entries.find((e) => e.kind === "remote_group")!;
+    render(<Inbox topic={{ ...t, entries: [...t.entries, remote] }} host={demoHost} now={DEMO_NOW} />);
+    const keys = within(screen.getByRole("list", { name: "Inbox" })).getAllByRole("listitem").map((li) => li.querySelector("[data-key]")?.getAttribute("data-key"));
+    expect(keys.slice(-2)).toEqual(["gone", "remote:m1|db|3"]);
   });
 
   it("does not fold a single gone-agent answer", () => {
     const t = topic("failed");
     render(<Inbox topic={{ ...t, entries: t.entries.filter((e) => e.key !== "failed:121") }} host={demoHost} now={DEMO_NOW} />);
     expect(screen.getByText("Question Title 120")).toBeInTheDocument();
-    expect(screen.queryByText(/answers can't be delivered/)).toBeNull();
+    expect(screen.queryByText(/answers whose agents are gone/)).toBeNull();
   });
 });
 
@@ -122,7 +142,7 @@ describe("App", () => {
   it("follows the scenario in the hash", () => {
     window.location.hash = "#/inbox/empty";
     render(<App />);
-    expect(screen.getByText("Nothing is waiting for you")).toBeInTheDocument();
+    expect(screen.getAllByText("No open questions").length).toBeGreaterThan(0);
     expect(screen.queryByLabelText(/Inbox: \?/)).toBeNull();
   });
 });

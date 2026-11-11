@@ -77,6 +77,8 @@ export interface Home {
   calls: () => string[];
   /** Sets what `app show --question <q> --json` prints (exit 0), or removes it. */
   show: (qid: number, row: unknown | null) => void;
+  /** While set, `app show --question <q>` answers `busy`. */
+  busy: (qid: number, on: boolean) => void;
   setHelp: (text: string, code?: number) => void;
   setEnsureCode: (code: number) => void;
   writeFeed: (feed: unknown | string | null) => void;
@@ -84,7 +86,7 @@ export interface Home {
 
 /** An app home with the (fake) inbox install receipt, plugin files and feed, plus a fake plugin root and launcher. */
 export function inboxHome(
-  opts: { feed?: unknown | string | null; files?: Partial<Record<"feed" | "commands" | "words", string>>; pinned?: Partial<Record<"feed" | "commands" | "words", string>>; receipt?: boolean; root?: boolean } = {},
+  opts: { feed?: unknown | string | null; files?: Partial<Record<"feed" | "commands" | "words", string>>; pinned?: Partial<Record<"feed" | "commands" | "words", string>>; receipt?: boolean; root?: boolean; moves?: boolean } = {},
 ): Home {
   const home = tmp("s10-home-");
   const root = tmp("s10-root-");
@@ -96,7 +98,7 @@ export function inboxHome(
     receipt[`${MODS}/${names[k]}`] = opts.pinned?.[k] ?? sha(files[k]);
   }
   if (opts.receipt !== false) {
-    put(home, "data/herdr-inbox/install.json", JSON.stringify({ v: 1, plugin_root: opts.root === false ? "/nonexistent/root" : root, plugin_moves: false, claude_config: null, dirs: [], files: receipt }));
+    put(home, "data/herdr-inbox/install.json", JSON.stringify({ v: 1, plugin_root: opts.root === false ? "/nonexistent/root" : root, plugin_moves: opts.moves === true, claude_config: null, dirs: [], files: receipt }));
   }
   put(root, "herdr-plugin.toml", "name = 'fake'\n");
   put(root, "help.out", "herdr-inbox app v1\nusage: fake\n");
@@ -110,6 +112,7 @@ echo "$*" >> "$D/calls.log"
 case "$1 $2" in
   "app --help") cat "$D/help.out"; exit $(cat "$D/help.code" 2>/dev/null || echo 0);;
   "app show")
+    if [ -f "$D/show-$4.busy" ]; then echo '{"v":1,"ok":false,"verb":"show","entry":"group:0","code":"busy","message":"busy","closed":null}'; exit 1; fi
     f="$D/show-$4.json"
     if [ -f "$f" ]; then cat "$f"; exit 0; fi
     echo '{"v":1,"ok":false,"verb":"show","entry":"group:0","code":"stale","message":"closed","closed":"answered"}'; exit 1;;
@@ -133,6 +136,11 @@ exit 2
       const p = join(root, `show-${qid}.json`);
       if (row === null) rmSync(p, { force: true });
       else writeFileSync(p, JSON.stringify({ v: 1, ok: true, verb: "show", entry: (row as { key: string }).key, row }));
+    },
+    busy: (qid, on) => {
+      const p = join(root, `show-${qid}.busy`);
+      if (on) writeFileSync(p, "");
+      else rmSync(p, { force: true });
     },
     setHelp: (text, code = 0) => {
       writeFileSync(join(root, "help.out"), text);

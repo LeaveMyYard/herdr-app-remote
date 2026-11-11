@@ -82,7 +82,11 @@ export async function resolveLauncher(appHome: string, run: Runner): Promise<Lau
   } catch {
     return undefined;
   }
-  const root = record !== null && typeof record === "object" ? (record as { plugin_root?: unknown }).plugin_root : undefined;
+  const rec = record !== null && typeof record === "object" ? (record as { plugin_root?: unknown; plugin_moves?: unknown }) : {};
+  const root = rec.plugin_root;
+  // Only the operator's own checkout stays put. A moving install may leave an old copy behind that a rollback
+  // never reaches, and finding the current one needs `herdr plugin list` / Claude Code's list (not done yet).
+  if (rec.plugin_moves !== false) return undefined;
   if (typeof root !== "string" || !isAbsolute(root)) return undefined;
   const launch = join(root, "scripts", "launch");
   try {

@@ -95,12 +95,13 @@ export function inboxBadge(topic: bridgeApi.InboxTopic | undefined): string | un
 
 export const headerSub = (topic: bridgeApi.InboxTopic): string => {
   const parts = [topic.waiting > 0 ? `${topic.waiting} waiting` : null, topic.alerts > 0 ? plural(topic.alerts, "alert", "alerts") : null].filter((x): x is string => x !== null);
-  return parts.length > 0 ? parts.join(" · ") : "Nothing waiting";
+  return parts.length > 0 ? parts.join(" · ") : "No open questions";
 };
 
 /** What the feed left out, in words (the required "incomplete feed" notice). */
 export function incompleteWords(inc: NonNullable<bridgeApi.InboxTopic["incomplete"]>): string {
-  const counts = inc.counts.length > 0 ? `Still open, and not listed here: ${inc.counts.join(", ")}.` : "";
-  const unlisted = inc.unlisted > 0 ? ` ${plural(inc.unlisted, "question is", "questions are")} not shown yet; the desktop inbox has ${inc.unlisted === 1 ? "it" : "them"}.` : "";
+  // `leftOutWords` of the inbox's own overlay when something is still unopened; otherwise say where the rows came from.
+  const counts = inc.counts.length === 0 ? "" : inc.unlisted > 0 ? `Still open, and not listed here: ${inc.counts.join(", ")}.` : `Left out of the feed, shown here: ${inc.counts.join(", ")}.`;
+  const unlisted = inc.unlisted > 0 ? ` ${plural(inc.unlisted, "question is", "questions are")} not shown yet.` : "";
   return `${counts}${unlisted}`.trim();
 }

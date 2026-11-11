@@ -45,6 +45,8 @@ interface ShowEntry {
   row: Obj | null;
   at: number;
   retryAt: number;
+  /** The inbox said the question is no longer open (`stale`): app-commands-v1 allows no silent second call. */
+  closed?: boolean;
 }
 
 type Read = { text: string } | { problem: "missing" | "unreadable" };
@@ -87,6 +89,7 @@ export class InboxTopicDriver {
   private ensuring: Promise<void> | undefined;
   private showing: Promise<void> | undefined;
   private readonly shows = new Map<string, ShowEntry>();
+  private wanted: ReadonlyMap<string, number> = new Map();
   private readonly tokens = new Map<string, string>();
   private marks: { question_id: number; alert_id: number; seen: Set<number> } | undefined;
   private readonly newUntil = new Map<string, number>();
@@ -250,13 +253,16 @@ export class InboxTopicDriver {
       const cut = (e.questions as Obj[]).find((q) => q.cut === true);
       if (cut && typeof cut.id === "number" && typeof e.token === "string") wanted.set(`cut:${String(e.key)}|${e.token}`, cut.id);
     }
+    this.wanted = wanted;
     for (const k of [...this.shows.keys()]) if (!wanted.has(k)) this.shows.delete(k);
     if (this.showing) return;
     const due = [...wanted].filter(([k]) => {
       const s = this.shows.get(k);
       if (!s) return true;
-      if (now < s.retryAt) return false;
+      // A `stale` refusal is final for this key: the next call would be a silent refresh the protocol forbids.
+      if (s.closed || now < s.retryAt) return false;
       // A left-out row can change under the same id (nothing in the feed says so): look again now and then.
+      if (s.row === null) return true;
       return k.startsWith("omit:") && now - s.at >= SHOW_REFRESH_MS;
     });
     if (due.length === 0) return;
@@ -268,11 +274,15 @@ export class InboxTopicDriver {
         const r = await launch(modules.showArgs(qid), SHOW_TIMEOUT_MS).catch(() => null);
         const at = this.now();
         const res = modules.readResult(r === null ? null : { code: r.error ? null : r.code, stdout: r.stdout }, "show", null);
+        // The group may have changed or left while the call ran: a late answer must not bring its key back.
+        if (!this.wanted.has(k)) continue;
         const prev = this.shows.get(k);
         if (res.kind === "shown") {
           this.shows.set(k, { row: (res as { row: Obj }).row, at, retryAt: 0 });
+        } else if (res.kind === "refused" && (res as { code?: unknown }).code === "stale") {
+          this.shows.set(k, { row: null, at, retryAt: Infinity, closed: true });
         } else {
-          // `stale` (closed meanwhile), busy, unknown: keep what is shown and look again later, never in a loop.
+          // busy, not_migrated, unknown: keep what is shown and look again later (a cut or left-out row stays openable).
           this.shows.set(k, { row: prev?.row ?? null, at, retryAt: at + SHOW_RETRY_MS });
         }
         if (this.running) this.publish();
@@ -329,6 +339,8 @@ export class InboxTopicDriver {
     const r = bridgeApi.InboxTopic.safeParse(topic);
     if (!r.success) {
       this.opts.onInvalid?.(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+      // Never leave an old value standing as fresh.
+      if (hub.get(INBOX_TOPIC) !== undefined) hub.setStale(INBOX_TOPIC, "source_unavailable");
       return;
     }
     hub.publish(INBOX_TOPIC, r.data as unknown as Json);

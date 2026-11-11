@@ -10,10 +10,10 @@ export interface InboxProps {
 }
 
 const PROBLEM: Record<NonNullable<bridgeApi.InboxTopic["problem"]>, string> = {
-  missing: "the feed file is gone",
-  unreadable: "the feed can't be read",
-  unsupported: "the feed is from another version",
-  "not-ok": "the inbox couldn't read its own data",
+  missing: "missing",
+  unreadable: "unreadable",
+  unsupported: "unsupported version",
+  "not-ok": "the inbox could not be read",
 };
 
 function Notice({ tone, children }: { tone: "warn" | "info"; children: React.ReactNode }) {
@@ -100,19 +100,19 @@ function renderRow(row: Row, n: number | null, ctx: { host: HostState | undefine
     );
   }
   if (isKind(row, "remote_group")) {
-    return <RowShell key={row.key} {...common} mark="" title={row.title ?? row.questions[0]?.question ?? row.key} meta={age(row.created_at, ctx.now)} sub={`${machineName(row.machine)} · read only`} />;
+    return <RowShell key={row.key} {...common} mark="" title={row.title ?? row.questions[0]?.question ?? row.key} meta={age(row.created_at, ctx.now)} sub={[machineName(row.machine), row.questions.some((q) => q.cut) ? "text cut" : null].filter((x) => x !== null).join(" · ")} />;
   }
   if (isKind(row, "remote_alert")) {
-    return <RowShell key={row.key} {...common} mark="⚠" title={row.title} meta={age(row.created_at, ctx.now)} sub={`${machineName(row.machine)} · read only`} tone="alert" />;
+    return <RowShell key={row.key} {...common} mark="⚠" title={row.title} meta={age(row.created_at, ctx.now)} sub={machineName(row.machine)} tone="alert" />;
   }
   if (isKind(row, "remote_outbox")) {
     return <RowShell key={row.key} {...common} mark="" title={`${row.action} to ${machineName(row.machine)}`} meta="" sub={[row.state, row.result].filter((x): x is string => !!x).join(" · ")} tone="dim" />;
   }
   if (isKind(row, "remote_problem")) {
-    return <RowShell key={row.key} {...common} mark="⚠" title={row.question} meta="" sub={`${machineName(row.machine)} · ${row.why}`} tone="alert" />;
+    return <RowShell key={row.key} {...common} mark="⚠" title={row.question} meta="" sub={[machineName(row.machine), row.why, row.cut ? "text cut" : null].filter((x) => x !== null).join(" · ")} tone="alert" />;
   }
   // A kind this version does not know: its key, and nothing offered.
-  return <RowShell key={row.key} {...common} mark="" title={row.key} meta="" sub="This version can't show this row." tone="dim" />;
+  return <RowShell key={row.key} {...common} mark="" title={row.key} meta="" sub="" tone="dim" />;
 }
 
 /** PhoneInbox (design/PhoneInbox): the herdr-inbox feed, read-only. Answering is S11. */
@@ -125,21 +125,44 @@ export function Inbox({ topic, host, now }: InboxProps) {
   const live = (gone.current ?? []).filter((k) => topic.entries.some((r) => r.key === k && isKind(r, "failed") && r.delivery.state === "agent_gone"));
   const rows = topic.entries.filter((r) => !folded.has(r.key));
   const selectedKey = picked !== null && rows.some((r) => r.key === picked) ? picked : (rows[0]?.key ?? null);
+  // The summary sits right after the failed rows, before the remote ones (the popup's order), and stays while any of its members does.
+  let goneAt = rows.length;
+  const lastFailed = rows.map((r) => r.kind).lastIndexOf("failed");
+  if (lastFailed >= 0) goneAt = lastFailed + 1;
+  else {
+    const firstRemote = rows.findIndex((r) => r.kind.startsWith("remote_") && r.kind !== "remote_alert");
+    if (firstRemote >= 0) goneAt = firstRemote;
+  }
   const groupNo = new Map<string, number>();
   for (const r of rows) if (isKind(r, "group")) groupNo.set(r.key, groupNo.size + 1);
-  const groups = rows.filter((r) => isKind(r, "group")).length;
+
+  const renderOne = (r: Row) => renderRow(r, groupNo.get(r.key) ?? null, { host, now, selected: r.key === selectedKey, onSelect: () => setPicked(r.key) });
+  const goneRow =
+    live.length >= 1 ? (
+      <li key="gone">
+        <div className="ib-row" data-tone="alert" data-key="gone">
+          <span className="row ib-line">
+            <span className="mono nf ib-cursor" aria-hidden="true" />
+            <span className="mono nf ib-num">⚠</span>
+            <span className="f1 tr ib-title">{live.length === 1 ? "1 answer whose agent is gone" : `${live.length} answers whose agents are gone`}</span>
+          </span>
+          <span className="tr ib-sub">check_answers still has {live.length === 1 ? "it" : "them"}</span>
+        </div>
+      </li>
+    ) : null;
 
   return (
     <>
       <header className="col nf ib-head">
         <h1 className="ib-h1">Inbox</h1>
-        <span className="ib-headsub">{topic.state === "ok" ? headerSub(topic) : "Not available"}</span>
+        <span className="ib-headsub">{topic.state === "ok" ? headerSub(topic) : "Inbox unavailable"}</span>
       </header>
       <main className="col f1 ib-main">
         {topic.stale && topic.state === "ok" ? (
           <Notice tone="warn">
-            {topic.problem ? `${PROBLEM[topic.problem][0]?.toUpperCase()}${PROBLEM[topic.problem].slice(1)}. ` : "The inbox feed isn't updating. "}
-            Showing the last good copy{topic.generated_at !== null ? `, ${feedAge(topic.generated_at, now)} old` : ""}.
+            {topic.problem
+              ? `The inbox feed can't be read (${PROBLEM[topic.problem]}): this is the last good copy${topic.generated_at !== null ? `, ${feedAge(topic.generated_at, now)} old` : ""}. It may be out of date.`
+              : "The inbox feed is out of date: this may not be the inbox as it is now."}
           </Notice>
         ) : null}
         {topic.incomplete ? (
@@ -149,40 +172,29 @@ export function Inbox({ topic, host, now }: InboxProps) {
         ) : null}
         {topic.state === "unavailable" ? (
           <div className="col f1 ib-empty">
-            <p className="ib-empty-head">The inbox isn&apos;t available</p>
+            <p className="ib-empty-head">Inbox unavailable</p>
             <p className="ib-empty-body">
               {topic.plugin === "ready"
-                ? `${topic.problem ? `${PROBLEM[topic.problem][0]?.toUpperCase()}${PROBLEM[topic.problem].slice(1)}` : "Waiting for the feed"}. This is not an empty inbox.`
+                ? `There is no inbox feed to read (${topic.problem ? PROBLEM[topic.problem] : "waiting for it"}).`
                 : topic.plugin === "too_old"
-                  ? "herdr-inbox is too old for the app. Update it on the computer."
-                  : "herdr-inbox isn't working right now."}
+                  ? "herdr-inbox is too old for the app."
+                  : "herdr-inbox is not responding."}
             </p>
           </div>
         ) : topic.empty ? (
           <div className="col f1 ib-empty">
-            <p className="ib-empty-head">Nothing is waiting for you</p>
-            <p className="ib-empty-body">New questions and alerts from your agents show up here.</p>
+            <p className="ib-empty-head">No open questions</p>
           </div>
         ) : (
           <>
             <div className="row nf ib-listhead">
               <h2 className="f1 ib-listtitle">Open questions</h2>
-              <span className="mono ib-count">{groups === 1 ? "1 group" : `${groups} groups`}</span>
+              <span className="mono ib-count">{topic.waiting === 1 ? "1 group" : `${topic.waiting} groups`}</span>
             </div>
             <ul className="col ib-list" aria-label="Inbox">
-              {rows.map((r) => renderRow(r, groupNo.get(r.key) ?? null, { host, now, selected: r.key === selectedKey, onSelect: () => setPicked(r.key) }))}
-              {live.length >= 2 ? (
-                <li>
-                  <div className="ib-row" data-tone="dim" data-key="gone">
-                    <span className="row ib-line">
-                      <span className="mono nf ib-cursor" aria-hidden="true" />
-                      <span className="mono nf ib-num">⚠</span>
-                      <span className="f1 tr ib-title">{live.length} answers can&apos;t be delivered</span>
-                    </span>
-                    <span className="tr ib-sub">Their agents are gone. They can still fetch the answers themselves.</span>
-                  </div>
-                </li>
-              ) : null}
+              {rows.slice(0, goneAt).map(renderOne)}
+              {goneRow}
+              {rows.slice(goneAt).map(renderOne)}
             </ul>
           </>
         )}

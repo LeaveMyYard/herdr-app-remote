@@ -173,7 +173,7 @@ describe("inbox topic: opening rows with app show", () => {
     expect(JSON.stringify(hub.get("inbox"))).not.toContain("tok-");
   });
 
-  it("counts a left-out question it could not open, and does not retry it in a loop", async () => {
+  it("counts a left-out question it could not open, and never asks again after a stale refusal", async () => {
     const h = inboxHome({ feed: feedDoc({ omitted: omitted([201, 202]), entries: [] }) });
     h.show(201, group(201));
     const hub = newHub();
@@ -194,10 +194,11 @@ describe("inbox topic: opening rows with app show", () => {
       await driver.settled();
     }
     expect(asked()).toBe(1);
-    clock.now += 30_000;
+    clock.now += 31_000;
     await driver.refresh();
     await driver.settled();
-    expect(asked()).toBe(2);
+    // app-commands-v1: after `stale` the next call is the operator's, never a silent refresh
+    expect(asked()).toBe(1);
     t = bridgeApi.InboxTopic.parse(hub.get("inbox"));
     expect(t.incomplete?.unlisted).toBe(1);
   });
@@ -221,6 +222,131 @@ describe("inbox topic: opening rows with app show", () => {
     const cut = group(123, { questions: [question(123, { question: "Question Ti", cut: true })] });
     const t = (await started({ feed: feedDoc({ entries: [cut] }) })).topic();
     expect(t.entries[0]).toMatchObject({ questions: [{ cut: true }] });
+  });
+});
+
+describe("inbox topic: show retries and bad rows", () => {
+  const cutGroup = group(123, { questions: [question(123, { question: "Question Ti", cut: true })] });
+
+  it("opens a cut group again after a busy first call", async () => {
+    const h = inboxHome({ feed: feedDoc({ entries: [cutGroup] }) });
+    h.busy(123, true);
+    const hub = newHub();
+    const clock = { now: NOW };
+    driver = new InboxTopicDriver({ hub, appHome: h.home, run, now: () => clock.now, intervalMs: 3_600_000 });
+    await driver.start();
+    await driver.settled();
+    expect(h.calls().filter((c) => c.includes("--question 123"))).toHaveLength(1);
+    h.busy(123, false);
+    h.show(123, group(123, { questions: [question(123, { question: "Question Title 123 in full" })] }));
+    for (let i = 0; i < 3; i++) {
+      clock.now += 31_000;
+      h.writeFeed(feedDoc({ generated_at: clock.now / 1000, entries: [cutGroup] }));
+      await driver.refresh();
+      await driver.settled();
+    }
+    await driver.refresh();
+    const t = bridgeApi.InboxTopic.parse(hub.get("inbox"));
+    expect(t.entries[0]).toMatchObject({ questions: [{ question: "Question Title 123 in full", cut: false }] });
+  });
+
+  it("does not call app show again inside the retry wait after a busy answer", async () => {
+    const h = inboxHome({ feed: feedDoc({ omitted: { groups: 1, questions: 1, failed: 0, alerts: 0, remote: 0, question_ids: [201] }, entries: [] }) });
+    h.busy(201, true);
+    const hub = newHub();
+    const clock = { now: NOW };
+    driver = new InboxTopicDriver({ hub, appHome: h.home, run, now: () => clock.now, intervalMs: 3_600_000 });
+    await driver.start();
+    await driver.settled();
+    for (let i = 0; i < 5; i++) {
+      clock.now += 1000;
+      await driver.refresh();
+      await driver.settled();
+    }
+    expect(h.calls().filter((c) => c.includes("--question 201"))).toHaveLength(1);
+    clock.now += 30_000;
+    await driver.refresh();
+    await driver.settled();
+    expect(h.calls().filter((c) => c.includes("--question 201"))).toHaveLength(2);
+  });
+
+  it("drops a row it cannot build, and still publishes the others fresh", async () => {
+    const bad = [{ key: "", kind: "wat", token: null, actions: [] }, group(9, { questions: [] })];
+    const { topic, invalid } = await started({ feed: feedDoc({ entries: [alertEntry(456), ...bad] }) });
+    expect(invalid).toEqual([]);
+    expect(topic().entries.map((e) => e.key)).toEqual(["alert:456"]);
+  });
+
+  it("marks the topic stale when a value cannot be published", async () => {
+    const s = await started();
+    // a topic that fails its own schema must not stay up as fresh
+    expect(s.hub.isStale("inbox")).toBeNull();
+    const orig = bridgeApi.InboxTopic.safeParse;
+    (bridgeApi.InboxTopic as { safeParse: unknown }).safeParse = () => ({ success: false, error: { issues: [{ path: ["x"], message: "boom" }] } });
+    try {
+      s.h.writeFeed(feedDoc({ generated_at: NOW / 1000 + 1 }));
+      await s.step(1000);
+    } finally {
+      (bridgeApi.InboxTopic as { safeParse: unknown }).safeParse = orig;
+    }
+    expect(s.invalid.length).toBeGreaterThan(0);
+    expect(s.hub.isStale("inbox")).toBe("source_unavailable");
+  });
+
+  it("counts left-out groups as waiting before they are opened", async () => {
+    const { topic } = await started({ feed: feedDoc({ entries: [], omitted: { groups: 2, questions: 2, failed: 0, alerts: 0, remote: 0, question_ids: [] } }) });
+    expect(topic()).toMatchObject({ waiting: 2, empty: false });
+  });
+
+  it("reads a feed over 1 MiB as unreadable", async () => {
+    const { topic, h, step } = await started();
+    h.writeFeed(JSON.stringify(feedDoc({ errors: ["x".repeat(1_100_000)] })));
+    await step(1000);
+    expect(topic().problem).toBe("unreadable");
+    expect(topic().stale).toBe(true);
+  });
+
+  it("opens at most 20 left-out ids", async () => {
+    const ids = Array.from({ length: 30 }, (_, i) => 300 + i);
+    const h = inboxHome({ feed: feedDoc({ entries: [], omitted: { groups: 30, questions: 30, failed: 0, alerts: 0, remote: 0, question_ids: ids } }) });
+    for (const id of ids) h.show(id, group(id));
+    const hub = newHub();
+    const clock = { now: NOW };
+    driver = new InboxTopicDriver({ hub, appHome: h.home, run, now: () => clock.now, intervalMs: 3_600_000 });
+    await driver.start();
+    for (let i = 0; i < 10; i++) {
+      clock.now += 1000;
+      await driver.refresh();
+      await driver.settled();
+    }
+    const t = bridgeApi.InboxTopic.parse(hub.get("inbox"));
+    expect(t.entries).toHaveLength(20);
+    expect(t.incomplete?.unlisted).toBe(10);
+  });
+
+  it("puts opened left-out groups after the local groups and before failed rows", async () => {
+    const h = inboxHome({ feed: feedDoc({ omitted: { groups: 1, questions: 1, failed: 0, alerts: 0, remote: 0, question_ids: [201] }, entries: [alertEntry(456), group(123), failedEntry(119)] }) });
+    h.show(201, group(201));
+    const hub = newHub();
+    driver = new InboxTopicDriver({ hub, appHome: h.home, run, now: () => NOW, intervalMs: 3_600_000 });
+    await driver.start();
+    await driver.settled();
+    await driver.refresh();
+    expect(bridgeApi.InboxTopic.parse(hub.get("inbox")).entries.map((e) => e.key)).toEqual(["alert:456", "group:123", "group:201", "failed:119"]);
+  });
+
+  it("picks up an inbox that was updated or removed while running", async () => {
+    const h = inboxHome();
+    const hub = newHub();
+    const clock = { now: NOW };
+    driver = new InboxTopicDriver({ hub, appHome: h.home, run, now: () => clock.now, intervalMs: 3_600_000 });
+    await driver.start();
+    expect(bridgeApi.InboxTopic.parse(hub.get("inbox")).plugin).toBe("ready");
+    h.setHelp("herdr-inbox 0.1.0\n");
+    clock.now += 31_000;
+    h.writeFeed(feedDoc({ generated_at: clock.now / 1000 }));
+    await driver.refresh();
+    expect(bridgeApi.InboxTopic.parse(hub.get("inbox"))).toMatchObject({ plugin: "too_old", state: "unavailable" });
   });
 });
 
@@ -283,6 +409,10 @@ describe("inbox topic: the writer", () => {
 
 describe("inbox topic: availability", () => {
   const state = async (opts: Parameters<typeof inboxHome>[0]) => (await started(opts)).topic();
+
+  it("treats a moving install as missing: the recorded root may be an old copy", async () => {
+    expect(await state({ moves: true })).toMatchObject({ plugin: "missing", state: "unavailable" });
+  });
 
   it("is missing without an install receipt, or when the recorded root is gone", async () => {
     expect(await state({ receipt: false })).toMatchObject({ plugin: "missing", state: "unavailable" });

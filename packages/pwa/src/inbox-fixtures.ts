@@ -165,6 +165,7 @@ const SCENARIOS: Record<string, bridgeApi.InboxTopic> = {
     incomplete: { counts: ["2 questions", "1 group"], errors: ["a remote machine was not read"], unlisted: 1 },
   }),
   "left-out-only": ok([], {
+    waiting: 1,
     incomplete: { counts: ["1 question", "1 group"], errors: [], unlisted: 1 },
   }),
   unknown: ok([
