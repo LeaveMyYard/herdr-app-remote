@@ -520,6 +520,11 @@ export class Security {
       this.audit({ event: "pair.transfer_fail", text: "Home Screen setup refused: invalid or used code", ok: false });
       throw new HttpError(403, "bad_code");
     }
+    // This browser already is the device (storage shared with Safari): the code is spent, nothing else changes.
+    if (holder !== undefined) {
+      json(res, 200, { device: this.view(d) });
+      return;
+    }
     const token = randomBytes(32).toString("base64url");
     // One Home Screen token per device: a new one replaces the last (a re-added app), Safari's stays.
     this.store.update(d.id, (x) => {

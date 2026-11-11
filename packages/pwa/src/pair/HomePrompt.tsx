@@ -4,6 +4,7 @@
 import { createContext, useContext } from "react";
 import appIcon from "../assets/remote.svg";
 import { Icon } from "../components/Icon";
+import { Steps } from "./PairScreen";
 
 /** What the header's bell does; null hides the bell (the installed app, tests, the visual harness by default). */
 export const HomePromptBell = createContext<(() => void) | null>(null);
@@ -50,14 +51,7 @@ export function HomePrompt({ onClose }: { onClose: () => void }) {
           <Icon name="x" size={14} />
         </button>
       </div>
-      <ol className="col pair-steps home-prompt-steps">
-        {steps.map((s, i) => (
-          <li key={i} className="row pair-step">
-            <span className="mono nf row pair-step-n">{i + 1}</span>
-            <span className="f1">{s}</span>
-          </li>
-        ))}
-      </ol>
+      <Steps items={steps} className="home-prompt-steps" />
       <div className="row home-prompt-foot">
         <span className="f1 home-prompt-hint">To see this again, tap the bell at the top.</span>
         <button type="button" className="home-prompt-later" onClick={onClose}>

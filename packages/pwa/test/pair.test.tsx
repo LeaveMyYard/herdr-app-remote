@@ -115,12 +115,28 @@ describe("Safari: /pair#c=<code>", () => {
     expect(e.shown.map((v) => v.state)).toEqual(["check", "wait", "ok"]);
   });
 
-  it("no code in the URL: the expired state", async () => {
-    const { api, calls } = fakeApi({});
+  it("no code in the URL and no device here: the expired state", async () => {
+    const { api, calls } = fakeApi({ me: [{ status: 401 }] });
     const e = env(api);
     await runPairing(parseFragment(""), e);
-    expect(e.shown).toEqual([{ state: "bad" }]);
-    expect(calls).toEqual([]);
+    expect(e.shown.at(-1)).toEqual({ state: "bad" });
+    expect(calls).toEqual(["me"]);
+  });
+
+  it("a reload of the waiting screen (the code already left the URL) waits again, then opens", async () => {
+    const { api, calls } = fakeApi({ me: [pending("Phone 1"), pending("Phone 1"), approvedR("Phone 1")] });
+    const e = env(api);
+    await runPairing(parseFragment(""), e);
+    expect(e.shown.map((v) => v.state)).toEqual(["check", "wait", "ok"]);
+    expect(calls.every((c) => c === "me")).toBe(true);
+    expect(e.opened).toBe(1);
+  });
+
+  it("a reload after approval opens the app", async () => {
+    const { api } = fakeApi({ me: [approvedR()] });
+    const e = env(api);
+    await runPairing(parseFragment(""), e);
+    expect(e.opened).toBe(1);
   });
 
   it("stops when the screen is gone", async () => {
@@ -146,12 +162,36 @@ describe("Home Screen app: /pair#t=<code>", () => {
     expect(e.offered).toBe(0);
   });
 
-  it("a later launch (the start URL still names the spent code): already paired, nothing is posted", async () => {
+  it("a later launch (the start URL still names the spent code): already paired, nothing is posted or shown", async () => {
     const { api, calls } = fakeApi({ me: [approvedR()] });
     const e = env(api);
     await runPairing(parseFragment(`#t=${CODE}`), e);
     expect(calls).toEqual(["me"]);
+    expect(e.shown).toEqual([]);
     expect(e.opened).toBe(1);
+  });
+
+  it.each([
+    ["offline", { status: null }],
+    ["paused or Funnel", { status: 503 }],
+    ["refused", { status: 403 }],
+  ] as [string, Reply][])("a launch while %s opens the app (its banner says why) and never posts the code", async (_w, r) => {
+    const { api, calls } = fakeApi({ me: [r] });
+    const e = env(api);
+    await runPairing(parseFragment(`#t=${CODE}`), e);
+    expect(calls).toEqual(["me"]);
+    expect(e.shown).toEqual([]);
+    expect(e.opened).toBe(1);
+  });
+
+  it("a first launch whose transfer can't be asked (network, 429, 5xx) opens the app; only a refused code shows expired", async () => {
+    for (const r of [{ status: null }, { status: 429 }, { status: 503 }] as Reply[]) {
+      const { api } = fakeApi({ me: [{ status: 401 }], transfer: [r] });
+      const e = env(api);
+      await runPairing(parseFragment(`#t=${CODE}`), e);
+      expect(e.opened).toBe(1);
+      expect(e.shown).toEqual([{ state: "first" }]);
+    }
   });
 
   it("a spent or expired transfer code: the transfer variant of the expired state", async () => {
@@ -170,6 +210,7 @@ describe("PairPage (board copy)", () => {
     ["wait", { state: "wait", name: "Phone 1" }, ["Approve on your computer", "desk-1 is asking whether to let this phone in. Approve it there to finish.", "Shows as", "Phone 1", "Computer", "Waiting for approval…", "The request ends after 10 minutes if no one approves it."]],
     ["ok", { state: "ok", name: "Phone 1" }, ["Phone 1 is paired", "desk-1 approved this phone. You can remove it any time in Remote on the computer.", "Opening Herdr…", "Continue"]],
     ["bad", { state: "bad" }, ["This code no longer works", "Each code works once, for 5 minutes.", "On desk-1, open Remote › Devices for a fresh code.", "Scan it with the iPhone Camera."]],
+    ["bad (transfer)", { state: "bad", transfer: true }, ["This code no longer works", "Each Home Screen setup works once, within 10 minutes.", "Delete this Herdr icon from your Home Screen.", "Open Herdr in Safari, tap the bell, then add it to your Home Screen again."]],
     ["first", { state: "first" }, ["Finishing setup on this phone…", "Using the pairing from Safari. No need to approve again."]],
   ] as [string, PairView, string[]][])("%s", (_n, view, texts) => {
     const { container } = render(<PairPage view={view} host={host} />);
@@ -308,6 +349,34 @@ describe("Home Screen prompt in the live app", () => {
     expect(transfers(s)).toHaveLength(2);
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("region", { name: "Get notifications" })).toBeNull();
+  });
+
+  it("one code per opening: a reconnect while it stays open mints nothing new", async () => {
+    setPromptWanted(true);
+    const s = await mount();
+    await answer(s);
+    await act(async () => s.drop(1006));
+    await act(async () => client.wake());
+    await act(async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+    const s2 = sockets.at(-1)!;
+    expect(s2).not.toBe(s);
+    await act(async () => {
+      s2.open();
+      s2.recv({ type: "welcome", api: 1, bridge: "0.0.0", epoch: "e1" });
+    });
+    expect(screen.getByRole("region", { name: "Get notifications" })).toBeInTheDocument();
+    expect(transfers(s2)).toHaveLength(0);
+  });
+
+  it("a banner takes its place: no prompt and no bell while the connection isn't right", async () => {
+    setPromptWanted(true);
+    const s = await mount();
+    await act(async () => s.recv({ type: "stale", topic: "host", reason: "layout_without_remote" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Switch to a layout with Remote");
+    expect(screen.queryByRole("region", { name: "Get notifications" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Notifications" })).toBeNull();
   });
 
   it("not asked for: the bell shows, the prompt doesn't, and nothing is minted", async () => {

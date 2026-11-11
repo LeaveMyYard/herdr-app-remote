@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { App, type AppData, type HomePromptState, type LiveSources } from "./App";
 import type { BridgeClient, ClientSnapshot } from "./bridge/client";
@@ -86,15 +86,20 @@ function useTerminalInput(active: boolean, online: boolean, read: () => Promise<
  */
 function useHomePrompt(client: BridgeClient, online: boolean, standalone: boolean, refresh: () => void): HomePromptState | null {
   const [open, setOpen] = useState(() => !standalone && promptWanted());
+  // One code per opening: a reconnect while it stays open doesn't mint (and log) another.
+  const minted = useRef(false);
   useEffect(() => {
-    if (!open || !online || standalone) return;
-    let gone = false;
+    if (!open) {
+      minted.current = false;
+      return;
+    }
+    if (!online || standalone || minted.current) return;
+    minted.current = true;
     void client.act("pair.transfer").then((r) => {
-      if (!gone && r.ok) refresh();
+      if (r.ok) refresh();
+      // Not minted (offline, refused): the next time it is open and online tries again.
+      else minted.current = false;
     });
-    return () => {
-      gone = true;
-    };
   }, [open, online, standalone, client, refresh]);
   const onOpen = useCallback(() => {
     setPromptWanted(true);

@@ -330,10 +330,19 @@ describe("attack: wrong device", () => {
     expect(d.caps.navigate).toBe(false);
   });
 
-  it("redeeming with the same device's own cookie is allowed (a browser that shares storage)", async () => {
+  it("redeeming with the same device's own cookie spends the code and changes nothing (a browser that shares storage)", async () => {
     const a = await safariDevice();
     await mint(a.cookie);
-    expect((await redeem(await codeFor(a.cookie), { ...OK_POST, Cookie: a.cookie })).status).toBe(200);
+    const home = cookieOf(await redeem(await codeFor(a.cookie)));
+    await mint(a.cookie);
+    const code = await codeFor(a.cookie);
+    const r = await redeem(code, { ...OK_POST, Cookie: a.cookie });
+    expect(r.status).toBe(200);
+    expect(r.headers["set-cookie"]).toBeUndefined();
+    // Neither token was replaced, and the code is spent.
+    expect((await me(a.cookie)).status).toBe(200);
+    expect((await me(home)).status).toBe(200);
+    expect((await redeem(code)).status).toBe(403);
   });
 });
 

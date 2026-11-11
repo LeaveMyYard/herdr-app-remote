@@ -8,7 +8,8 @@
 //
 // The code is taken out of the address bar at once. Nothing here retries a code by itself.
 
-export type PairState = "check" | "wait" | "ok" | "bad" | "first";
+/** `none`: nothing yet (a Home Screen launch waits for `/api/v1/me` before showing anything). */
+export type PairState = "none" | "check" | "wait" | "ok" | "bad" | "first";
 
 export interface PairView {
   state: PairState;
@@ -93,10 +94,10 @@ const approved = (r: Reply) => r.status === 200 && r.device?.state === "approved
 
 /** Runs the flow for a fragment until it settles on `ok`, `bad` or opens the app. */
 export async function runPairing(frag: ReturnType<typeof parseFragment>, env: FlowEnv): Promise<void> {
-  if (!frag) return env.show({ state: "bad" });
-  if (frag.kind === "t") return transferFlow(frag.code, env);
+  if (frag?.kind === "t") return transferFlow(frag.code, env);
   env.show({ state: "check" });
-  // Already paired in this browser (a second scan): don't spend the code on a new device.
+  // Asked first, so neither a second scan nor a reload spends anything: already approved here opens the app, a
+  // request already pending waits again. A reload has no code left (it leaves the URL at once), so only this tells.
   const before = await env.api.me();
   if (!env.alive()) return;
   if (approved(before)) return env.open();
@@ -104,6 +105,7 @@ export async function runPairing(frag: ReturnType<typeof parseFragment>, env: Fl
   if (before.status === 200 && before.device?.state === "pending") {
     name = before.device.name;
   } else {
+    if (!frag) return env.show({ state: "bad" });
     const r = await env.api.pair(frag.code);
     if (!env.alive()) return;
     if (r.status !== 202 || !r.device) return env.show({ state: "bad" });
@@ -126,16 +128,22 @@ export async function runPairing(frag: ReturnType<typeof parseFragment>, env: Fl
   if (env.alive()) env.open();
 }
 
+/**
+ * The Home Screen app's launch at `/pair#t=<code>`. iOS keeps that start URL for good, so this runs on every cold
+ * launch: nothing shows until `/api/v1/me` answers, and the code is posted only when this app's storage holds no
+ * device at all (401). Unreachable, paused or refused opens the app, whose banners say so; only a code the bridge
+ * refused shows the expired state.
+ */
 async function transferFlow(code: string, env: FlowEnv): Promise<void> {
-  env.show({ state: "first" });
-  // A later launch of an app that is set up already: its start URL still names the spent code.
   const before = await env.api.me();
   if (!env.alive()) return;
-  if (approved(before)) return env.open();
+  if (before.status !== 401) return env.open();
+  env.show({ state: "first" });
   const r = await env.api.transfer(code);
   if (!env.alive()) return;
-  if (r.status === 200) return env.open();
-  env.show({ state: "bad", transfer: true });
+  if (r.status === 403) return env.show({ state: "bad", transfer: true });
+  // Set up (200), or the bridge couldn't be asked (network, 429, 5xx): the app shows the state, the next launch tries again.
+  env.open();
 }
 
 // ---- the Home Screen prompt (Safari only) ----

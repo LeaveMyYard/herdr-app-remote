@@ -326,11 +326,12 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
   }
 
   return (
-    <HomePromptBell.Provider value={homePrompt?.onOpen ?? null}>
+    // The prompt and its bell only while nothing else is wrong: a banner takes the same place, and the prompt's mint needs the socket.
+    <HomePromptBell.Provider value={homePrompt && conn.status === "online" ? homePrompt.onOpen : null}>
       <div className="hd ph">
         <Banner connection={conn} host={hostInfo.name} onRetry={onRetry} />
         {screen}
-        {homePrompt?.open ? <HomePrompt onClose={homePrompt.onClose} /> : null}
+        {homePrompt?.open && conn.status === "online" ? <HomePrompt onClose={homePrompt.onClose} /> : null}
         <TabBar active={tab} badges={tabBadgesNow} onSelect={select} />
       </div>
     </HomePromptBell.Provider>

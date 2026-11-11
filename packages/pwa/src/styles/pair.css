@@ -5,7 +5,7 @@
 .pair-icon{width:64px;height:64px;border-radius:14px}
 .pair-chip{position:absolute;right:-8px;bottom:-8px;width:28px;height:28px;justify-content:center;border-radius:9px;background:var(--t-chrome)}
 .pair-spinner{display:inline-block;flex:none;width:16px;height:16px;background:var(--spinner-working) center/contain no-repeat}
-.pair-dot{width:8px;height:8px;border-radius:4px;background:#ffb547;animation:hd-breathe 1.6s ease-in-out infinite}
+.pair-dot{width:8px;height:8px;border-radius:4px;background:var(--hue);animation:hd-breathe 1.6s ease-in-out infinite}
 .pair-title{margin:0;font-size:17px;font-weight:600;line-height:1.4}
 .pair-body{margin:0;font-size:14px;color:var(--t-muted);line-height:1.5;max-width:300px}
 .pair-card{border-radius:10px;background:var(--t-background);border:1px solid var(--t-border)}
@@ -13,7 +13,7 @@
 .pair-kv{gap:8px;font-size:13px}
 .pair-k{color:var(--t-dim)}
 .pair-v{font-weight:500}
-.pair-waiting{gap:8px;padding-top:10px;border-top:1px solid var(--t-border);font-size:13px;color:#ffb547}
+.pair-waiting{gap:8px;padding-top:10px;border-top:1px solid var(--t-border);font-size:13px;color:var(--hue)}
 .pair-note{margin:0;font-size:12.5px;color:var(--t-dim)}
 .pair-foot{gap:8px;padding:12px 16px 34px;border-top:1px solid var(--t-border)}
 .hd .pair-solid{height:48px;width:100%;justify-content:center;border-radius:7px;border:1px solid var(--t-solid);background:var(--t-solid);color:var(--t-solid-fg);font-size:15px;font-weight:500}

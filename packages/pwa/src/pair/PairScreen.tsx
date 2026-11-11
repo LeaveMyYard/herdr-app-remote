@@ -14,11 +14,11 @@ function Mark({ chip }: { chip: ReactNode }) {
 }
 
 const Spinner = () => <i className="spin pair-spinner" data-vis-mask="" aria-hidden="true" />;
-const WaitDot = () => <span className="nf pair-dot" data-vis-mask="" aria-hidden="true" />;
+const WaitDot = () => <span className="nf pair-dot s-wait" data-vis-mask="" aria-hidden="true" />;
 
-function Steps({ items }: { items: ReactNode[] }) {
+export function Steps({ items, className = "" }: { items: ReactNode[]; className?: string }) {
   return (
-    <ol className="col pair-steps">
+    <ol className={`col pair-steps ${className}`.trimEnd()}>
       {items.map((s, i) => (
         <li key={i} className="row pair-step">
           <span className="mono nf row pair-step-n">{i + 1}</span>
@@ -49,6 +49,9 @@ export function PairPage({ view, host, onContinue }: { view: PairView; host: str
   const name = view.name ?? "This phone";
   let inner: ReactNode;
   switch (view.state) {
+    case "none":
+      inner = null;
+      break;
     case "check":
       inner = <Block chip={<Spinner />} title="Checking the code…" body={`Pairing this phone with ${host}.`} />;
       break;
@@ -69,7 +72,7 @@ export function PairPage({ view, host, onContinue }: { view: PairView; host: str
                   <span className="f1 pair-k">Computer</span>
                   <span className="pair-v">{host}</span>
                 </div>
-                <div role="status" className="row pair-waiting">
+                <div role="status" className="row pair-waiting s-wait">
                   <WaitDot />
                   Waiting for approval…
                 </div>
@@ -99,12 +102,13 @@ export function PairPage({ view, host, onContinue }: { view: PairView; host: str
       break;
     case "bad":
       inner = view.transfer ? (
-        // Not drawn on the board (provisional): a spent or expired Home Screen code is fixed from Safari, not by a new QR code.
+        // Not drawn on the board (provisional, for the operator's sign-off): a spent or expired Home Screen setup is
+        // fixed from Safari, and this icon's saved start URL is spent for good, so it goes first.
         <Block
           chip={<Tile code="fail" size={18} />}
           title="This code no longer works"
-          body="Each setup link works once, for 10 minutes."
-          extra={<Steps items={["Open Herdr in Safari on this phone.", "Tap the bell at the top, then add Herdr to your Home Screen again."]} />}
+          body="Each Home Screen setup works once, within 10 minutes."
+          extra={<Steps items={["Delete this Herdr icon from your Home Screen.", "Open Herdr in Safari, tap the bell, then add it to your Home Screen again."]} />}
         />
       ) : (
         <Block
@@ -144,7 +148,7 @@ export function PairScreen({
   sleep?: (ms: number) => Promise<void>;
   standalone?: () => boolean;
 }) {
-  const [view, setView] = useState<PairView>(() => ({ state: parseFragment(hash)?.kind === "t" ? "first" : "check" }));
+  const [view, setView] = useState<PairView>(() => ({ state: parseFragment(hash)?.kind === "t" ? "none" : "check" }));
   // Started once per screen, even when StrictMode runs the effect twice: a code must never be posted twice.
   const started = useRef(false);
   const alive = useRef(true);
