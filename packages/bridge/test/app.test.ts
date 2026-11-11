@@ -427,6 +427,25 @@ describe("startApp: topics over the link", () => {
     expect(await p.until(resOf("h1"))).toMatchObject({ ok: false, code: "cancelled", unknown_effect: true });
   });
 
+  it("Funnel turning on kills every send still held by hc", async () => {
+    await start();
+    holdSends = true;
+    const p = await phone(await paired({ terminal: true }));
+    send(p, { type: "hello", api: 1 });
+    send(p, { type: "act", id: "f1", kind: "terminal.send", args: { terminal: "t3", text: "held" } });
+    const end = Date.now() + 2000;
+    while (!calls.some((c) => c.args[0] === "send") && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+    const res = p.until(resOf("f1"));
+    tsStatus = funnelOn(`${SERVE}:8443`);
+    await app!.checkFunnel();
+    // The socket closes for Funnel; the res may still arrive before the close completes, so either proves the kill.
+    const settled = await Promise.race([res.then(() => "res"), p.closed.then(() => "closed")]);
+    expect(["res", "closed"]).toContain(settled);
+    const held = calls.filter((c) => c.args[0] === "send");
+    expect(held).toHaveLength(1);
+    expect(app!.security.activity().some((e) => e.text.includes("sent 4 chars to t3: result unknown"))).toBe(true);
+  });
+
   it("stop() closes the API listener and leaves the link server to its owner", async () => {
     await start();
     const port = app!.port;
