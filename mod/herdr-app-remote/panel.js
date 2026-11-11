@@ -4,7 +4,7 @@
 // Everything here is plain functions of data: `sanitize` checks what came over the link, `renderPanel`
 // builds the element tree and calls back into `on` for every click. Text from the bridge is drawn as
 // text only. No Node APIs, no host calls (main.js owns those).
-import { div } from 'gpui-kit';
+import { div, svg } from 'gpui-kit';
 import { h_flex, v_flex } from 'gpui-base';
 
 export const TABS = Object.freeze([
@@ -98,7 +98,7 @@ export const PLUGIN_TEXT = Object.freeze({
 export function deviceState(d, now) {
   if (d.state === 'pending') return 'Waiting for approval';
   if (d.live > 0) return 'Live';
-  return d.last_seen ? `Away · ${ago(d.last_seen, now)}` : 'Never connected';
+  return d.last_seen ? `Away · ${ago(d.last_seen, now).replace('now', 'just now')}` : 'Never connected';
 }
 
 export function capsSummary(d) {
@@ -141,7 +141,8 @@ export const tint = (color, alpha) => (/^#[0-9a-f]{6}$/i.test(color) ? `${color}
 // ---- elements ----
 
 function button(c, id, label, onClick, { primary = false, danger = false, grow = false, height = 24 } = {}) {
-  return div().id(id).flex().items_center().justify_center().h(height).px(10).rounded(6).text_size(12)
+  return div().id(id).flex().items_center().justify_center().h(height).px(10).rounded(grow ? 7 : 6).text_size(grow ? 12.5 : 12)
+    .when(grow, (e) => e.border(1).border_color(c.input))
     .bg(primary ? c.foreground : c.raised).text_color(primary ? c.surface : danger ? c.ansi1 : c.foreground)
     .when(grow, (e) => e.flex_1())
     .hover((s) => s.bg(primary ? c.muted : c.input))
@@ -159,9 +160,10 @@ function card(c, children) {
 
 function checkTile(c, state) {
   const color = { ok: c.ok, warn: c.warn, bad: c.ansi1, off: c.dim }[state];
-  const glyph = { ok: '✓', warn: '!', bad: '✕', off: '–' }[state];
-  return div().w(18).h(18).flex().items_center().justify_center().rounded(5).flex_none().mt(1)
-    .bg(tint(color, '26')).border(1).border_color(tint(color, '55')).text_color(color).text_size(11).font_semibold().child(glyph);
+  // The board's tile: solid, with a dark mark (the check is an icon: a font glyph renders thin).
+  const tile = div().w(18).h(18).flex().items_center().justify_center().rounded(5).flex_none().mt(1).bg(color).text_color(c.canvas);
+  if (state === 'ok') return tile.child(svg('mods/herdr-app-remote/check.svg').w(12).h(12));
+  return tile.text_size(11).font_semibold().child({ warn: '!', bad: '✕', off: '–' }[state]);
 }
 
 /** The QR as rows of dark runs on a white square. */
@@ -264,11 +266,11 @@ function deviceCard(m, c, d, on) {
 function pairingCard(m, c, on) {
   const p = m.view.pairing;
   if (p && p.expires_at > m.now) {
-    return h_flex().gap(12).p(12).mt(6).rounded(8).border(1).border_color(c.input).children([
+    return h_flex().gap(12).p(12).mt(6).rounded(8).border(1).border_dashed().border_color(c.input).children([
       qrElement(c, p.qr),
       v_flex().gap(4).flex_1().min_w(0).text_size(12).children([
-        div().font_medium().text_size(12.5).child('Scan with the camera'),
-        div().text_color(c.muted).child('Then Share › Add to Home Screen. The code works once.'),
+        div().font_medium().text_size(12.5).child('Add a phone'),
+        div().text_color(c.muted).child('Scan with the camera, then Share › Add to Home Screen.'),
         div().text_color(c.dim).text_size(11.5).child(`Expires in ${countdown(p.expires_at - m.now)}`),
         h_flex().gap(6).children([
           button(c, 'pair-copy', m.copied ? 'Copied' : 'Copy link', (_e, cx) => on.copy(cx, p.url), { height: 22 }),
@@ -277,10 +279,10 @@ function pairingCard(m, c, on) {
       ]),
     ]);
   }
-  return h_flex().gap(12).p(12).mt(6).rounded(8).border(1).border_color(c.input).children([
+  return h_flex().gap(12).p(12).mt(6).rounded(8).border(1).border_dashed().border_color(c.input).children([
     v_flex().gap(4).flex_1().min_w(0).text_size(12).children([
       div().font_medium().text_size(12.5).child('Add a phone'),
-      div().text_color(c.muted).child('Show a QR code, scan it with the camera, then Share › Add to Home Screen.'),
+      div().text_color(c.muted).child('Scan with the camera, then Share › Add to Home Screen.'),
       h_flex().mt(2).children([button(c, 'pair-show', 'Show QR code', (_e, cx) => on.act(cx, 'pair.code', {}), { height: 22 })]),
     ]),
   ]);

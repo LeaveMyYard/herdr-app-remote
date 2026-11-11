@@ -81,16 +81,16 @@ export class PanelDriver {
     const devices = security.devices();
     const status: modLink.PanelView["status"] = paused ? "paused" : funnel === "on" ? "blocked" : serve && funnel === "off" ? "serving" : "setup";
 
-    const checks: modLink.PanelCheck[] = [
-      { id: "bridge", label: "Bridge running", detail: `up ${duration(now - this.startedAt)}`, state: "ok" },
-      this.o.link.connected("link")
-        ? { id: "link", label: "Linked to herdr-app", detail: "the Remote layout block is live", state: "ok" }
-        : { id: "link", label: "Not linked to herdr-app", detail: "this layout has no Remote block", state: "warn" },
-    ];
-    checks.push(...(this.o.extraChecks?.() ?? []));
+    const checks: modLink.PanelCheck[] = [...(this.o.extraChecks?.() ?? [])];
     if (funnel === "on") checks.push({ id: "funnel", label: "Funnel is on", detail: "Access is refused until Funnel is turned off", state: "bad" });
     else if (serve) checks.push({ id: "serve", label: "Serving on the tailnet", detail: serve.host, state: funnel === "off" ? "ok" : "warn" });
     else checks.push({ id: "serve", label: "Not serving yet", detail: "Set up Tailscale to let a phone connect", state: "off" });
+    checks.push({ id: "bridge", label: "Bridge running", detail: `up ${duration(now - this.startedAt)}`, state: "ok" });
+    checks.push(
+      this.o.link.connected("link")
+        ? { id: "link", label: "Linked to herdr-app", detail: "the Remote layout block is live", state: "ok" }
+        : { id: "link", label: "Not linked to herdr-app", detail: "this layout has no Remote block", state: "warn" },
+    );
     if (paused) checks.push({ id: "paused", label: "Remote access paused", detail: "Every phone is refused until you resume", state: "warn" });
 
     const topic = this.o.hub.get("plugins") as bridgeApi.PluginsTopic | undefined;

@@ -404,3 +404,59 @@ describe("startApp: topics over the link", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("startApp: the desktop panel", () => {
+  async function panelMod(): Promise<Mod> {
+    const socket = net.connect(link.port, "127.0.0.1");
+    peers.push(socket);
+    await new Promise<void>((r, j) => socket.once("connect", () => r()).once("error", j));
+    const mod: Mod = { socket, lines: [], send: (o) => socket.write(JSON.stringify(o) + "\n") };
+    let buf = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (d: string) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        mod.lines.push(JSON.parse(buf.slice(0, i)) as Record<string, unknown>);
+        buf = buf.slice(i + 1);
+      }
+    });
+    const up = new Promise((r) => link.once("link", r));
+    mod.send({ type: "hello", v: 1, token: TOKEN, copy: "panel", layout: "herdr-remote", app: { version: "0.0.1" } });
+    await up;
+    return mod;
+  }
+  const waitLine = async (m: Mod, pred: (l: Record<string, unknown>) => boolean, ms = 1000) => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const i = m.lines.findIndex(pred);
+      if (i >= 0) return m.lines.splice(i, 1)[0]!;
+      if (Date.now() > end) throw new Error("timed out waiting for a line");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+
+  it("a pairing request toasts the link copy with open_panel, and the panel copy sees the pending phone", async () => {
+    await start();
+    const mod = await linkMod();
+    const panel = await panelMod();
+    await waitLine(panel, (l) => l.type === "panel");
+    const { code } = app!.security.issueCode();
+    const r = await http("POST", "/api/v1/pair", OK_POST, JSON.stringify({ code, name: "Phone 1" }));
+    expect(r.status).toBe(202);
+    const toast = await waitLine(mod, (l) => l.type === "notify");
+    expect(toast).toMatchObject({ level: "info", action: "open_panel" });
+    expect(String(toast.message)).toContain("Phone 1");
+    const view = (await waitLine(panel, (l) => l.type === "panel" && (l.view as { devices: unknown[] }).devices.length === 1)).view as { devices: { state: string }[] };
+    expect(view.devices[0]!.state).toBe("pending");
+  });
+
+  it("a security change reaches the panel at once, not on the 2 s recheck", async () => {
+    await start();
+    const panel = await panelMod();
+    await waitLine(panel, (l) => l.type === "panel");
+    app!.security.pause();
+    const m = await waitLine(panel, (l) => l.type === "panel" && (l.view as { status: string }).status === "paused", 800);
+    expect(m.type).toBe("panel");
+  });
+});

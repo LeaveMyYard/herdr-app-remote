@@ -198,3 +198,26 @@ describe("panel acts", () => {
     expect(security.devices().find((d) => d.id === PENDING)!.state).toBe("pending");
   });
 });
+
+describe("panel view guard", () => {
+  it("a view that does not match the schema is never sent, and is logged", async () => {
+    const logs: string[] = [];
+    const srv = new LinkServer({ token: TOKEN, log: (e) => logs.push(e.event) });
+    await srv.listen();
+    try {
+      const good = driver.view();
+      srv.setPanel({ view: () => ({ ...good, token_sha256: "a".repeat(64) }) as never, act: () => ({ ok: true }) });
+      const s = net.connect(srv.port, "127.0.0.1");
+      peers.push(s);
+      await new Promise<void>((r) => s.once("connect", () => r()));
+      const p = new Peer(s);
+      p.send({ type: "hello", v: 1, token: TOKEN, copy: "panel", layout: "x", app: { version: "1" } });
+      await new Promise((r) => srv.once("link", r));
+      await tick(100);
+      expect(p.lines.filter((l) => l.type === "panel")).toEqual([]);
+      expect(logs).toContain("panel_invalid");
+    } finally {
+      await srv.close();
+    }
+  });
+});

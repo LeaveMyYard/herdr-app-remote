@@ -213,6 +213,11 @@ describe('link copy', () => {
     await settle(150);
     expect(m.error).toBeUndefined();
     expect(c.lines.filter((l) => l.msg.type === 'panel_act')).toEqual([]);
+    // The link copy has no panel: it keeps no view, and act() refuses without writing anything.
+    expect(m.view.view).toBeUndefined();
+    expect(await m.view.link.act(m.cx(), 'remote.pause', {})).toEqual({ ok: false, code: 'no_link' });
+    await settle(50);
+    expect(c.lines.filter((l) => l.msg.type === 'panel_act')).toEqual([]);
   });
 
   it('a notify with action open_panel makes the toast open the panel', async () => {

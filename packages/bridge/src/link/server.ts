@@ -38,6 +38,7 @@ export type LinkLogEvent =
   | { event: "link"; copy: Copy; replaced: boolean }
   | { event: "unlink"; copy: Copy }
   | { event: "dropped_line"; copy: Copy; reason: "invalid" | "panel_state" | "stale_seq" | "unknown_result" | "link_panel_act" }
+  | { event: "panel_invalid" }
   | { event: "panel_act"; kind: string; ok: boolean; code?: string }
   | { event: "dropped_peer"; copy: Copy; reason: "too_long" | "idle" | "backpressure" }
   | { event: "run_refused"; name: string; error: modLink.RunRefusal };
@@ -225,14 +226,14 @@ export class LinkServer extends EventEmitter {
       return;
     }
     if (json === conn.panelSent) return;
-    conn.panelSent = json;
-    conn.panelSeq += 1;
     // The view was built by the bridge; parse it back so only the schema's fields can ever leave.
     const parsed = modLink.PanelView.safeParse(JSON.parse(json));
     if (!parsed.success) {
-      conn.panelSent = null;
+      this.log({ event: "panel_invalid" });
       return;
     }
+    conn.panelSent = json;
+    conn.panelSeq += 1;
     this.send(conn, { type: "panel", seq: conn.panelSeq, view: parsed.data });
   }
 

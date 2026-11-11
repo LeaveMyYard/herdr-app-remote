@@ -47,7 +47,7 @@ cp "$here/sidecar.mjs" "$here/inner.sh" "$here/lib.sh" "$rig/bin/"
 # The real link mod and the harness, for the scenarios that use them (rig-only copy of the mod).
 repo=$(cd "$here/.." && pwd -P)
 mkdir -p "$rig/home/.config/herdr-app/mods/herdr-app-remote"
-cp "$repo"/mod/herdr-app-remote/*.js "$repo"/mod/herdr-app-remote/mod.json "$rig/home/.config/herdr-app/mods/herdr-app-remote/"
+cp "$repo"/mod/herdr-app-remote/*.js "$repo"/mod/herdr-app-remote/*.svg "$repo"/mod/herdr-app-remote/mod.json "$rig/home/.config/herdr-app/mods/herdr-app-remote/"
 cp "$here/link-harness.mjs" "$here/inbox-harness.mjs" "$here/panel-harness.mjs" "$rig/bin/"
 cp "$here/scenarios/$scenario.sh" "$rig/scenarios/"
 echo "rig: $rig"
