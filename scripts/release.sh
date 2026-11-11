@@ -4,7 +4,7 @@
 # install.json, checks the two hashes agree, writes release/herdr-app-remote-<version>.manifest.txt and
 # prints the remaining steps.
 #
-#   scripts/release.sh <version>        e.g. scripts/release.sh 0.1.0
+#   scripts/release.sh <version>        e.g. scripts/release.sh 0.1.0 (or 0.1.0-rc.1)
 #
 # It does NOT tag, push, create a GitHub release or publish a package, and it never touches your real
 # herdr-app app home: the install goes into a temp directory made here (fixtures/app-home copy) and
@@ -12,7 +12,13 @@
 set -eu
 
 version=${1:-}
-printf '%s\n' "$version" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' || { echo "usage: scripts/release.sh <version>   (for example 0.1.0)" >&2; exit 2; }
+# Strict version check. The case rejects any character outside the allowed set first, a newline
+# included (grep works line by line and would accept "1.2.3<newline>anything"); the pattern then
+# fixes the shape: 1.2.3, optionally followed by -rc.1 or .1 style suffixes.
+case $version in
+  ''|*[!0-9A-Za-z.-]*) echo "usage: scripts/release.sh <version>   (for example 0.1.0 or 0.1.0-rc.1)" >&2; exit 2 ;;
+esac
+printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$' || { echo "usage: scripts/release.sh <version>   (for example 0.1.0 or 0.1.0-rc.1)" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 cd "$root"
 
