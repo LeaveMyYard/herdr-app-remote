@@ -93,9 +93,12 @@ export async function startApp(o: AppOptions): Promise<App> {
   const invalid = (topic: string) => (error: string) => log({ event: "invalid_topic", topic, error });
 
   let usage: UsageTopicDriver | undefined = undefined;
+  let inboxDriver: InboxTopicDriver | undefined = undefined;
   const actors: Actor[] = [
     ...(o.actors ?? []),
     (_c, kind, args) => usage?.act(kind, args),
+    // The inbox verbs (S11): bound to the row the phone was shown; `inbox.answer` capability, audited.
+    (_c, kind, args) => inboxDriver?.act(kind, args),
     navigateActor(o.link),
   ];
   const security = new Security({
@@ -117,7 +120,7 @@ export async function startApp(o: AppOptions): Promise<App> {
   const plugins = new PluginsTopicDriver({ hub, appHome: o.appHome, run, binaries, onInvalid: invalid("plugins") });
   const panorama = new PanoramaTopicDriver({ hub, appHome: o.appHome, onInvalid: invalid("panorama") });
   const chat = new ChatTopicDriver({ hub, run, binaries });
-  const inbox = new InboxTopicDriver({ hub, appHome: o.appHome, run, binaries });
+  const inbox = (inboxDriver = new InboxTopicDriver({ hub, appHome: o.appHome, run, binaries }));
   usage = new UsageTopicDriver({ hub, run, binaries, appHome: o.appHome, ...(o.home !== undefined ? { home: o.home } : {}) });
 
   const guard = (req: IncomingMessage, kind: "http" | "ws"): GuardVerdict => {

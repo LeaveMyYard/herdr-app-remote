@@ -33,14 +33,32 @@ export function incompleteness(f) {
 
 export const FAKE_COMMANDS_JS = `
 export const showArgs = qid => ['app', 'show', '--question', String(qid), '--json'];
+export function verbArgs({ verb, entry, qids = [], detail, clear = false }, token) {
+  if (typeof token !== 'string' || token === '' || !qids.every(q => Number.isSafeInteger(q) && q >= 1)) return null;
+  const head = ['app', verb, '--entry', entry, '--token', token, ...qids.flatMap(q => ['--question', String(q)])];
+  if (clear) return [...head, '--clear', '--json'];
+  if (!detail) return [...head, '--json'];
+  const text = JSON.stringify({ choices: detail.choices, notes: detail.notes, text: detail.text });
+  return Buffer.byteLength(text) > 65536 ? null : [...head, '--detail', text, '--json'];
+}
 export function readResult(result, verb, entry) {
   if (result === null) return { kind: 'unknown', why: 'it could not be started' };
+  if (result.code === 2) return { kind: 'refused', code: 'error', closed: null, message: 'nothing was done' };
   if (result.code !== 0 && result.code !== 1) return { kind: 'unknown', why: 'it exited ' + result.code };
   let v;
   try { v = JSON.parse(result.stdout); } catch { return { kind: 'unknown', why: 'not a result' }; }
   if (v === null || typeof v !== 'object' || v.v !== 1 || v.verb !== verb) return { kind: 'unknown', why: 'not a result' };
-  if (result.code === 0 && v.ok === true) return { kind: 'shown', row: v.row };
-  return { kind: 'refused', code: v.code, closed: v.closed ?? null, message: v.message ?? '' };
+  if (entry !== null && v.entry !== entry) return { kind: 'unknown', why: 'another row' };
+  if (result.code === 0 && v.ok === true && verb === 'show') return { kind: 'shown', row: v.row };
+  if (result.code === 0 && v.ok === true) {
+    const ids = x => Array.isArray(x) && x.every(Number.isSafeInteger);
+    if (!(v.token === null || typeof v.token === 'string') || !ids(v.done) || !ids(v.skipped)) return { kind: 'unknown', why: 'unreadable' };
+    if (!(v.delivery === null || v.delivery === 'queued' || v.delivery === 'held')) return { kind: 'unknown', why: 'delivery' };
+    return { kind: 'done', token: v.token, done: v.done, skipped: v.skipped, delivery: v.delivery };
+  }
+  const CODES = ['stale', 'already_sending', 'invalid', 'read_only', 'busy', 'not_migrated', 'error'];
+  if (result.code === 1 && v.ok === false) return { kind: 'refused', code: CODES.includes(v.code) ? v.code : 'error', closed: typeof v.closed === 'string' ? v.closed : null, message: typeof v.message === 'string' ? v.message : '' };
+  return { kind: 'unknown', why: 'disagree' };
 }
 `;
 
@@ -65,6 +83,16 @@ export function retryLabel(row) {
 const SEV = new Set(['urgent', 'warning', 'info']);
 export const severity = w => (SEV.has(w) ? w : 'warning');
 export const alertKind = w => (w === 'blocked' ? 'blocked' : 'agent');
+const list = ids => ids.map(id => 'Q' + id).join(', ');
+export function refusalWords(verb, { code, message, closed }) {
+  if (code === 'stale') return closed ? 'This changed: it was ' + closed + ' elsewhere. Nothing was sent. Look again.' : 'This group changed, look again. Nothing was sent.';
+  if (code === 'busy') return 'The inbox is busy. Nothing changed: try again. Your input stays.';
+  return message || 'The inbox refused this ' + verb + '. Nothing changed.';
+}
+export const unknownWords = why => 'The result is unknown (' + why + '). It may or may not have been done, and it was not repeated.';
+export const heldWords = (verb, done) => list(done) + ' recorded, but nothing was sent.';
+export const queuedWords = done => 'Sending ' + list(done) + ' in the background.';
+export const skippedWords = skipped => list(skipped) + ' had no stored answer and was not sent.';
 `;
 
 const MODS = "mods/herdr-inbox";
@@ -82,6 +110,10 @@ export interface Home {
   setHelp: (text: string, code?: number) => void;
   setEnsureCode: (code: number) => void;
   writeFeed: (feed: unknown | string | null) => void;
+  /** What `app <verb>` prints and its exit; `@ENTRY@` becomes the `--entry`. Null restores the default success. */
+  reply: (verb: string, stdout: unknown | string | null, code?: number, sleepSeconds?: number) => void;
+  /** The launcher calls that ran a write verb (not `--help`, `show` or `app-feed`). */
+  verbCalls: () => string[];
 }
 
 /** An app home with the (fake) inbox install receipt, plugin files and feed, plus a fake plugin root and launcher. */
@@ -117,6 +149,12 @@ case "$1 $2" in
     if [ -f "$f" ]; then cat "$f"; exit 0; fi
     echo '{"v":1,"ok":false,"verb":"show","entry":"group:0","code":"stale","message":"closed","closed":"answered"}'; exit 1;;
   "app-feed --ensure") exit $(cat "$D/ensure.code" 2>/dev/null || echo 0);;
+  "app answer"|"app draft"|"app dismiss"|"app retry"|"app stop-showing"|"app ack")
+    verb=$2; entry=""
+    while [ $# -gt 0 ]; do [ "$1" = "--entry" ] && entry=$2; shift; done
+    [ -f "$D/reply-$verb.sleep" ] && sleep "$(cat "$D/reply-$verb.sleep")"
+    if [ -f "$D/reply-$verb.json" ]; then sed "s|@ENTRY@|$entry|g" "$D/reply-$verb.json"; exit $(cat "$D/reply-$verb.code" 2>/dev/null || echo 0); fi
+    echo '{"v":1,"ok":true,"verb":"'"$verb"'","entry":"'"$entry"'","token":"tok-after-'"$verb"'","done":[],"skipped":[],"delivery":null}'; exit 0;;
 esac
 exit 2
 `,
@@ -147,6 +185,15 @@ exit 2
       writeFileSync(join(root, "help.code"), String(code));
     },
     setEnsureCode: (code) => writeFileSync(join(root, "ensure.code"), String(code)),
+    reply: (verb, stdout, code = 0, sleepSeconds) => {
+      const p = join(root, `reply-${verb}`);
+      for (const ext of [".json", ".code", ".sleep"]) rmSync(p + ext, { force: true });
+      if (sleepSeconds !== undefined) writeFileSync(`${p}.sleep`, String(sleepSeconds));
+      if (stdout === null) return;
+      writeFileSync(`${p}.json`, typeof stdout === "string" ? stdout : JSON.stringify(stdout));
+      writeFileSync(`${p}.code`, String(code));
+    },
+    verbCalls: () => h.calls().filter((c) => /^app (answer|draft|dismiss|retry|stop-showing|ack) /.test(c)),
     writeFeed: (feed) => {
       const p = join(home, "data/herdr-inbox/feed.json");
       if (feed === null) rmSync(p, { force: true });

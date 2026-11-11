@@ -1,0 +1,19 @@
+{
+  "type": "act",
+  "id": "act-answer-lone",
+  "kind": "inbox.answer",
+  "args": {
+    "key": "group:127",
+    "rev": "0f1e2d3c4b5a69780001",
+    "question": 127,
+    "detail": {
+      "choices": [
+        1
+      ],
+      "notes": {
+        "1": "Note 1"
+      },
+      "text": null
+    }
+  }
+}

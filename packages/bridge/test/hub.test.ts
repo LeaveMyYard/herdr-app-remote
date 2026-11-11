@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bridgeApi } from "@herdr-remote/protocol";
 import { applyPatch, type Json } from "../src/patch.js";
+import { toRes } from "../src/hub.js";
 import { HOST, fixture, join, newHub } from "./helpers.js";
 
 describe("hub snap/patch", () => {
@@ -324,5 +325,15 @@ describe("discard keeps seq monotonic", () => {
     await a2.send({ type: "sub", topics: ["chat:t1"] });
     expect(a2.client.ofType("snap")).toHaveLength(1);
     expect(a2.client.ofType("patch")).toHaveLength(0);
+  });
+});
+
+describe("toRes", () => {
+  it("never splits a surrogate pair when it caps a message, and stays within the schema", () => {
+    const msg = "a" + "😀".repeat(1500);
+    const r = toRes("x", { ok: false, code: "busy", message: msg });
+    expect(r.message!.length).toBeLessThanOrEqual(2000);
+    expect(r.message!.endsWith("\ud83d")).toBe(false);
+    expect(bridgeApi.Res.safeParse(r).success).toBe(true);
   });
 });

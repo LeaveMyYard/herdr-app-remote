@@ -56,6 +56,7 @@ const question = (id: number, over: Partial<bridgeApi.InboxQuestion> = {}): brid
 const group = (id: number, minutes: number, a: bridgeApi.InboxAsker, over: Record<string, unknown> = {}): bridgeApi.InboxRow =>
   ({
     key: `group:${id}`,
+    rev: `rev-group-${id}`,
     kind: "group",
     actions: ["answer", "draft", "dismiss"],
     new: false,
@@ -69,6 +70,7 @@ const group = (id: number, minutes: number, a: bridgeApi.InboxAsker, over: Recor
 
 const alert456: bridgeApi.InboxRow = {
   key: "alert:456",
+  rev: "rev-alert-456",
   kind: "alert",
   actions: ["ack"],
   new: false,
@@ -85,6 +87,7 @@ const alert456: bridgeApi.InboxRow = {
 const failed = (qid: number, state: string, over: Record<string, unknown> = {}): bridgeApi.InboxRow =>
   ({
     key: `failed:${qid}`,
+    rev: `rev-failed-${qid}`,
     kind: "failed",
     actions: ["retry", "stop-showing"],
     new: false,
@@ -147,7 +150,28 @@ const unavailable = (over: Partial<bridgeApi.InboxTopic> = {}): bridgeApi.InboxT
   ...over,
 });
 
-const g123 = group(123, 2, asker("t1"), { new: true, questions: [question(123), question(124, { draft: { choices: ["Option A"], notes: {}, text: null } }), question(125)] });
+/** The boards' group (design/PhoneQuestion, PhoneReview): Single, Multi and Free text, one stored draft. */
+const opt = (label: string, description: string | null = null) => ({ label, description, preview: null });
+const q123 = (draft: bridgeApi.InboxDetail | null) =>
+  question(123, {
+    header: "Single",
+    question: "Question Text 345: pick one option.",
+    options: [opt("Option A", "First test choice"), opt("Option B", "Second test choice"), opt("Option C", "Third test choice")],
+    draft,
+  });
+const q124 = question(124, {
+  header: "Multi",
+  question: "Question Text 346: pick any.",
+  multi_select: true,
+  options: [opt("Option X"), opt("Option Y"), opt("Option Z")],
+  draft: { choices: ["Option X", "Option Z"], notes: {}, text: null },
+});
+const q125 = question(125, { header: "Free text", question: "Question Text 347: say it in your words.", options: [] });
+const g123 = group(123, 2, asker("t1"), { new: true, questions: [q123(null), q124, q125] });
+const g123Review = group(123, 2, asker("t1"), { new: true, questions: [q123({ choices: ["Option A"], notes: {}, text: null }), q124, q125] });
+
+/** The board's fourth row: Q119's answer, which the phone saw delivered (a `stale` refusal said `delivered`). */
+export const demoClosed = [{ key: "failed:119", title: "Question Title 119", sub: "Option B · Agent 2", reason: "delivered", at: ago(60) }];
 
 export interface InboxScenario {
   name: string;
@@ -157,6 +181,7 @@ export interface InboxScenario {
 const SCENARIOS: Record<string, bridgeApi.InboxTopic> = {
   // The board: two groups and an alert (the feed puts alerts first; the board's order is only for the picture).
   typical: ok([g123, group(127, 14, asker("t3")), alert456]),
+  review: ok([g123Review, group(127, 14, asker("t3")), alert456]),
   empty: ok([], { empty: true }),
   failed: ok([group(127, 14, asker("t3")), failed(119, "pending"), failed(120, "agent_gone"), failed(121, "agent_gone")]),
   stale: ok([alert456, g123], { stale: true, problem: "unreadable", generated_at: DEMO_NOW - 300 }),
@@ -170,9 +195,10 @@ const SCENARIOS: Record<string, bridgeApi.InboxTopic> = {
   }),
   unknown: ok([
     alert456,
-    { key: "wat:1", kind: "wat", actions: [], new: false },
+    { key: "wat:1", rev: "rev-wat-1", kind: "wat", actions: [], new: false },
     {
       key: "remote:m1|db|3",
+      rev: "rev-remote-3",
       kind: "remote_group",
       actions: [],
       new: false,

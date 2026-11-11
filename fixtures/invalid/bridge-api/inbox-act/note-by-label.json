@@ -1,0 +1,19 @@
+{
+  "type": "act",
+  "id": "act-note-by-label",
+  "kind": "inbox.draft",
+  "args": {
+    "key": "group:123",
+    "rev": "0f1e2d3c4b5a69780001",
+    "question": 124,
+    "detail": {
+      "choices": [
+        0
+      ],
+      "notes": {
+        "Option A": "x"
+      },
+      "text": null
+    }
+  }
+}

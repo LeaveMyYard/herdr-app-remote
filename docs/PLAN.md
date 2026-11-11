@@ -84,7 +84,7 @@ Sources:
 | capability | default | covers |
 |---|---|---|
 | `view` | on after approval | all read topics |
-| `inbox.answer` | on | inbox verbs only: draft, answer, dismiss, ack |
+| `inbox.answer` | on | inbox verbs only: draft, answer, dismiss, ack, retry, stop-showing |
 | `navigate` | off | allowlist: `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
 | `terminal.input` | **off**; desktop-only toggle, can expire | `hc send` |
 | `push` | off | push subscriptions |

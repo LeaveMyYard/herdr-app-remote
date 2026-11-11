@@ -367,6 +367,14 @@ describe("BridgeClient: actions", () => {
     expect(await client.act("usage.refresh")).toEqual({ ok: false, code: "offline" });
   });
 
+  it("passes an inbox result's message and closed word through", async () => {
+    make();
+    const s = await online();
+    const p = client.act("inbox.ack", { key: "alert:456", rev: "r" });
+    s.recv({ type: "res", id: s.ofType("act")[0]!.id, ok: true, message: "Done here.", closed: "acked" });
+    expect(await p).toEqual({ ok: true, message: "Done here.", closed: "acked" });
+  });
+
   it("passes unknown_effect through", async () => {
     make();
     const s = await online();

@@ -91,6 +91,12 @@ export function LiveApp({ client, hostName = hostNameFrom(window.location.hostna
         if (r.unknown_effect) client.refresh("usage");
       });
     },
+    inboxAct: async (kind, args) => {
+      const r = await client.act(kind, args);
+      // An unknown effect is said, the inbox is read again, and nothing is repeated.
+      if (r.unknown_effect) client.refresh("inbox");
+      return r;
+    },
     onUsageRefresh: async () => {
       const r = await client.act("usage.refresh", {});
       if (r.unknown_effect) client.refresh("usage");

@@ -572,7 +572,7 @@ describe("capabilities", () => {
     await start();
     const { cookie, id } = await pairedDevice();
     const s = await greeted(cookie);
-    const answered = await act(s, "inbox.answer", { id: "Q119", label: "secret label", text: "secret free text" });
+    const answered = await act(s, "inbox.answer", { key: "group:119", rev: "r", question: 119, label: "secret label", detail: { choices: [], notes: {}, text: "secret free text" } });
     expect(answered).toEqual({ type: "res", id: "a1", ok: true });
     expect(await act(s, "tab.select", { id: "t2" })).toMatchObject({ ok: false, code: "forbidden" });
     expect(await act(s, "terminal.send", { terminal: "t3", text: "ls -la secret" })).toMatchObject({ ok: false, code: "forbidden" });
@@ -589,7 +589,7 @@ describe("capabilities", () => {
     clock += 1000;
     expect(await act(s, "terminal.send", { terminal: "t3", text: "again" })).toMatchObject({ ok: false, code: "forbidden" });
     sec.setCap(id, "inbox.answer", false);
-    expect(await act(s, "inbox.dismiss", { id: "Q1" })).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await act(s, "inbox.dismiss", { key: "group:1", question: 1 })).toMatchObject({ ok: false, code: "forbidden" });
     s.ws.close();
     await s.closed;
 
@@ -609,7 +609,7 @@ describe("capabilities", () => {
     await start({ inner: null });
     const { cookie } = await pairedDevice();
     const s = await greeted(cookie);
-    expect(await act(s, "inbox.answer", { id: "Q1" })).toMatchObject({ ok: false, code: "unsupported_action" });
+    expect(await act(s, "inbox.answer", { key: "group:1", question: 1 })).toMatchObject({ ok: false, code: "unsupported_action" });
     s.ws.close();
   });
 
@@ -621,7 +621,7 @@ describe("capabilities", () => {
     });
     const { cookie } = await pairedDevice();
     const s = await greeted(cookie);
-    expect(await act(s, "inbox.ack", { id: "A1" })).toEqual({ type: "res", id: "a1", ok: false, code: "internal_error", unknown_effect: true });
+    expect(await act(s, "inbox.ack", { key: "alert:1" })).toEqual({ type: "res", id: "a1", ok: false, code: "internal_error", unknown_effect: true });
     expect(activity()).toContain("Phone 1 acknowledged A1: result unknown");
     s.ws.close();
   });
@@ -631,9 +631,9 @@ describe("capabilities", () => {
     const { id } = await pairedDevice();
     const closes: number[] = [];
     const client = { principal: { deviceId: id }, send: () => undefined, close: (c: number) => void closes.push(c) };
-    expect(await sec.act(client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: true });
+    expect(await sec.act(client, "inbox.ack", { key: "alert:1" })).toMatchObject({ ok: true });
     sec.revoke(id);
-    expect(await sec.act(client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
+    expect(await sec.act(client, "inbox.ack", { key: "alert:1" })).toMatchObject({ ok: false, code: "unpaired" });
     expect(closes).toEqual([CLOSE_REVOKED]);
     expect(acts).toHaveLength(1);
   });
@@ -658,7 +658,7 @@ describe("capabilities", () => {
       sec.onConnect(a.client);
       sec.setCap(id, "view", false);
       expect(a.c.closes).toEqual([CLOSE_NO_VIEW]);
-      expect(await sec.act(a.client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
+      expect(await sec.act(a.client, "inbox.ack", { key: "alert:1" })).toMatchObject({ ok: false, code: "unpaired" });
       expect(a.c.terminated).toBe(0);
       vi.advanceTimersByTime(1000);
       expect(a.c.terminated).toBe(1);
@@ -669,11 +669,11 @@ describe("capabilities", () => {
       sec.onConnect(b.client);
       sec.setServe({ host: "desk-2.example-tailnet.ts.net", login: OWNER });
       expect(b.c.closes).toEqual([CLOSE_REVOKED]);
-      expect(await sec.act(b.client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
+      expect(await sec.act(b.client, "inbox.ack", { key: "alert:1" })).toMatchObject({ ok: false, code: "unpaired" });
       // A fresh connection of the same device is fine.
       const c = mk();
       sec.onConnect(c.client);
-      expect(await sec.act(c.client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: true });
+      expect(await sec.act(c.client, "inbox.ack", { key: "alert:1" })).toMatchObject({ ok: true });
       expect(acts).toHaveLength(1);
     } finally {
       vi.useRealTimers();
@@ -685,7 +685,7 @@ describe("capabilities", () => {
     const { id } = await pairedDevice();
     const client = { principal: { deviceId: id }, send: () => undefined, close: () => undefined };
     sec.setServe({ host: SERVE, login: "user-2@example" });
-    expect(await sec.act(client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
+    expect(await sec.act(client, "inbox.ack", { key: "alert:1" })).toMatchObject({ ok: false, code: "unpaired" });
     sec.setServe({ host: SERVE, login: OWNER });
     const r = await pair(sec.issueCode().code);
     const pendingId = (JSON.parse(r.body) as { device: { id: string } }).device.id;

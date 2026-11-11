@@ -1,0 +1,9 @@
+{
+  "type": "act",
+  "id": "act-dismiss-group",
+  "kind": "inbox.dismiss",
+  "args": {
+    "key": "group:123",
+    "rev": "0f1e2d3c4b5a69780001"
+  }
+}

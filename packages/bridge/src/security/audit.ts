@@ -48,6 +48,28 @@ function charCount(v: unknown): number {
   return typeof v === "string" ? [...v].length : 0;
 }
 
+const isQid = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 1;
+const ROW_KEY = /^(group|failed|alert):([1-9][0-9]{0,15})$/;
+
+/** The inbox thing an act names, from canonical ids only: `Q123`, `Q123, Q124`, `group 123` or `A456`. */
+function inboxTarget(args: Record<string, unknown>, fallback: string): string {
+  if (isQid(args.question)) return `Q${args.question}`;
+  const qs = args.questions;
+  if (Array.isArray(qs) && qs.length > 0 && qs.every(isQid)) return qs.slice(0, 6).map((q) => `Q${q}`).join(", ") + (qs.length > 6 ? ", …" : "");
+  const m = typeof args.key === "string" ? ROW_KEY.exec(args.key) : null;
+  if (!m) return fallback;
+  return m[1] === "alert" ? `A${m[2]}` : m[1] === "group" ? `group ${m[2]}` : `Q${m[2]}`;
+}
+
+/** " (Option B)" from the label the bridge resolved, else " (12 chars)" for free text, else nothing. */
+function labelOrLength(label: string | undefined, args: Record<string, unknown>): string {
+  const shown = label !== undefined ? cleanLabel(label) : "";
+  if (shown) return ` (${shown})`;
+  const d = args.detail;
+  const text = d !== null && typeof d === "object" ? charCount((d as { text?: unknown }).text) : 0;
+  return text ? ` (${text} chars)` : "";
+}
+
 /**
  * The redacted description of an action, for the audit log. Only identifiers, lengths and
  * the option label the bridge resolved itself (`label`, from the handler's result) get
@@ -59,18 +81,19 @@ export function describeAct(kind: string, args: Record<string, unknown>, label?:
     case "terminal.send":
       return `sent ${charCount(args.text)} chars to ${target("terminal", "a terminal")}`;
     case "inbox.answer": {
-      const q = target("id", "a question");
-      const shown = label !== undefined ? cleanLabel(label) : "";
-      const text = charCount(args.text);
-      const what = shown ? ` (${shown})` : text ? ` (${text} chars)` : "";
-      return `answered ${q}${what}`;
+      const what = labelOrLength(label, args);
+      return `answered ${inboxTarget(args, "a question")}${what}`;
     }
     case "inbox.draft":
-      return `saved a draft for ${target("id", "a question")} (${charCount(args.text)} chars)`;
+      return args.clear === true ? `cleared the draft of ${inboxTarget(args, "a question")}` : `saved a draft for ${inboxTarget(args, "a question")}${labelOrLength(label, args)}`;
     case "inbox.dismiss":
-      return `dismissed ${target("id", "a question")}`;
+      return `dismissed ${inboxTarget(args, "a question")}`;
     case "inbox.ack":
-      return `acknowledged ${target("id", "an alert")}`;
+      return `acknowledged ${inboxTarget(args, "an alert")}`;
+    case "inbox.retry":
+      return `asked to resend the answer to ${inboxTarget(args, "a question")}`;
+    case "inbox.stop_showing":
+      return `stopped showing the answer to ${inboxTarget(args, "a question")}`;
     case "agent.focus":
     case "tab.select":
     case "space.select":

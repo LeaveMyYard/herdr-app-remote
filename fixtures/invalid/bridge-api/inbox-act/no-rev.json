@@ -1,0 +1,8 @@
+{
+  "type": "act",
+  "id": "act-no-rev",
+  "kind": "inbox.ack",
+  "args": {
+    "key": "alert:456"
+  }
+}

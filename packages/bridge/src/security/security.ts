@@ -512,7 +512,7 @@ export class Security {
       entry.text += res.unknown_effect ? ": result unknown" : ": failed";
     }
     this.bestEffort(() => this.log.record(entry));
-    // `audit_label` never reaches the client: the Hub's `toRes` copies only ok/code/unknown_effect.
+    // `audit_label` never reaches the client: the Hub's `toRes` copies only ok, code, unknown_effect, message and closed.
     return res;
   };
 

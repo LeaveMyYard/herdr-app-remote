@@ -20,6 +20,7 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "bridge-api/panorama": bridgeApi.PanoramaTopic,
   "bridge-api/usage": bridgeApi.UsageTopic,
   "bridge-api/inbox": bridgeApi.InboxTopic,
+  "bridge-api/inbox-act": bridgeApi.InboxAct,
   "bridge-api/chat": bridgeApi.ChatTopic,
   "install/receipt": install.InstallReceipt,
 };
