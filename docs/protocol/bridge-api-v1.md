@@ -11,8 +11,8 @@ The API between the PWA (and other clients) and the bridge. Source of truth: `pa
 ### Listener and Funnel
 
 - The API listens on `127.0.0.1:47391` only (`DEFAULT_API_PORT`, fixed so that `tailscale serve --https=8443` can forward to it). The bridge never binds another address.
-- **Funnel refusal.** The bridge reads `tailscale serve status --json` (read-only) at start and every 30 s. While Funnel is on for the serve port `:8443`, or for any `host:port` whose web or TCP handler forwards to the API port (foreground sessions included), every request, `/healthz` included, answers `503 funnel`, and live sockets are closed with `4004`. Until the first check has run, requests answer `503 starting`.
-  - Tailscale not installed counts as off: nothing can be funneled. A check that fails or prints something unreadable keeps the last verdict, so once Funnel was seen on, only a clean "off" serves again. Funnel traffic carries no `Tailscale-User-Login`, so the identity guard below would refuse it anyway; the Funnel check is the outer wall.
+- **Funnel refusal.** The bridge reads `tailscale serve status --json` (read-only) at start and every 30 s. While Funnel is on for the serve port `:8443`, or for any `host:port` whose web or TCP handler forwards to the API port (foreground sessions included), every request, `/healthz` included, answers `503 funnel`, and live sockets are closed with `4004`. Until the first check has run, requests answer `503 starting`. From the close on, that socket's `act`s answer `funnel`.
+  - Tailscale not installed counts as off: nothing can be funneled. A check that fails, times out or prints something unreadable proves nothing: before any verdict the bridge refuses (`503 funnel_unknown`, retried every 5 s); after one it keeps it, so once Funnel was seen on, only a clean "off" serves again. Funnel traffic carries no `Tailscale-User-Login`, so the identity guard below would refuse it anyway; the Funnel check is the outer wall.
 
 ### Request guards
 
@@ -140,7 +140,8 @@ Source: while at least one client is subscribed, the bridge runs `hc read <t> --
 ### The PWA's client (`packages/pwa/src/bridge/client.ts`)
 
 - Before each connect it asks `GET /api/v1/me`, because a browser can't see why an upgrade was refused: `401` shows "not paired" and retries every 10 s, `403` stops ("no longer accepts this phone"), `503` retries every 10 s, a network error retries with backoff.
-- It sends `hello` (with `resume` once it knows an epoch), then one `sub` for every topic the screens want. `usage` is asked for only once the Usage tab has been opened (it polls the desktop's CLI while subscribed), and `chat:<terminal>` only while that chat is open. There is no `unsub`: a subscription lasts the socket.
+- It sends `hello` (with `resume` once it knows an epoch), then one `sub` for every topic the screens want. `usage` is asked for only once the Usage tab has been opened (it polls the desktop's CLI while subscribed), and `chat:<terminal>` only while that chat is open. There is no `unsub`, so 10 s after the last topic is given up (and with no `act` in flight) the client replaces its socket quietly: the resume `hello` subscribes only what is still wanted, and the bridge stops reading the closed chat.
+- A seq gap asks once for a fresh `snap`; later patches of that topic are dropped until it arrives. Any frame on a greeted socket shows the client as online again, whatever the browser's `offline` event said.
 - Reconnects use backoff from 0.5 s, doubling, to 10 s. `visibilitychange` (to visible) and `online` reconnect at once; with a socket still open they send a `ping` and reconnect if no frame arrives within 5 s. A socket silent for 45 s is replaced.
 - An `act` in flight when the socket goes resolves `connection_lost` with `unknown_effect`, and is never resent. An `act` while not connected resolves `offline` and sends nothing.
 - `navigate` kinds (`agent.focus`, `tab.select`, `space.select`, `pane.focus`) are sent to the link copy as an allowlisted `run`; its outcome maps to `res` (`no_link`, `timeout`, `link_lost`, ... with `unknown_effect` where the command may have run).

@@ -234,6 +234,39 @@ describe("startApp: Funnel", () => {
     expect((await http("GET", "/healthz", { Host: "127.0.0.1" })).status).toBe(503);
   });
 
+  it("refuses while the first check can't tell, and serves once a check says off", async () => {
+    tsStatus = { code: 1, stdout: "", stderr: "boom" };
+    await start();
+    expect(app!.funnel?.state).toBe("unknown");
+    expect((await http("GET", "/healthz", { Host: "127.0.0.1" })).status).toBe(503);
+    tsStatus = ok("{}");
+    await app!.checkFunnel();
+    expect((await http("GET", "/healthz", { Host: "127.0.0.1" })).status).toBe(200);
+  });
+
+  it("keeps serving when a check fails after a clean off", async () => {
+    await start();
+    tsStatus = { code: null, stdout: "", stderr: "", error: "timeout" };
+    await app!.checkFunnel();
+    expect((await http("GET", "/healthz", { Host: "127.0.0.1" })).status).toBe(200);
+  });
+
+  it("refuses acts from the moment Funnel turns on, before the socket is gone", async () => {
+    await start();
+    const cookie = await paired();
+    const id = app!.security.devices()[0]!.id;
+    const got: bridgeApi.ServerMessage[] = [];
+    const client = { principal: { deviceId: id }, send: (m: bridgeApi.ServerMessage) => void got.push(m), close: () => undefined };
+    expect(cookie).toBeTruthy();
+    const conn = app!.hub.connect(client);
+    await app!.hub.handleRaw(conn, JSON.stringify({ type: "hello", api: 1 }));
+    tsStatus = funnelOn(`${SERVE}:8443`);
+    await app!.checkFunnel();
+    await app!.hub.handleRaw(conn, JSON.stringify({ type: "act", id: "f1", kind: "usage.refresh", args: {} }));
+    expect(got.at(-1)).toMatchObject({ type: "res", id: "f1", ok: false, code: "funnel" });
+    expect(calls.some((c) => c.cmd === "/usr/bin/env")).toBe(false);
+  });
+
   it("serves when tailscale is not installed (nothing can be funneled)", async () => {
     tsStatus = { code: null, stdout: "", stderr: "", error: "ENOENT" };
     await start();

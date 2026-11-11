@@ -56,8 +56,12 @@ describe("checkFunnel", () => {
     expect(await checkFunnel({ run: run({ code: 0, stdout: "" }), tailscale: "ts", apiPort: API })).toEqual({ state: "off" });
   });
 
-  it("can't tell when tailscale is missing, fails or prints garbage", async () => {
-    expect((await checkFunnel({ run: run({ code: null, stdout: "", error: "ENOENT" }), tailscale: "ts", apiPort: API })).state).toBe("unknown");
+  it("is off when tailscale is not installed: nothing can be funneled", async () => {
+    expect(await checkFunnel({ run: run({ code: null, stdout: "", error: "ENOENT" }), tailscale: "ts", apiPort: API })).toEqual({ state: "off" });
+  });
+
+  it("can't tell when tailscale fails, times out or prints garbage", async () => {
+    expect((await checkFunnel({ run: run({ code: null, stdout: "", error: "timeout" }), tailscale: "ts", apiPort: API })).state).toBe("unknown");
     expect((await checkFunnel({ run: run({ code: 1, stdout: "" }), tailscale: "ts", apiPort: API })).state).toBe("unknown");
     expect((await checkFunnel({ run: run({ code: 0, stdout: "{nope" }), tailscale: "ts", apiPort: API })).state).toBe("unknown");
   });

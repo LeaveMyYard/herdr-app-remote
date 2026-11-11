@@ -69,6 +69,12 @@ export interface BridgeClientOptions {
   /** After a wake, a pong must arrive within this long. */
   wakeProbeMs?: number;
   backoff?: { min: number; max: number };
+  /**
+   * The protocol has no unsub, so a topic given up (a chat that closed) keeps the bridge reading it. This long after
+   * the last one is given up, with no act in flight, the socket is replaced: the resume `hello` subscribes only what
+   * is still wanted, and the data on screen stays. Default 10 s.
+   */
+  pruneMs?: number;
 }
 
 const OPEN = 1;
@@ -109,6 +115,9 @@ export class BridgeClient {
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private pingTimer: ReturnType<typeof setInterval> | undefined;
   private probeTimer: ReturnType<typeof setTimeout> | undefined;
+  private pruneTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Topics re-subscribed for a gap: their patches are dropped until the fresh snap, without asking again. */
+  private resyncing = new Set<string>();
   private lastInbound = 0;
   /** Frames received on the current socket (the wake probe compares it). */
   private inbound = 0;
@@ -126,6 +135,7 @@ export class BridgeClient {
       deadMs: opts.deadMs ?? 45_000,
       wakeProbeMs: opts.wakeProbeMs ?? 5_000,
       backoff: opts.backoff ?? { min: 500, max: 10_000 },
+      pruneMs: opts.pruneMs ?? 10_000,
     };
   }
 
@@ -200,28 +210,38 @@ export class BridgeClient {
     this.reconnectNow();
   };
 
-  private reconnectNow(): void {
+  /** `quiet`: a planned replacement (pruning), so the status stays as it is instead of showing "connecting". */
+  private reconnectNow(quiet = false): void {
     this.attempt = 0;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
     this.dropSocket();
-    void this.connect();
+    void this.connect(quiet);
   }
 
   private clearTimers(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.probeTimer) clearTimeout(this.probeTimer);
-    this.retryTimer = this.pingTimer = this.probeTimer = undefined;
+    if (this.pruneTimer) clearTimeout(this.pruneTimer);
+    this.retryTimer = this.pingTimer = this.probeTimer = this.pruneTimer = undefined;
+  }
+
+  /** Forgets the current socket's state and fails its acts in flight. */
+  private teardown(): void {
+    this.ws = null;
+    this.greeted = false;
+    this.subscribed = new Set();
+    this.resyncing = new Set();
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    if (this.probeTimer) clearTimeout(this.probeTimer);
+    this.pingTimer = this.probeTimer = undefined;
+    this.failPending();
   }
 
   private dropSocket(): void {
     const ws = this.ws;
-    this.ws = null;
-    this.greeted = false;
-    this.subscribed = new Set();
-    if (this.pingTimer) clearInterval(this.pingTimer);
-    this.pingTimer = undefined;
+    this.teardown();
     if (ws) {
       ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
       try {
@@ -230,7 +250,6 @@ export class BridgeClient {
         // already closed
       }
     }
-    this.failPending();
   }
 
   /** Acts in flight when the socket went: the bridge may have run them. */
@@ -253,10 +272,10 @@ export class BridgeClient {
     }, delay);
   }
 
-  private async connect(): Promise<void> {
+  private async connect(quiet = false): Promise<void> {
     if (!this.running) return;
     const gen = ++this.generation;
-    if (this.snap.status !== "offline") this.set({ status: "connecting" });
+    if (!quiet && this.snap.status !== "offline") this.set({ status: "connecting" });
     // The upgrade's refusal is invisible to a browser (just a close), so ask first why it would fail.
     const me = await this.o.checkMe();
     if (gen !== this.generation || !this.running) return;
@@ -283,17 +302,14 @@ export class BridgeClient {
       if (this.ws !== ws) return;
       this.lastInbound = Date.now();
       this.inbound += 1;
+      // A frame on a greeted socket proves the link works, whatever the browser's `offline` event said.
+      if (this.greeted && this.snap.status !== "online") this.set({ status: "online" });
       if (typeof ev.data === "string") this.onFrame(ev.data);
     };
     ws.onerror = () => undefined;
     ws.onclose = (ev) => {
       if (this.ws !== ws) return;
-      this.ws = null;
-      this.greeted = false;
-      this.subscribed = new Set();
-      if (this.pingTimer) clearInterval(this.pingTimer);
-      this.pingTimer = undefined;
-      this.failPending();
+      this.teardown();
       this.onClosed(ev.code);
     };
   }
@@ -333,7 +349,7 @@ export class BridgeClient {
 
   // ---- topics ----
 
-  /** Asks for a topic; the returned function gives it up. (The protocol has no unsub: it lasts the socket.) */
+  /** Asks for a topic; the returned function gives it up (see `pruneMs`: the protocol has no unsub). */
   want(topic: string): () => void {
     this.wanted.set(topic, (this.wanted.get(topic) ?? 0) + 1);
     this.flushSubs();
@@ -342,9 +358,25 @@ export class BridgeClient {
       if (released) return;
       released = true;
       const n = (this.wanted.get(topic) ?? 1) - 1;
-      if (n <= 0) this.wanted.delete(topic);
-      else this.wanted.set(topic, n);
+      if (n > 0) return void this.wanted.set(topic, n);
+      this.wanted.delete(topic);
+      if (this.subscribed.has(topic)) this.schedulePrune();
     };
+  }
+
+  private schedulePrune(): void {
+    if (this.pruneTimer) clearTimeout(this.pruneTimer);
+    this.pruneTimer = setTimeout(() => {
+      this.pruneTimer = undefined;
+      const unwanted = [...this.subscribed].filter((t) => !this.wanted.has(t));
+      if (unwanted.length === 0 || !this.greeted) return;
+      // Replacing the socket would turn an act in flight into an unknown effect: wait for it.
+      if (this.pending.size > 0) return this.schedulePrune();
+      const topics = { ...this.snap.topics };
+      for (const t of unwanted) delete topics[t];
+      this.set({ topics });
+      this.reconnectNow(true);
+    }, this.o.pruneMs);
   }
 
   private flushSubs(): void {
@@ -357,6 +389,13 @@ export class BridgeClient {
   /** Asks the bridge for a topic's current state again (after an action with an unknown effect). */
   refresh(topic: string): void {
     if (this.subscribed.has(topic)) this.resubscribe(topic);
+  }
+
+  /** Asks once for a fresh snap; later patches of the topic are dropped until it arrives. */
+  private resync(topic: string): void {
+    if (this.resyncing.has(topic)) return;
+    this.resyncing.add(topic);
+    this.resubscribe(topic);
   }
 
   private resubscribe(topic: string): void {
@@ -390,20 +429,22 @@ export class BridgeClient {
       }
       case "snap":
         if (msg.epoch !== this.epoch) return;
+        this.resyncing.delete(msg.topic);
         this.setTopic(msg.topic, { data: msg.data as Json, seq: msg.seq, stale: null });
         return;
       case "patch": {
+        if (this.resyncing.has(msg.topic)) return;
         const cur = this.snap.topics[msg.topic];
         if (!cur || cur.data === undefined || cur.seq < 0 || msg.seq !== cur.seq + 1) {
           // Already current (a resume replay of an old patch) is not a gap.
-          if (!cur || msg.seq > cur.seq) this.resubscribe(msg.topic);
+          if (!cur || msg.seq > cur.seq) this.resync(msg.topic);
           return;
         }
         let data: Json;
         try {
           data = applyPatch(cur.data, msg.ops);
         } catch {
-          this.resubscribe(msg.topic);
+          this.resync(msg.topic);
           return;
         }
         this.setTopic(msg.topic, { data, seq: msg.seq, stale: cur.stale });

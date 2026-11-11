@@ -8,10 +8,11 @@ export const SERVE_PORT = 8443;
 export const FUNNEL_TIMEOUT_MS = 5_000;
 
 /**
- * - `off`: Funnel is not on for the serve port or for any handler that reaches the API port.
+ * - `off`: Funnel is not on for the serve port or for any handler that reaches the API port, or tailscale is not
+ *   installed (nothing can be funneled).
  * - `on`: it is; `where` names the first `host:port` found.
- * - `unknown`: tailscale is not installed, failed, or printed something unreadable. Funnel traffic carries
- *   no `Tailscale-User-Login`, so the request guard refuses it anyway; `unknown` keeps the last verdict.
+ * - `unknown`: tailscale failed, timed out or printed something unreadable. Before any verdict this refuses; after
+ *   one it keeps it (see `startApp`).
  */
 export type FunnelVerdict = { state: "off" } | { state: "on"; where: string } | { state: "unknown"; detail: string };
 
@@ -78,7 +79,7 @@ export function funnelFromStatus(raw: unknown, apiPort: number, servePort = SERV
 
 export async function checkFunnel(opts: { run: Runner; tailscale: string; apiPort: number; servePort?: number; timeoutMs?: number }): Promise<FunnelVerdict> {
   const r = await opts.run(opts.tailscale, ["serve", "status", "--json"], { timeoutMs: opts.timeoutMs ?? FUNNEL_TIMEOUT_MS });
-  if (r.error === "ENOENT") return { state: "unknown", detail: "tailscale is not installed" };
+  if (r.error === "ENOENT") return { state: "off" };
   if (r.error || r.code !== 0) return { state: "unknown", detail: "tailscale serve status failed" };
   // An empty config prints nothing (or `{}`): nothing is served, so nothing is funneled.
   if (r.stdout.trim() === "") return { state: "off" };

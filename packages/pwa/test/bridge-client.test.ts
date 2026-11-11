@@ -89,9 +89,11 @@ describe("BridgeClient: handshake and topics", () => {
     s.recv({ type: "patch", topic: "setup", seq: 5, ops: [{ op: "replace", path: "/n", value: 9 }] });
     expect(s.ofType("sub").length).toBe(subs + 1);
     expect(client.getSnapshot().topics.setup!.data).toEqual(HOST);
-    s.recv({ type: "patch", topic: "setup", seq: 4, ops: [{ op: "remove", path: "/missing" }] });
+    // The fresh snap after the gap, then a patch that doesn't apply.
+    s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 5, data: HOST });
+    s.recv({ type: "patch", topic: "setup", seq: 6, ops: [{ op: "remove", path: "/missing" }] });
     expect(s.ofType("sub").length).toBe(subs + 2);
-    expect(client.getSnapshot().topics.setup!.seq).toBe(3);
+    expect(client.getSnapshot().topics.setup!.seq).toBe(5);
   });
 
   it("keeps the data on stale, records the reason, and clears it with the next snap", async () => {
@@ -212,6 +214,78 @@ describe("BridgeClient: reconnecting", () => {
     await vi.advanceTimersByTimeAsync(4_000);
     await flush();
     expect(sockets.length).toBe(2);
+  });
+});
+
+describe("BridgeClient: review fixes", () => {
+  it("goes back online when a frame arrives after the browser's offline event", async () => {
+    make();
+    const s = await online();
+    win.fire("offline");
+    expect(client.getSnapshot().status).toBe("offline");
+    win.fire("online");
+    s.recv({ type: "pong" });
+    expect(client.getSnapshot().status).toBe("online");
+    expect(sockets.length).toBe(1);
+  });
+
+  it("fails an act in flight when the wake probe replaces a dead socket", async () => {
+    make();
+    await online();
+    const p = client.act("tab.select", { index: 1 });
+    doc.fire("visibilitychange");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await p).toEqual({ ok: false, code: "connection_lost", unknown_effect: true });
+  });
+
+  it("asks once for a fresh snap on a gap, dropping later patches until it comes", async () => {
+    make();
+    client.want("setup");
+    const s = await online();
+    s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 1, data: { n: 1 } });
+    const subs = s.ofType("sub").length;
+    s.recv({ type: "patch", topic: "setup", seq: 3, ops: [] });
+    s.recv({ type: "patch", topic: "setup", seq: 4, ops: [] });
+    s.recv({ type: "patch", topic: "setup", seq: 5, ops: [] });
+    expect(s.ofType("sub").length).toBe(subs + 1);
+    s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 5, data: { n: 5 } });
+    s.recv({ type: "patch", topic: "setup", seq: 6, ops: [{ op: "replace", path: "/n", value: 6 }] });
+    expect(client.getSnapshot().topics.setup!.data).toEqual({ n: 6 });
+  });
+
+  it("replaces the socket quietly once a given-up topic is still subscribed, resubscribing only what is wanted", async () => {
+    make({ pruneMs: 1_000 });
+    client.want("host");
+    const release = client.want("chat:t3");
+    const s = await online();
+    s.recv({ type: "snap", topic: "chat:t3", epoch: "e1", seq: 1, data: { lines: [] } });
+    const seen: string[] = [];
+    client.subscribe(() => seen.push(client.getSnapshot().status));
+    release();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flush();
+    expect(sockets.length).toBe(2);
+    expect(seen).not.toContain("connecting");
+    expect(client.getSnapshot().topics["chat:t3"]).toBeUndefined();
+    const s2 = last();
+    s2.open();
+    s2.recv({ type: "welcome", api: 1, bridge: "0.0.0", epoch: "e1" });
+    expect(s2.ofType("sub")).toEqual([{ type: "sub", topics: ["host"] }]);
+  });
+
+  it("waits for acts in flight before pruning, and doesn't prune a topic wanted again", async () => {
+    make({ pruneMs: 1_000 });
+    const release = client.want("chat:t3");
+    const s = await online();
+    const p = client.act("tab.select", { index: 1 });
+    release();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sockets.length).toBe(1);
+    s.recv({ type: "res", id: s.ofType("act")[0]!.id, ok: true });
+    expect(await p).toEqual({ ok: true });
+    client.want("chat:t3");
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(sockets.length).toBe(1);
   });
 });
 

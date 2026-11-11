@@ -28,6 +28,8 @@ export { checkFunnel, funnelFromStatus, targetPort, SERVE_PORT, FUNNEL_TIMEOUT_M
 export const DEFAULT_API_PORT = 47391;
 /** How often the Funnel state is re-read. */
 export const FUNNEL_CHECK_MS = 30_000;
+/** While no check has told yet, it is retried this often. */
+export const FUNNEL_RETRY_MS = 5_000;
 /** Close code for clients dropped because Funnel turned on (the 4001–4003 codes are the security layer's). */
 export const CLOSE_FUNNEL = 4004;
 export const BRIDGE_VERSION = "0.0.0";
@@ -80,7 +82,7 @@ export interface App {
 }
 
 /**
- * Starts the API side of the bridge. Every request is refused until the first Funnel check has run; while
+ * Starts the API side of the bridge. Every request is refused until a Funnel check has said `off`; while
  * Funnel is on (for the serve port, or for any handler that reaches the API port) every request, `/healthz`
  * included, answers `503 funnel` and live sockets are dropped with {@link CLOSE_FUNNEL}.
  */
@@ -102,7 +104,14 @@ export async function startApp(o: AppOptions): Promise<App> {
     inner: routeActs(actors),
     ...(o.onPending ? { onPending: o.onPending } : {}),
   });
-  const hub = new Hub({ bridgeVersion: o.bridgeVersion ?? BRIDGE_VERSION, onAct: security.act });
+  // null: not checked yet. Serving needs an `off` verdict; anything else refuses requests and acts alike.
+  let funnel: FunnelVerdict | null = null;
+  const serving = () => funnel?.state === "off";
+  // A socket closed for Funnel stays readable until its close completes: its acts are refused from the close on.
+  const hub = new Hub({
+    bridgeVersion: o.bridgeVersion ?? BRIDGE_VERSION,
+    onAct: (client, kind, args) => (serving() ? security.act(client, kind, args) : { ok: false, code: "funnel" }),
+  });
 
   const host = new HostTopic({ hub, source: new LinkHostSource(o.link, { owned: false }), onInvalid: invalid("host") });
   const plugins = new PluginsTopicDriver({ hub, appHome: o.appHome, run, binaries, onInvalid: invalid("plugins") });
@@ -111,11 +120,11 @@ export async function startApp(o: AppOptions): Promise<App> {
   const inbox = new InboxTopicDriver({ hub, appHome: o.appHome, run, binaries });
   usage = new UsageTopicDriver({ hub, run, binaries, appHome: o.appHome, ...(o.home !== undefined ? { home: o.home } : {}) });
 
-  // null: not checked yet. Serving needs a verdict that isn't `on`.
-  let funnel: FunnelVerdict | null = null;
   const guard = (req: IncomingMessage, kind: "http" | "ws"): GuardVerdict => {
     if (funnel === null) return { allow: false, status: 503, reason: "starting" };
     if (funnel.state === "on") return { allow: false, status: 503, reason: "funnel" };
+    // The first check could not tell: no proof Funnel is off yet.
+    if (funnel.state === "unknown") return { allow: false, status: 503, reason: "funnel_unknown" };
     return security.guard(req, kind);
   };
   const server = createBridgeServer({
@@ -137,8 +146,9 @@ export async function startApp(o: AppOptions): Promise<App> {
       v = { state: "unknown", detail: "check failed" };
     }
     const before = funnel?.state;
-    // `unknown` can't prove Funnel off once it was seen on: keep refusing until a clean `off`.
-    if (v.state !== "unknown" || funnel === null) funnel = v.state === "unknown" ? { state: "off" } : v;
+    // A check that can't tell keeps the last verdict: `on` keeps refusing, `off` keeps serving (one failed read
+    // between two clean ones is not evidence Funnel turned on). With no verdict yet, it refuses.
+    if (v.state !== "unknown" || funnel === null || funnel.state === "unknown") funnel = v;
     if (funnel.state === "on" && before !== "on") hub.closeAll(CLOSE_FUNNEL, "funnel");
     log({ event: "funnel", verdict: v });
     return v;
@@ -170,7 +180,7 @@ export async function startApp(o: AppOptions): Promise<App> {
       void recheck().finally(() => {
         if (!stopped) tick();
       });
-    }, o.funnelCheckMs ?? FUNNEL_CHECK_MS);
+    }, funnel?.state === "unknown" ? FUNNEL_RETRY_MS : (o.funnelCheckMs ?? FUNNEL_CHECK_MS));
     timer.unref();
   };
   tick();
