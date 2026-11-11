@@ -90,3 +90,8 @@
 .qn-sendsub,.qn-cancelsub{font-size:12.5px;opacity:.8}
 .qn-cancel{min-height:48px;padding:0 14px;gap:10px;border-radius:9px;border:2px solid var(--t-input);background:var(--t-raised)}
 .qn-cancellabel{font-size:14px;font-weight:600}
+
+/* The notifications row (S17, provisional: not on a board yet). */
+.push-row{gap:10px;align-items:center}
+.hd .push-btn{flex:none;height:36px;padding:0 12px;border-radius:7px;border:1px solid var(--t-input);background:var(--t-raised);font-size:13px;color:var(--t-foreground)}
+.hd .push-btn:disabled{opacity:.6}

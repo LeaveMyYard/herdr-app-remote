@@ -23,6 +23,9 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "bridge-api/inbox-act": bridgeApi.InboxAct,
   "bridge-api/chat": bridgeApi.ChatTopic,
   "bridge-api/setup": bridgeApi.SetupTopic,
+  "bridge-api/push-payload": bridgeApi.PushPayload,
+  "bridge-api/push-subscribe": bridgeApi.PushSubscribeArgs,
+  "bridge-api/push-info": bridgeApi.PushInfo,
   "install/receipt": install.InstallReceipt,
 };
 

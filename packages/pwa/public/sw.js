@@ -55,3 +55,44 @@ self.addEventListener("fetch", (event) => {
     ),
   );
 });
+
+// ---- Web Push (S17) ----
+// iOS revokes a subscription whose pushes don't show a notification, so every push shows one, even a payload
+// this version can't read. Text is shown as the notification's plain title and body, never as markup.
+
+const ROUTE = /^#\/[A-Za-z0-9_.~%:/-]*$/;
+
+function pushPayload(data) {
+  let p = null;
+  try {
+    p = data ? data.json() : null;
+  } catch {
+    p = null;
+  }
+  const ok = p && typeof p === "object" && p.v === 1;
+  const str = (v, max) => (typeof v === "string" ? v.slice(0, max) : "");
+  return {
+    title: (ok && str(p.title, 200)) || "Herdr",
+    body: ok ? str(p.body, 40) : "Something needs you",
+    tag: ok && typeof p.tag === "string" && /^[a-z0-9-]{1,40}$/.test(p.tag) ? p.tag : "herdr",
+    url: ok && typeof p.url === "string" && ROUTE.test(p.url) && p.url.length <= 300 ? p.url : "#/inbox",
+  };
+}
+
+self.addEventListener("push", (event) => {
+  const n = pushPayload(event.data);
+  event.waitUntil(self.registration.showNotification(n.title, { body: n.body, tag: n.tag, icon: "icons/icon-192.png", data: { url: n.url } }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const route = event.notification.data && typeof event.notification.data.url === "string" && ROUTE.test(event.notification.data.url) ? event.notification.data.url : "#/inbox";
+  const target = new URL(route, self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const mine = list.find((c) => new URL(c.url).origin === self.location.origin);
+      if (mine) return mine.navigate(target).then((c) => (c || mine).focus()).catch(() => mine.focus());
+      return self.clients.openWindow(target);
+    }),
+  );
+});

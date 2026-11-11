@@ -22,3 +22,4 @@ export * from "./daemon/index.js";
 export { startApp, DEFAULT_API_PORT, FUNNEL_CHECK_MS, FUNNEL_RETRY_MS, CLOSE_FUNNEL, BRIDGE_VERSION, routeActs, navigateActor, fromRun, checkFunnel, funnelFromStatus, targetPort, SERVE_PORT, FUNNEL_TIMEOUT_MS, type App, type AppOptions, type AppLogEvent, type Actor, type FunnelVerdict } from "./app/index.js";
 export { PanelDriver, duration, type PanelDriverOptions } from "./panel/driver.js";
 export * as tailscale from "./tailscale/index.js";
+export { PushService, summarize, PUSH_TTL_S, type PushGate, type PushOptions } from "./push/service.js";

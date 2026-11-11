@@ -70,6 +70,25 @@ There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other 
 
 `activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers and lengths only, plus, for an answer, the option label the bridge resolved from its own inbox data. A label sent by the client is never logged. Examples: "Phone 1 sent 12 chars to t3", "Phone 1 answered Q119 (Option B)".
 
+### Web Push (S17)
+
+Push is off per device until the desktop turns on the `push` capability. Subscribing does not depend on how the device was paired: a subscription belongs to the device whose socket sent it.
+
+- **Keys.** The bridge makes one VAPID key pair (P-256) on first start and keeps it in `vapid.json` (mode 0600). A damaged file is an error, never replaced, since a new key would orphan every subscription; its contents are never quoted in the error. A damaged `push.json` is instead moved aside to `push.json.damaged` (0600) and the bridge starts with no subscriptions (Activity: "Push subscriptions were unreadable…"); phones turn notifications on again.
+- **`GET /api/v1/push`** (same guards as any GET, plus an approved device's cookie, else `401 unpaired`) returns `{key, allowed, subscribed}`: the VAPID public key (base64url, the `applicationServerKey`), whether the device may get pushes now, and whether the bridge holds its subscription. Read-only.
+- **`act push.subscribe {endpoint, keys: {p256dh, auth}}`** (the browser's `PushSubscription.toJSON()`, nothing else) stores one subscription per device in `push.json` (0600), replacing the device's earlier one and any other device's with the same endpoint. Refusals: `bad_args`, `bad_endpoint` (only `https:` on port 443 of `web.push.apple.com`, `*.push.apple.com`, `fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.push.services.mozilla.com` or `*.notify.windows.com`, with no credentials, at most 1024 characters: a subscription must not turn the bridge into a client for any other URL), `bad_keys` (`p256dh` is not a P-256 point, or `auth` is not 16 bytes). **`act push.unsubscribe {}`** forgets it. Both need `push`, and both are audited ("Phone 1 turned push on").
+- **The PWA** shows the notifications row only in the Home Screen app, and asks for permission only from a tap, as the first thing the tap does (iOS requires the user gesture).
+- **Triggers.** The bridge looks at its own topics once a second:
+  - an inbox `group` or `alert` row marked `new` (app-feed-v1's toast marks, so nothing open when the bridge started is new);
+  - a panorama root whose status becomes `blk`, in a fresh rich feed. The first such reading after start, or after the feed was aged, stale or basic, only seeds.
+  - The push service's own first look also only seeds. Nothing that was there before a bridge restart is announced.
+  - A root is announced as blocked at most once per 5 minutes. Several new things in one look become one notification ("and 2 more"); each device gets at most 20 per 10 minutes.
+- **Payload** (`PushPayload`, encrypted with RFC 8291 `aes128gcm`, signed with a VAPID JWT whose `sub` is the project URL): `{v: 1, kind, title, body, tag, url}`. `title` is "Agent 1: Question Title 123" (the question group's title, else its first question's header, never the question text; PLAN §7.3), "Agent 1: Alert Title 456" (never the alert message) or "Agent 1 is blocked" (the name only through the root's verified host agent, else "An agent": a root's own title can be an AI summary of the session). `body` is a fixed word ("New question", "Alert", "Needs you", "and 2 more"). `url` is a `#/` route of the PWA (a question opens `#/inbox/q/<key>/<first question without a draft>`); the service worker accepts nothing else. Headers: `TTL: 14400`, `Urgency: high`.
+- **At start** the bridge also drops subscriptions of devices revoked, or with `push` turned off, while it was down.
+- **Who gets it.** Every subscription whose device is approved, current, not paused and has `view` and `push` now, while the bridge is serving (no Funnel). Revoking the device or turning `push` off deletes its subscription at once; pause or a login change only holds sends.
+- **Answers.** 2xx is sent. `404` and `410` drop that subscription (only if it still has that endpoint) and log "Phone 1: push subscription expired". Anything else, or no answer within 10 s, logs a failure and keeps the subscription; nothing is retried. Redirects are not followed.
+- **Audit** entries carry identifiers only, never titles, names of agents or endpoints: "Push sent to Phone 1: group 123", "Push sent to Phone 1: A456", "Push sent to Phone 1: an agent", "Push to Phone 1 failed: group 123" (code `http_500` or `no_answer`), "Push to Phone 1 skipped: …" (`rate_limited`).
+
 ## WebSocket `/api/v1/ws`
 
 One JSON object per text frame, each with a `type`.
