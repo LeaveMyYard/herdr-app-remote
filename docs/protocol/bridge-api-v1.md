@@ -14,7 +14,7 @@ One JSON object per text frame, each with a `type`.
 
 | type | fields |
 |---|---|
-| `hello` | `api: 1`, `resume?: {epoch, seq}` |
+| `hello` | `api: 1`, `resume?: {epoch, seqs: {topic: seq}}` |
 | `sub` | `topics: Topic[]` (at least one) |
 | `act` | `id`, `kind`, `args` |
 | `ping` | |
@@ -39,7 +39,7 @@ Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plug
 
 ### Resume and consistency
 
-- `seq` is one server-wide counter per epoch, shared by all topics; every `snap` and `patch` takes the next value. `hello.resume.seq` is the last `seq` the client applied. `patch` carries no `epoch`: a bridge restart is detected through `welcome.epoch`, after which the client resubscribes and gets fresh `snap`s. A `seq` gap means the client must resubscribe.
+- `seq` is per topic within an epoch. A `snap` sets the topic's `seq`; each `patch` for that topic carries previous + 1. `hello.resume.seqs` maps each topic to the last `seq` the client applied. `patch` carries no `epoch`: a bridge restart is detected through `welcome.epoch`, after which the client resubscribes and gets fresh `snap`s. A `seq` gap on a topic means the client re-subscribes to that topic only and receives a fresh `snap`.
 - `snap.data` is validated against the topic payload schema where one is defined (`host`, `plugins`).
 - Each bridge start gets a random epoch. A client that resumes with an unknown epoch, or whose seq has a gap, gets a fresh `snap`.
 - iOS kills background sockets, so the PWA reconnects on `visibilitychange` and `online`.

@@ -31,8 +31,10 @@ export type Meta = z.infer<typeof Meta>;
 export const ClientHello = z.object({
   type: z.literal("hello"),
   api: z.literal(API_VERSION),
-  /** `seq` is the last server-wide seq the client applied (one counter per epoch across all topics). */
-  resume: z.object({ epoch: z.string().min(1), seq: z.number().int().nonnegative() }).optional(),
+  /** `seqs` maps each topic to the last `seq` the client applied for it. */
+  resume: z
+    .object({ epoch: z.string().min(1), seqs: z.record(Topic, z.number().int().nonnegative()) })
+    .optional(),
 });
 export const ClientSub = z.object({ type: z.literal("sub"), topics: z.array(Topic).min(1) });
 export const ClientAct = z.object({
@@ -87,7 +89,7 @@ export const Snap = z
     type: z.literal("snap"),
     topic: Topic,
     epoch: z.string().min(1),
-    /** One server-wide counter per epoch, shared by all topics. */
+    /** Per-topic counter within an epoch; a `snap` sets it, each `patch` is previous + 1. */
     seq: z.number().int().nonnegative(),
     data: z.unknown(),
   })

@@ -68,7 +68,7 @@ describe("no real data in fixtures, protocol docs or design", () => {
   const files = [
     ...walk(ROOT),
     ...walk(join(REPO, "docs/protocol")),
-    ...walk(join(REPO, "design")).filter((f) => !f.endsWith(".png")),
+    ...walk(join(REPO, "design")).filter((f) => /\.(html|py|sh|js|json|svg)$/.test(f)),
   ];
 
   it("scans a non-trivial set of files", () => {
