@@ -1,3 +1,5 @@
+import type { bridgeApi } from "@herdr-remote/protocol";
+
 export type TabId = "agents" | "swarm" | "inbox" | "chat" | "usage";
 
 export const TABS: readonly { id: TabId; label: string }[] = [
@@ -35,7 +37,7 @@ export interface BasicAgent {
   spaceId: string;
 }
 
-export type PluginState = "ready" | "missing" | "outdated" | "error";
+export type PluginState = bridgeApi.PluginState;
 
 export interface PluginRow {
   name: string;
@@ -52,6 +54,8 @@ export interface Connection {
   status: ConnectionStatus;
   /** For "stale": how old the data is, pre-formatted ("2m"). */
   age?: string;
+  /** For "stale": the bridge's reason (`stale {reason}` in the bridge API), for example "layout_without_remote". */
+  reason?: string;
 }
 
 export interface HostInfo {

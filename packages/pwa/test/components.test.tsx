@@ -44,6 +44,11 @@ describe("Banner", () => {
     expect(banner).toHaveClass(cls);
   });
 
+  it("uses the plan's wording for layout_without_remote", () => {
+    render(<Banner connection={{ status: "stale", reason: "layout_without_remote" }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Switch to a layout with Remote");
+  });
+
   it("falls back when a stale banner has no age", () => {
     render(<Banner connection={{ status: "stale" }} />);
     expect(screen.getByRole("status")).toHaveTextContent("Showing older data");

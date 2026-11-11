@@ -60,13 +60,14 @@ html,body{margin:0;height:100%;background:var(--t-chrome);overscroll-behavior:no
 .arow-icon img{width:14px;height:14px}
 .arow-name{gap:5px}
 .arow-title{max-width:150px;color:var(--t-foreground)}
+.arow[data-status=idle] .arow-title{color:var(--t-muted)}
 .arow-tab{color:var(--t-dim)}
 .arow-age{margin-right:8px;font-size:11px;color:var(--t-dim)}
 .needs-pill{display:flex;align-items:center;flex:none;height:18px;padding:0 6px;border-radius:5px;background:#f0705f26;font-size:10.5px;font-weight:600;color:var(--t-blocked)}
 .work-spinner{display:inline-block;flex:none;width:12px;height:12px;background:var(--spinner-working) center/contain no-repeat;margin:0 1px}
 .dot{flex:none;width:7px;height:7px;margin:0 3px;border-radius:4px}
 .dot-done{background:var(--t-done)}
-.dot-idle{background:var(--t-idle)}
+.dot-ring{border:1.5px solid var(--t-idle);background:none}
 .hint-card{margin:14px 8px 0;padding:10px 12px;gap:3px;border-radius:8px;border:1px dashed var(--t-input)}
 .hint-title{font-size:12.5px}
 .hint-body{font-size:11.5px;color:var(--t-muted)}
@@ -91,10 +92,10 @@ html,body{margin:0;height:100%;background:var(--t-chrome);overscroll-behavior:no
 .plugin-state{font-size:12px;color:var(--t-dim)}
 .plugin-row[data-state=ready] .plugin-dot{background:var(--t-ansi2)}
 .plugin-row[data-state=ready] .plugin-state{color:var(--t-ansi2)}
-.plugin-row[data-state=outdated] .plugin-state{color:var(--t-working)}
-.plugin-row[data-state=outdated] .plugin-dot{background:var(--t-working)}
-.plugin-row[data-state=error] .plugin-state{color:var(--t-blocked)}
-.plugin-row[data-state=error] .plugin-dot{background:var(--t-blocked)}
+.plugin-row[data-state=too_old] .plugin-state,.plugin-row[data-state=stale] .plugin-state{color:var(--t-working)}
+.plugin-row[data-state=too_old] .plugin-dot,.plugin-row[data-state=stale] .plugin-dot{background:var(--t-working)}
+.plugin-row[data-state=broken] .plugin-state,.plugin-row[data-state=not_running] .plugin-state{color:var(--t-blocked)}
+.plugin-row[data-state=broken] .plugin-dot,.plugin-row[data-state=not_running] .plugin-dot{background:var(--t-blocked)}
 
 /* Tab bar */
 .tabbar{display:flex;align-items:center;flex:none;padding:8px 8px var(--sab);background:var(--t-chrome);border-top:1px solid var(--t-border)}

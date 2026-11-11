@@ -12,6 +12,10 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+function isHtml(res) {
+  return (res.headers.get("content-type") || "").includes("text/html");
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
@@ -19,12 +23,15 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.includes("/api/")) return;
 
   if (req.mode === "navigate") {
-    // Network first so a new build is picked up; the cached shell keeps the app opening offline.
+    // Network first so a new build is picked up. Only a plain 200 HTML page becomes the offline
+    // shell: an error page, a redirect or an auth refusal must never replace it.
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(SHELL).then((c) => c.put("shell", copy));
+          if (res.ok && !res.redirected && isHtml(res)) {
+            const copy = res.clone();
+            caches.open(SHELL).then((c) => c.put("shell", copy));
+          }
           return res;
         })
         .catch(() => caches.match("shell").then((r) => r || Response.error())),
@@ -32,7 +39,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Hashed assets, fonts and icons: cache first, fill on miss.
+  // Hashed build output only; everything else (manifest, icons, other GETs) goes to the network.
+  if (!url.pathname.includes("/assets/")) return;
   event.respondWith(
     caches.match(req).then(
       (hit) =>

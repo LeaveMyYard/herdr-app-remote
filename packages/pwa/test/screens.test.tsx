@@ -33,6 +33,12 @@ describe("AgentsBasic", () => {
     expect(screen.getByText(/Install it in herdr-app on desk-9/)).toBeInTheDocument();
   });
 
+  it("draws idle as a ring and mutes the name", () => {
+    render(<AgentsBasic host={host} spaces={spaces} agents={[{ ...agents[0]!, status: "idle" }]} />);
+    expect(screen.getByRole("img", { name: "Idle" })).toHaveClass("dot-ring");
+    expect(screen.getByRole("link")).toHaveAttribute("data-status", "idle");
+  });
+
   it("masks animated spinners for the visual harness", () => {
     const { container } = render(<AgentsBasic host={host} spaces={spaces} agents={agents} />);
     expect(container.querySelectorAll("[data-vis-mask]")).toHaveLength(2);
@@ -69,6 +75,15 @@ describe("Missing", () => {
     await userEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(onCopy).toHaveBeenCalledWith("[AGENT-USAGE INSTALL COMMAND]");
     expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
+  it("maps every protocol plugin state to a label", () => {
+    const states = ["ready", "missing", "too_old", "broken", "stale", "not_running"] as const;
+    render(<Missing {...props} plugins={states.map((state) => ({ name: `p-${state}`, state }))} />);
+    const card = screen.getByRole("region", { name: "Plugins on desk-1" });
+    for (const label of ["ready", "not installed", "too old", "broken", "stale", "not running"]) {
+      expect(within(card).getByText(label)).toBeInTheDocument();
+    }
   });
 
   it("stays on Copy when the clipboard refuses", async () => {

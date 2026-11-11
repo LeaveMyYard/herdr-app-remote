@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Icon } from "../components/Icon";
 import type { HostInfo, PluginRow } from "../model";
 
@@ -13,17 +14,23 @@ export interface MissingProps {
   /** Install command to copy; the screen shows it verbatim. */
   command: string;
   plugins: PluginRow[];
+  /** Icon in the tile; defaults to a generic one. */
+  icon?: ReactNode;
   onCopy?: (text: string) => Promise<void> | void;
 }
 
+/** One label per protocol plugin state (bridge-api PLUGIN_STATES). "ready", "not installed" and
+    "not responding" are the design's words; the others are provisional (see the PR). */
 const STATE_LABEL: Record<PluginRow["state"], string> = {
   ready: "ready",
   missing: "not installed",
-  outdated: "needs an update",
-  error: "not responding",
+  too_old: "too old",
+  broken: "broken",
+  stale: "stale",
+  not_running: "not running",
 };
 
-function UsageGlyph() {
+export function UsageGlyph() {
   return (
     <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <rect x="2.5" y="8" width="2.5" height="5.5" rx="0.8" />
@@ -33,13 +40,17 @@ function UsageGlyph() {
   );
 }
 
-export function Missing({ host, title, plugin, blurb, command, plugins, onCopy }: MissingProps) {
+export function Missing({ host, title, plugin, blurb, command, plugins, icon, onCopy }: MissingProps) {
   const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
   const copy = async () => {
     try {
       await (onCopy ? onCopy(command) : navigator.clipboard.writeText(command));
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
     } catch {
       setCopied(false);
     }
@@ -52,7 +63,7 @@ export function Missing({ host, title, plugin, blurb, command, plugins, onCopy }
       </div>
       <main className="col f1 missing">
         <div aria-hidden="true" className="row missing-icon">
-          {plugin === "agent-usage" ? <UsageGlyph /> : <Icon name="layers" size={28} />}
+          {icon ?? <Icon name="layers" size={28} />}
         </div>
         <h1 className="missing-head">{plugin} isn&apos;t installed</h1>
         <p className="missing-body">

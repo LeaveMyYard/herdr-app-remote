@@ -39,13 +39,13 @@ function AgentMark({ agent }: { agent: BasicAgent }) {
     case "done":
       return <span className="dot dot-done" role="img" aria-label="Done" />;
     case "idle":
-      return <span className="dot dot-idle" role="img" aria-label="Idle" />;
+      return <span className="dot dot-ring" role="img" aria-label="Idle" />;
   }
 }
 
 function AgentRow({ agent }: { agent: BasicAgent }) {
   return (
-    <a href={`#/chat/${agent.id}`} className="arow">
+    <a href={`#/chat/${agent.id}`} className="arow" data-status={agent.status}>
       <span className="arow-icon">
         <img className="hn" src={HARNESS_ICON[agent.harness]} alt="" width={14} height={14} />
       </span>

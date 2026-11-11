@@ -44,6 +44,9 @@ describe("safe areas", () => {
     expect(css).toMatch(/display-mode: standalone[\s\S]*env\(safe-area-inset-bottom\)/);
     expect(css).toMatch(/--sat:50px/);
     expect(css).toMatch(/--sab:30px/);
+    expect(css).toMatch(/\.app-header\{[^}]*var\(--sat\)/);
+    expect(css).toMatch(/\.status-spacer\{[^}]*var\(--sat\)/);
+    expect(css).toMatch(/\.tabbar\{[^}]*var\(--sab\)/);
   });
 });
 

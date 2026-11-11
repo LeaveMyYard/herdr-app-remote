@@ -23,3 +23,6 @@ export const plugins: PluginRow[] = [
 ];
 
 export const badges: TabBadges = { inbox: "?2" };
+
+/** Placeholder from the board; the real command comes from the plugin probe (S7). */
+export const usageInstallCommand = "[AGENT-USAGE INSTALL COMMAND]";

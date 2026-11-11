@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Banner } from "./components/Banner";
 import { TabBar } from "./components/TabBar";
-import { agents, badges, host, plugins, spaces } from "./fixtures";
+import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
 import { TABS, type Connection, type TabBadges, type TabId } from "./model";
 import { AgentsBasic } from "./screens/AgentsBasic";
-import { Missing } from "./screens/Missing";
+import { Missing, UsageGlyph } from "./screens/Missing";
 import { Soon } from "./screens/Soon";
 
 function tabFromHash(hash: string): TabId {
@@ -57,7 +57,8 @@ export function App({ connection, tabBadges = badges }: AppProps) {
           title="Agent Usage"
           plugin="agent-usage"
           blurb="This tab shows how much of each Claude and Codex account is left."
-          command="[AGENT-USAGE INSTALL COMMAND]"
+          command={usageInstallCommand}
+          icon={<UsageGlyph />}
           plugins={plugins}
         />
       ) : (

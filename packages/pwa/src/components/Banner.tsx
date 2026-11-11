@@ -3,7 +3,16 @@ import type { Connection } from "../model";
 const COPY: Record<Exclude<Connection["status"], "online">, { cls: string; text: (c: Connection) => string }> = {
   connecting: { cls: "s-q", text: () => "Connecting to your computer…" },
   offline: { cls: "s-fail", text: () => "No connection. Retrying…" },
-  stale: { cls: "s-wait", text: (c) => (c.age ? `Showing data from ${c.age} ago` : "Showing older data") },
+  stale: {
+    cls: "s-wait",
+    text: (c) =>
+      // Wording for this reason is fixed by PLAN section 3 and bridge-api-v1.
+      c.reason === "layout_without_remote"
+        ? "Switch to a layout with Remote"
+        : c.age
+          ? `Showing data from ${c.age} ago`
+          : "Showing older data",
+  },
 };
 
 /** Connection and stale-data banner. Renders nothing while online. */
