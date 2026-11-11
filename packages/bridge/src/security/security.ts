@@ -297,7 +297,9 @@ export class Security {
     const used = new Set(this.store.all().map((d) => d.name));
     if (!used.has(base)) return base;
     for (let n = 2; ; n++) {
-      const candidate = `${base.slice(0, 26)} (${n})`;
+      const suffix = ` (${n})`;
+      // Stays within the 32-character name the store's schema accepts.
+      const candidate = `${base.slice(0, 32 - suffix.length)}${suffix}`;
       if (!used.has(candidate)) return candidate;
     }
   }
