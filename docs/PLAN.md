@@ -92,7 +92,7 @@ Sources:
 There is no generic `run`, no `exec`, and no arbitrary `herdr-app do`. Anything else is refused and logged.
 
 **Origin, CSP and secrets**
-- The WS upgrade and every non-GET request need `Origin == https://<serve>`, the cookie, and `X-Remote-Api: 1`.
+- The WS upgrade and every non-GET request need `Origin == https://<serve>` and the cookie. Non-GET requests also need `X-Remote-Api: 1`; the WS upgrade instead needs the subprotocol `herdr-remote.v1`, because browsers can't set headers on it (S5).
 - GETs have no side effects.
 - CSP: `default-src 'self'`, with no inline script. Fonts are self-hosted.
 - Terminal and feed text is rendered as text, never as HTML.

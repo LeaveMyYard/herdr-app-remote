@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
@@ -11,10 +14,12 @@
   "dependencies": {
     "@herdr-remote/protocol": "workspace:*",
     "es-module-lexer": "1.7.0",
-    "ws": "^8.22.2"
+    "uqr": "^0.1.3",
+    "ws": "^8.22.2",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.2"
-  },
-  "main": "dist/index.js"
+    "@types/ws": "^8.18.2",
+    "jsqr": "^1.4.0"
+  }
 }
