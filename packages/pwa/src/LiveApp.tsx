@@ -3,6 +3,7 @@ import { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { App, type AppData, type LiveSources } from "./App";
 import type { BridgeClient, ClientSnapshot } from "./bridge/client";
 import { useBridge, useTopics } from "./bridge/react";
+import { browserEnv } from "./push/push";
 import type { Connection } from "./model";
 
 /** Always wanted: the Agents and Swarm tabs, the plugin cards and the Inbox badge need them. */
@@ -79,9 +80,11 @@ export function LiveApp({ client, hostName = hostNameFrom(window.location.hostna
   const chatView = chatName ? t[chatName] : undefined;
   const chatTopic = useMemo(() => parsed(bridgeApi.ChatTopic, chatView?.data), [chatView?.data]);
 
+  const push = useMemo(() => browserEnv((kind, args) => client.act(kind, args)), [client]);
   const data: AppData | undefined = useMemo(() => (host ? { host, ...(panorama ? { panorama } : {}) } : undefined), [host, panorama]);
   const live: LiveSources = {
     hostName,
+    push,
     plugins,
     inbox,
     usage,

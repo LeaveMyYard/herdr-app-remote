@@ -14,6 +14,8 @@ export interface InboxProps {
   act?: ActFn | undefined;
   /** Rows the phone saw close (the overlay's inert placeholders), shared with the Question screen. */
   closed?: ClosedRows | undefined;
+  /** Shown first in the list area: the notifications row (S17). */
+  extra?: React.ReactNode;
 }
 
 /** Why a row that left the list on its own left, as far as the list can tell (the overlay's own fallbacks). */
@@ -144,7 +146,7 @@ function footerRow(rows: readonly Row[], selected: string | null): Of<"alert"> |
 }
 
 /** PhoneInbox (design/PhoneInbox): the herdr-inbox feed, its rows' own verbs, and the rows the phone saw close. */
-export function Inbox({ topic, host, now, act = offlineAct, closed: given }: InboxProps) {
+export function Inbox({ topic, host, now, act = offlineAct, closed: given, extra }: InboxProps) {
   const [own] = useState(() => new ClosedRows());
   const closed = given ?? own;
   useSyncExternalStore(
@@ -245,6 +247,7 @@ export function Inbox({ topic, host, now, act = offlineAct, closed: given }: Inb
         <span className="ib-headsub">{topic.state === "ok" ? headerSub(topic) : UNAVAILABLE}</span>
       </header>
       <main className="col f1 ib-main">
+        {extra}
         {closed.notice() !== null ? <Notice tone="info">{closed.notice()}</Notice> : null}
         {topic.stale && topic.state === "ok" ? (
           <Notice tone="warn">

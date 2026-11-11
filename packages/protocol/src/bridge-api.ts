@@ -742,3 +742,53 @@ export type Stale = z.infer<typeof Stale>;
 export type Res = z.infer<typeof Res>;
 export type Event = z.infer<typeof Event>;
 
+// ---- push (S17) ----
+
+const B64U = z.string().regex(/^[A-Za-z0-9_-]+$/);
+
+/** `act` kinds of Web Push; both need the `push` capability. */
+export const PUSH_ACTS = ["push.subscribe", "push.unsubscribe"] as const;
+
+/**
+ * `push.subscribe`: the browser's `PushSubscription` (`endpoint` and `keys` of its `toJSON()`). It replaces the
+ * device's earlier subscription. The bridge accepts only HTTPS endpoints of the known push services.
+ */
+export const PushSubscribeArgs = z
+  .object({
+    endpoint: z.string().min(1).max(1024),
+    /** `p256dh`: the 65-byte P-256 point, `auth`: the 16-byte secret, both base64url without padding. */
+    keys: z.object({ p256dh: B64U.length(87), auth: B64U.length(22) }).strict(),
+  })
+  .strict();
+export type PushSubscribeArgs = z.infer<typeof PushSubscribeArgs>;
+/** `push.unsubscribe`: forgets the device's subscription. */
+export const PushUnsubscribeArgs = z.object({}).strict();
+
+/** `GET /api/v1/push` for the cookie's device. */
+export const PushInfo = z
+  .object({
+    /** The bridge's VAPID public key (base64url, uncompressed point): `applicationServerKey`. */
+    key: B64U.length(87),
+    /** The device has the `push` capability now (and remote access is not paused). */
+    allowed: z.boolean(),
+    /** The bridge holds a subscription for the device. */
+    subscribed: z.boolean(),
+  })
+  .strict();
+export type PushInfo = z.infer<typeof PushInfo>;
+
+/**
+ * The decrypted body of a push. `title` is the line the phone shows ("Agent 1: Question Title 123"); nothing else
+ * from the question, alert or terminal is sent. `url` is a `#/` route of the PWA.
+ */
+export const PushPayload = z
+  .object({
+    v: z.literal(1),
+    kind: z.enum(["question", "alert", "blocked"]),
+    title: z.string().min(1).max(200),
+    body: z.string().max(40),
+    tag: z.string().regex(/^[a-z0-9-]{1,40}$/),
+    url: z.string().regex(/^#\/[A-Za-z0-9_.~%:/-]*$/).max(300),
+  })
+  .strict();
+export type PushPayload = z.infer<typeof PushPayload>;

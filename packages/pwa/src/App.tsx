@@ -17,6 +17,8 @@ import { Swarm } from "./screens/Swarm";
 import { SwarmUnavailable } from "./screens/SwarmUnavailable";
 import { UsageTab } from "./screens/UsageTab";
 import { Question } from "./screens/Question";
+import { PushRow } from "./push/PushRow";
+import type { PushEnv } from "./push/push";
 import { DEMO_NOW, demoClosed, demoHost, inboxScenario } from "./inbox-fixtures";
 import { ClosedRows, offlineAct, type ActFn } from "./inbox/act";
 import { inboxBadge } from "./inbox/model";
@@ -79,6 +81,8 @@ export interface LiveSources {
   chat?: { topic: bridgeApi.ChatTopic | undefined; stale: string | null } | undefined;
   /** Sends an inbox `act` (draft, answer, dismiss, retry, stop showing, ack); resolves with the bridge's `res`. */
   inboxAct?: ActFn | undefined;
+  /** Web Push on this phone (S17): the Inbox shows the notifications row with it. */
+  push?: PushEnv | undefined;
 }
 
 export interface AppProps {
@@ -283,7 +287,11 @@ export function App({ connection, tabBadges, data, live, act }: AppProps) {
       />
     );
   } else if (tab === "inbox" && live) {
-    screen = live.inbox ? <Inbox topic={live.inbox} host={data?.host} now={now} act={inboxAct} closed={closedRows} /> : <Soon title="Inbox" />;
+    screen = live.inbox ? (
+      <Inbox topic={live.inbox} host={data?.host} now={now} act={inboxAct} closed={closedRows} extra={live.push ? <PushRow env={live.push} /> : null} />
+    ) : (
+      <Soon title="Inbox" />
+    );
   } else if (tab === "inbox") {
     screen = <Inbox topic={inbox.topic} host={demoHost} now={DEMO_NOW} act={inboxAct} closed={closedRows} />;
   } else if (tab === "usage") {

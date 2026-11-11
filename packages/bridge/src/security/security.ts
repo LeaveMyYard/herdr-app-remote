@@ -521,6 +521,31 @@ export class Security {
     return res;
   };
 
+  // ---- push (S17) ----
+
+  /** Approved, current, not paused, with `view` and `push` in effect now: may be sent a push. */
+  mayPush(id: string): boolean {
+    const d = this.store.get(id);
+    return this.mayView(d) && hasCap(d.caps, "push", this.now());
+  }
+
+  /** The device a request's cookie names, when it may hold a socket (approved, current, `view`, not paused). */
+  requestDevice(req: IncomingMessage): { id: string } | undefined {
+    const d = this.deviceFor(req);
+    return this.mayView(d) ? { id: d.id } : undefined;
+  }
+
+  /** A known device's name, and whether it is approved with `push` on as stored. */
+  pushDevice(id: string): { name: string; push: boolean } | undefined {
+    const d = this.store.get(id);
+    return d ? { name: d.name, push: d.state === "approved" && d.caps.push } : undefined;
+  }
+
+  /** An Activity entry from another part of the bridge (push). Identifiers only; never throws. */
+  note(e: Omit<AuditEntry, "ts">): void {
+    this.bestEffort(() => this.audit(e));
+  }
+
   // ---- audit ----
 
   /** The newest `n` Activity entries, oldest first. */

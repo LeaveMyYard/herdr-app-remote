@@ -16,6 +16,7 @@ import type { LinkServer } from "../link/server.js";
 import { PanelDriver } from "../panel/driver.js";
 import { PanoramaTopicDriver } from "../panorama/topic.js";
 import { PluginsTopicDriver } from "../plugins/topic.js";
+import { PushService, type PushOptions } from "../push/service.js";
 import { Security, type DeviceView, type ServeIdentity } from "../security/security.js";
 import { createBridgeServer, type BridgeServer, type GuardVerdict } from "../server.js";
 import { UsageTopicDriver } from "../usage.js";
@@ -68,6 +69,8 @@ export interface AppOptions {
   /** Extra Status checks and panel operations (S14). */
   panel?: Pick<import("../panel/driver.js").PanelDriverOptions, "extraChecks" | "extraAct">;
   log?: (e: AppLogEvent) => void;
+  /** Web Push test seams (S17): the fake push service's transport and endpoint check. */
+  push?: Pick<PushOptions, "transport" | "allowEndpoint" | "tickMs" | "rateLimit" | "now">;
 }
 
 /** Structured log events. Never carries tokens, cookies, headers or topic contents. */
@@ -80,6 +83,7 @@ export interface App {
   readonly hub: Hub;
   readonly security: Security;
   readonly server: BridgeServer;
+  readonly push: PushService;
   /** The bound API port on 127.0.0.1. */
   readonly port: number;
   /** The last Funnel verdict that decided serving; `on` refuses every request. */
@@ -107,11 +111,14 @@ export async function startApp(o: AppOptions): Promise<App> {
 
   let usage: UsageTopicDriver | undefined = undefined;
   let inboxDriver: InboxTopicDriver | undefined = undefined;
+  let push: PushService | undefined = undefined;
   const actors: Actor[] = [
     ...(o.actors ?? []),
     (_c, kind, args) => usage?.act(kind, args),
     // The inbox verbs (S11): bound to the row the phone was shown; `inbox.answer` capability, audited.
     (_c, kind, args) => inboxDriver?.act(kind, args),
+    // `push.subscribe` / `push.unsubscribe` (S17), bound to the device the socket acts as.
+    (c, kind, args) => push?.act(c, kind, args),
     navigateActor(o.link),
   ];
   // The desktop panel (S13) hears of security changes and new pairing requests through these two.
@@ -123,6 +130,8 @@ export async function startApp(o: AppOptions): Promise<App> {
     serve: o.serve ?? null,
     inner: routeActs(actors),
     onChange: () => {
+      // A revoked device or `push` turned off loses its subscription at once.
+      push?.sync();
       panelRef.current?.changed();
       // Step 5 ("Add your phone") follows approvals and revocations.
       setup?.refreshPhone();
@@ -148,6 +157,20 @@ export async function startApp(o: AppOptions): Promise<App> {
   const inbox = (inboxDriver = new InboxTopicDriver({ hub, appHome: o.appHome, run, binaries }));
   usage = new UsageTopicDriver({ hub, run, binaries, appHome: o.appHome, ...(o.home !== undefined ? { home: o.home } : {}) });
 
+  push = new PushService({
+    dataDir: join(o.appHome, "data/herdr-app-remote"),
+    gate: {
+      mayPush: (id) => security.mayPush(id),
+      requestDevice: (req) => security.requestDevice(req),
+      device: (id) => security.pushDevice(id),
+      note: (e) => security.note(e),
+    },
+    topics: () => ({ inbox: hub.get("inbox"), panorama: hub.get("panorama"), host: hub.get("host") }),
+    serving: () => serving(),
+    ...(o.push ?? {}),
+  });
+  const pushService = push;
+
   const panel = (panelRef.current = new PanelDriver({
     link: o.link,
     security,
@@ -168,7 +191,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     ...(o.staticDir ? { staticDir: o.staticDir } : {}),
     port: o.port ?? DEFAULT_API_PORT,
     guard,
-    routes: security.routes,
+    routes: async (req, res, path) => (await security.routes(req, res, path)) || pushService.routes(req, res, path),
     onConnect: security.onConnect,
   });
   const { port } = await server.listen();
@@ -220,7 +243,10 @@ export async function startApp(o: AppOptions): Promise<App> {
     await inbox.start();
     usage.start();
     chat.start();
+    // Last: its first look seeds the triggers from the topics as they are now, so nothing already there is announced.
+    pushService.start();
   } catch (e) {
+    pushService.stop();
     panel.stop();
     // Each stop is safe on a driver that never started.
     setup?.close();
@@ -247,6 +273,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     hub,
     security,
     server,
+    push: pushService,
     port,
     get funnel() {
       return funnel;
@@ -262,6 +289,7 @@ export async function startApp(o: AppOptions): Promise<App> {
       if (stopped) return;
       stopped = true;
       panel.stop();
+      pushService.stop();
       if (timer) clearTimeout(timer);
       setup?.close();
       usage?.stop();
