@@ -1,0 +1,19 @@
+#!/usr/bin/env node
+// Install, upgrade or uninstall herdr-app-remote in a herdr-app home. Never selects a layout,
+// edits settings or touches tailscale serve. Build first: pnpm install && pnpm build.
+//   scripts/app-install install --app-home ~/.config/herdr-app [--key ctrl-alt-r] [--node /abs/node]
+//   scripts/app-install uninstall --app-home ~/.config/herdr-app [--checker /abs/herdr-app]
+const major = Number(process.versions.node.split(".")[0]);
+if (major < 22) {
+  process.stderr.write(`herdr-app-remote: this needs node 22 or later, and this is ${process.versions.node}. Nothing was changed.\n`);
+  process.exit(1);
+}
+const entry = new URL("../installer/dist/index.js", import.meta.url);
+let mod;
+try {
+  mod = await import(entry.href);
+} catch {
+  process.stderr.write("herdr-app-remote: the installer is not built: run pnpm install && pnpm build first. Nothing was changed.\n");
+  process.exit(1);
+}
+process.exit(await mod.run(process.argv.slice(2)));

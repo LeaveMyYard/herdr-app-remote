@@ -5,6 +5,18 @@ import { world } from './shim/herdr.js';
 
 export const TOKEN = 'token-0123456789abcdef0123456789abcdef';
 export const RUNTIME_PATH = '/app-home/data/herdr-app-remote/runtime.json';
+export const RECEIPT_PATH = '/app-home/data/herdr-app-remote/install.json';
+/** The hash the fake install record and runtime.json both name. */
+export const BUNDLE_SHA = 'ab'.repeat(32);
+export const FAKE_PID = 4242;
+
+/** A record like the installer writes, with fake data. */
+export function fakeReceipt(sha = BUNDLE_SHA) {
+  return JSON.stringify({
+    v: 1, install_id: '0123456789abcdef0123456789abcdef', node: '/usr/bin/node-fake', dirs: [],
+    files: { 'data/herdr-app-remote/bin/bridge.mjs': { sha256: sha, mode: 0o644 } }, previous: {}, keys: null,
+  });
+}
 
 export class FakeBridge {
   constructor() {
@@ -19,8 +31,9 @@ export class FakeBridge {
     return this.port;
   }
 
-  advertise(token = TOKEN) {
-    world.files[RUNTIME_PATH] = JSON.stringify({ v: 1, port: this.port, token, pid: 4242, bundle_sha256: null });
+  advertise(token = TOKEN, { sha = BUNDLE_SHA, pid = FAKE_PID } = {}) {
+    world.files[RUNTIME_PATH] = JSON.stringify({ v: 1, port: this.port, token, pid, bundle_sha256: sha });
+    world.files[RECEIPT_PATH] ??= fakeReceipt();
   }
 
   accept(s) {

@@ -3,7 +3,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { bridgeApi, HostState, modLink } from "../src/index.js";
+import { bridgeApi, HostState, install, modLink } from "../src/index.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../fixtures");
 
@@ -21,7 +21,11 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "bridge-api/usage": bridgeApi.UsageTopic,
   "bridge-api/inbox": bridgeApi.InboxTopic,
   "bridge-api/chat": bridgeApi.ChatTopic,
+  "install/receipt": install.InstallReceipt,
 };
+
+/** Fake app-home files for the installer tests: not protocol messages, so no schema. */
+const NOT_PROTOCOL = join(ROOT, "app-home");
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
@@ -32,7 +36,7 @@ function walk(dir: string): string[] {
 
 function collect(base: string, skip?: string) {
   return walk(base)
-    .filter((f) => f.endsWith(".json") && !(skip && f.startsWith(skip)))
+    .filter((f) => f.endsWith(".json") && !(skip && f.startsWith(skip)) && !f.startsWith(NOT_PROTOCOL + "/"))
     .map((f) => {
       const dir = relative(base, dirname(f));
       const schema = SCHEMAS[dir];

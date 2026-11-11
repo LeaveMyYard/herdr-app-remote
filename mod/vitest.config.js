@@ -11,6 +11,7 @@ export default defineConfig({
       { find: /^gpui-kit$/, replacement: shim('gpui.js') },
       { find: /^gpui-base$/, replacement: shim('gpui.js') },
       { find: /^net$/, replacement: shim('net.js') },
+      { find: /^fs\/promises$/, replacement: shim('fs.js') },
     ],
   },
   test: { include: ['test/**/*.test.js'] },

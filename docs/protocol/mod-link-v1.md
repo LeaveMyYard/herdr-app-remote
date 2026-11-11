@@ -21,9 +21,21 @@ The bridge writes `<app home>/data/herdr-app-remote/runtime.json` (`RUNTIME_RELA
 | `port` | the link port |
 | `token` | 256-bit random, base64url; 32 to 256 chars |
 | `pid` | the bridge's pid; it removes the file on exit only if the pid is still its own |
-| `bundle_sha256` | the bundle's hash, or null (set by the launcher, S12) |
+| `bundle_sha256` | the sha256 of the bundle this bridge runs (checked against `install.json` at start), or null for a bridge not started from an install |
 
 The mod reads it before every connection attempt, so a restarted bridge with a new port or token is picked up. A missing or malformed file counts as a failed attempt (backoff applies).
+
+Before connecting, both copies check that the runtime is trustworthy (`trustRuntime` in `mod/herdr-app-remote/install.js`): `bundle_sha256` must equal the bundle hash in `data/herdr-app-remote/install.json`, and `pid` must be alive (`kill -0`). Otherwise the attempt counts as failed and the token is never sent. A null `bundle_sha256` is never trusted by the mod.
+
+## Starting the bridge
+
+The `link` copy starts the bridge when an attempt finds no usable one (no runtime, an untrusted one, or a refused connection), at most once per 10 s:
+
+1. It reads `install.json` (`packages/protocol/src/install.ts`), hashes `data/herdr-app-remote/bin/bridge.mjs` and compares; a mismatch launches nothing.
+2. It runs `exec(<node from install.json>, [<bundle>, "launch", "--app-home", <app home>])`: argv only, no shell.
+3. `launch` checks the bundle again, returns at once when a live bridge runs this same bundle, and otherwise starts `serve` detached (its own session, stdio closed) under `flock -n data/herdr-app-remote/bridge.lock` where flock(1) exists. Where it doesn't (stock macOS), `serve` refuses to start while another live bridge answers, and a bridge whose runtime.json was overwritten by another pid stops (`replaced`).
+
+The `panel` copy never launches. A bridge stops by itself (and removes its runtime.json) when the install record goes (`uninstalled`), when the record names another bundle (`superseded`, after an upgrade; the new bundle then takes the lock), when runtime.json names another pid (`replaced`), or when no `link` copy has been connected for 30 s and the app's socket (`<app home>/herdr-app.sock`) is gone or refuses (`app_gone`). It stays up while the app runs a layout without the link block, so the phone can show `layout_without_remote`.
 
 ## Handshake and authentication
 
@@ -84,7 +96,7 @@ A copy links only when its layout props say `role: "link"` or `role: "panel"`. A
 
 ## Security notes
 
-- The bridge authenticates the mod (the token); the mod does **not** authenticate the bridge. If a bridge dies without removing `runtime.json`, another local process (another user too) could bind the stale port. The mod would then send it the token and the host state, and show its `notify` text as a "Remote" toast. The token is useless once the real bridge has rotated it, and `run` stays limited to the mod's own navigate allowlist, so no command outside that list can run. This is a residual risk on multi-user machines, accepted for v1. Two ways to narrow it later: the launcher (S12) checks that the runtime pid is alive before connecting, or a v2 handshake has the bridge prove the token (an HMAC over a nonce from the mod's `hello`).
+- The bridge authenticates the mod (the token); the mod does **not** authenticate the bridge. If a bridge dies without removing `runtime.json`, another local process (another user too) could bind the stale port. The mod would then send it the token and the host state, and show its `notify` text as a "Remote" toast. The token is useless once the real bridge has rotated it, and `run` stays limited to the mod's own navigate allowlist, so no command outside that list can run. This is a residual risk on multi-user machines, accepted for v1. It is narrowed by the trust check above (the runtime must name the installed bundle and a live pid the user can signal, so a dead bridge's stale file is ignored), but not closed: a process that binds the port while the real bridge is alive, or a reused pid, still gets through. A v2 handshake can close it by having the bridge prove the token (an HMAC over a nonce from the mod's `hello`).
 - The bridge's `run()` sends the schema-parsed copy of `args`, never the caller's object.
 
 ## Lifecycle
