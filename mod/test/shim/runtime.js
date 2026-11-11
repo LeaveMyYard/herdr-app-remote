@@ -14,7 +14,8 @@ export class Mounted {
     this.stopped = false;
     world.props = props;
     this.view = new ViewClass();
-    this.view.init(props, this.cx());
+    // Like the real app (seen in the rig): init gets no props; a mod reads them with props().
+    this.view.init(undefined, this.cx());
     this.render();
   }
 

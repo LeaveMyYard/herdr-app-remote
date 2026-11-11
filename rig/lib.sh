@@ -28,6 +28,7 @@ start_stack() {
   APP_PID=$!
   say "app pid (in namespace): $APP_PID"
   wait_for 30 "app answers status" herdr-app status
+  say "hc version: $(hc --version 2>&1 | head -1)"
 }
 # Everything dies with the pid namespace; this is only tidiness, by exact pid.
 stop_stack() {
@@ -36,6 +37,16 @@ stop_stack() {
 }
 app_do() { herdr-app do "$@" >>"$RIG/rig.log" 2>&1; }
 sidecar_send() { echo "$1" >>"$RIG/sidecar.cmd"; }
+# Like clone_layout_with_probe for any installed mod: <layout> <mod> <props json>.
+clone_layout_with_mod() {
+  app_do layout.clone --name main --as "$1" || return 1
+  sleep 1
+  node -e '
+const fs = require("fs"), p = process.argv[1], l = JSON.parse(fs.readFileSync(p, "utf8"));
+const work = l.children.find(c => c.id === "work");
+work.children.push({ id: "bridge", type: "block", size: { px: 1 }, content: { mod: process.argv[2], props: JSON.parse(process.argv[3]) } });
+fs.writeFileSync(p, JSON.stringify(l, null, 1));' "$HERDR_APP_HOME/layouts/$1.json" "$2" "$3"
+}
 # Adds the 1px probe block to a personal layout (the documented way to keep a mod alive).
 clone_layout_with_probe() { # <name>
   app_do layout.clone --name main --as "$1" || return 1

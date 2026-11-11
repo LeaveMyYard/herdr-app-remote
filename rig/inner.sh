@@ -6,7 +6,9 @@ RIG=${RIG:?}
 log="$RIG/rig.log"
 say() { echo "$*" | tee -a "$log"; }
 case "${XDG_RUNTIME_DIR:-}" in /run/user/*|"") say "ABORT: runtime dir unset or under /run/user"; exit 1;; esac
-[ -z "$(ls -A /run/user 2>/dev/null)" ] || { say "ABORT: /run/user is visible"; exit 1; }
+# RIG_RUN_USER is only for the guard tests (they point it at an empty dir); run.sh never sets it.
+run_user=${RIG_RUN_USER:-/run/user}
+[ -z "$(ls -A "$run_user" 2>/dev/null)" ] || { say "ABORT: /run/user is visible"; exit 1; }
 case "${HERDR_APP_HOME:-}" in "$RIG"/*) ;; *) say "ABORT: app home is not inside the rig"; exit 1;; esac
 case "${HOME:-}" in "$RIG"/*) ;; *) say "ABORT: HOME is not inside the rig"; exit 1;; esac
 [ -n "${HC_SESSION:-}" ] || { say "ABORT: HC_SESSION unset"; exit 1; }

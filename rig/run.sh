@@ -40,6 +40,11 @@ echo done > "$rig/daemon.finished"
 EOT
 chmod +x "$rig/bin/"*.sh
 cp "$here/sidecar.mjs" "$here/inner.sh" "$here/lib.sh" "$rig/bin/"
+# The real link mod and the harness, for the scenarios that use them (rig-only copy of the mod).
+repo=$(cd "$here/.." && pwd -P)
+mkdir -p "$rig/home/.config/herdr-app/mods/herdr-app-remote"
+cp "$repo"/mod/herdr-app-remote/*.js "$repo"/mod/herdr-app-remote/mod.json "$rig/home/.config/herdr-app/mods/herdr-app-remote/"
+cp "$here/link-harness.mjs" "$rig/bin/"
 cp "$here/scenarios/$scenario.sh" "$rig/scenarios/"
 echo "rig: $rig"
 rc=0
@@ -50,7 +55,7 @@ bwrap --dev-bind / / \
   --tmpfs /mnt --bind "$rig" /mnt/r \
   --unshare-pid --proc /proc --unshare-net --die-with-parent --new-session \
   env -i PATH="$PATH" TERM=xterm-256color LANG="${LANG:-C.UTF-8}" \
-    RIG=/mnt/r SECS="$secs" SCENARIO="$scenario" \
+    RIG=/mnt/r REPO="$repo" SECS="$secs" SCENARIO="$scenario" \
     HOME=/mnt/r/home XDG_CONFIG_HOME=/mnt/r/home/.config XDG_STATE_HOME=/mnt/r/home/.local/state \
     XDG_RUNTIME_DIR=/mnt/r/run HERDR_APP_HOME=/mnt/r/home/.config/herdr-app \
     HC_SESSION="hws$$-$(date +%s)" \

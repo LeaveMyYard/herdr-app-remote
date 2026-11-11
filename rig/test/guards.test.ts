@@ -16,12 +16,13 @@ function sandbox() {
     writeFileSync(join(bin, t), `#!/bin/sh\necho "FAKE-${t} reached" >> "${root}/reached"\nexit 0\n`);
     chmodSync(join(bin, t), 0o755);
   }
+  mkdirSync(join(root, "empty-run-user"));
   return { root, bin };
 }
 
 function runInner(env: Record<string, string>, root: string, bin: string) {
   return spawnSync("sh", [join(rigDir, "inner.sh")], {
-    env: { PATH: `${bin}:/usr/bin:/bin`, RIG: root, SCENARIO: "isolation", ...env },
+    env: { RIG_RUN_USER: join(root, "empty-run-user"), PATH: `${bin}:/usr/bin:/bin`, RIG: root, SCENARIO: "isolation", ...env },
     encoding: "utf8",
   });
 }
@@ -70,6 +71,14 @@ describe("inner.sh ABORT guards", () => {
     const reached = spawnSync("cat", [`${root}/reached`], { encoding: "utf8" });
     expect(reached.status).not.toBe(0);
   });
+});
+
+it("aborts when /run/user is visible", () => {
+  const { root, bin } = sandbox();
+  writeFileSync(join(root, "empty-run-user", "x"), "");
+  const r = runInner({ XDG_RUNTIME_DIR: `${root}/run`, HERDR_APP_HOME: `${root}/h`, HOME: `${root}/h`, HC_SESSION: "x" }, root, bin);
+  expect(r.status).toBe(1);
+  expect(r.stdout).toContain("ABORT: /run/user is visible");
 });
 
 describe("run.sh outer guards", () => {

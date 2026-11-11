@@ -8,8 +8,8 @@ const env = (appHome: string, binaries = bins(tmp())) => ({ appHome, run, binari
 describe("hc (fake CLI)", () => {
   it.each([
     ["ready", 'echo "hc 0.4.2"', "ready"],
-    ["exactly the minimum", 'echo "hc 0.1.0"', "ready"],
-    ["too_old", 'echo "hc 0.0.9"', "too_old"],
+    ["exactly the minimum", 'echo "hc 0.1.19"', "ready"],
+    ["too_old", 'echo "hc 0.1.18"', "too_old"],
     ["broken: no version", 'echo "hc dev"', "broken"],
     ["broken: nonzero", "exit 3", "broken"],
   ])("%s", async (_n, body, state) => {

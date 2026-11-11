@@ -6,7 +6,7 @@
 // - any other props (mod.open, tab.new {mod}, a hand-made block): inert, never connects, so a stray
 //   copy can't fight the real link for its slot.
 import { View, div } from 'gpui-kit';
-import { agents, focused, panes, settings, shared, spaces, terminals, updates } from 'herdr';
+import { agents, focused, panes, props, settings, shared, spaces, terminals, updates } from 'herdr';
 import { buildHost } from './host.js';
 import { Link } from './link.js';
 
@@ -42,8 +42,9 @@ export function snapshot(now = Date.now()) {
 }
 
 export default class Remote extends View {
-  init(props, cx) {
-    const role = props?.role;
+  init(_props, cx) {
+    // The app passes nothing to init (rig run, herdr-app 2026-11): the layout's props come from props().
+    const role = props()?.role;
     this.role = role === 'link' || role === 'panel' ? role : null;
     if (!this.role) return;
     this.link = new Link({ copy: this.role, hello: () => ({ layout: layoutName(), app: { version: appVersion() } }) });
