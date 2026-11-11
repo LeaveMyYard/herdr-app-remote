@@ -76,6 +76,78 @@ export const PluginsTopic = z.object({
 });
 export type PluginsTopic = z.infer<typeof PluginsTopic>;
 
+// ---- panorama topic (S8) ----
+
+/**
+ * Agent status codes (feed v2 `status`, plus `unknown` for a code this version does not know).
+ * Roots use the same vocabulary: `working` is `run`, `blocked` is `blk`, `idle` and `done` map to themselves.
+ */
+export const AGENT_CODES = ["q", "run", "rev", "wait", "blk", "fail", "done", "cxl", "inf", "lost", "bg", "stale", "idle", "unknown"] as const;
+export const AgentCode = z.enum(AGENT_CODES);
+export type AgentCode = z.infer<typeof AgentCode>;
+
+/** A subagent of a root. `parent` is already normalised: dangling, self and cyclic parents are `null`. */
+export const PanoramaNode = z.object({
+  id: z.string().min(1),
+  parent: z.string().min(1).nullable(),
+  harness: z.string().min(1),
+  /** Never empty: the feed title, else the role, else the id. */
+  title: z.string().min(1),
+  role: z.string(),
+  model: z.string().nullable(),
+  status: AgentCode,
+  activity: z.string(),
+  last_message: z.string(),
+  pending: z.array(z.string()),
+  question_ids: z.array(z.number().int()),
+  error: z.string().nullable(),
+  tool_calls: z.number().int().nonnegative(),
+  started: z.number().nullable(),
+  ended: z.number().nullable(),
+  last_at: z.number().nullable(),
+  seq: z.number().int(),
+});
+export type PanoramaNode = z.infer<typeof PanoramaNode>;
+
+export const PanoramaRoot = z.object({
+  /** The feed's root key (`host` plus terminal or pane id). Opaque. */
+  key: z.string().min(1),
+  /** The host agent this root is verified to be, by exact terminal address; null when unmatched or while aged. */
+  agent_id: z.string().min(1).nullable(),
+  /** The host space of the matched agent. Never guessed. */
+  space_id: z.string().min(1).nullable(),
+  terminal: z.string().min(1).nullable(),
+  /** True when the terminal is verified live (Open root pane is possible). */
+  live: z.boolean(),
+  /** True while aged and a live host row has the same address: the Agents list must not list it twice. */
+  shadowed: z.boolean(),
+  harness: z.string().min(1),
+  /** The host agent's name when matched, else the feed title, else the tab label, else the pane id. */
+  title: z.string().min(1),
+  tab_no: z.number().int().nullable(),
+  status: AgentCode,
+  /** Open inbox question ids for this root (the complete inventory). */
+  inbox: z.array(z.number().int()),
+  hidden_finished: z.number().int().nonnegative(),
+  last_activity: z.number().nullable(),
+  agents: z.array(PanoramaNode),
+});
+export type PanoramaRoot = z.infer<typeof PanoramaRoot>;
+
+export const PanoramaTopic = z.object({
+  /** `rich` needs a lease owner and a feed (possibly retained); otherwise `basic` and the phone shows the stock agents. */
+  mode: z.enum(["rich", "basic"]),
+  /** The last read failed or the feed is aged; the retained feed is shown, marked. */
+  stale: z.boolean(),
+  /** Older than the 15 s limit: terminal joins are suppressed (terminal numbers prove nothing). */
+  aged: z.boolean(),
+  /** A short fixed sentence when the feed is missing, unreadable or invalid; never CLI output or a path. */
+  error: z.string().nullable(),
+  /** The feed's `generated_at` (POSIX seconds). */
+  collected_at: z.number().nullable(),
+  roots: z.array(PanoramaRoot),
+});
+export type PanoramaTopic = z.infer<typeof PanoramaTopic>;
 /**
  * `usage` topic: a trimmed `usagebar collect --format v1` report (agent-usage docs/collect-json-v1.md).
  * The bridge keeps only what PhoneUsage draws (no `watchDirs`, no per-pane shares, no `apiUsage`) and
@@ -360,6 +432,49 @@ export const InboxTopic = z.object({
   entries: z.array(InboxRow),
 });
 export type InboxTopic = z.infer<typeof InboxTopic>;
+/**
+ * `chat:<t>` topic: the text of terminal `<t>` (an `hc read`), ANSI already turned into spans.
+ * Spans carry text only: the PWA renders them as text nodes, never as HTML. Colours are a palette index
+ * 0 to 15 (the theme's ANSI colours) or `#rrggbb`; nothing else is accepted.
+ */
+export const ChatColor = z.union([z.number().int().min(0).max(15), z.string().regex(/^#[0-9a-f]{6}$/)]);
+export type ChatColor = z.infer<typeof ChatColor>;
+
+export const ChatSpan = z.object({
+  /** Printable text; the bridge strips every control character and escape sequence. */
+  t: z.string(),
+  fg: ChatColor.optional(),
+  bg: ChatColor.optional(),
+  b: z.literal(true).optional(),
+  d: z.literal(true).optional(),
+  i: z.literal(true).optional(),
+  u: z.literal(true).optional(),
+  /** Reverse video: the PWA swaps foreground and background. */
+  r: z.literal(true).optional(),
+});
+export type ChatSpan = z.infer<typeof ChatSpan>;
+
+export const ChatLine = z.array(ChatSpan);
+export type ChatLine = z.infer<typeof ChatLine>;
+
+export const ChatTopic = z.object({
+  /** The terminal id from the topic name. */
+  terminal: z.string().min(1),
+  lines: z.array(ChatLine),
+  /** True when older lines were dropped to fit the bridge's cap. */
+  truncated: z.boolean().optional(),
+});
+export type ChatTopic = z.infer<typeof ChatTopic>;
+
+/** Terminal ids the bridge will pass to `hc` (`t3`, `vps/t7`): no leading dash, no spaces, no control characters. */
+export const TERMINAL_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(\/[A-Za-z0-9][A-Za-z0-9_.-]{0,63})?$/;
+
+/** The terminal id of a `chat:<t>` topic, or null for any other topic or an id that fails {@link TERMINAL_ID}. */
+export function chatTerminal(topic: string): string | null {
+  if (!topic.startsWith("chat:")) return null;
+  const id = topic.slice(5);
+  return TERMINAL_ID.test(id) ? id : null;
+}
 
 export const Welcome = z.object({
   type: z.literal("welcome"),
@@ -373,6 +488,7 @@ export const Welcome = z.object({
 const TOPIC_PAYLOADS: Partial<Record<string, z.ZodTypeAny>> = {
   host: HostState,
   plugins: PluginsTopic,
+  panorama: PanoramaTopic,
   usage: UsageTopic,
 
   inbox: InboxTopic,
@@ -388,7 +504,7 @@ export const Snap = z
     data: z.unknown(),
   })
   .superRefine((m, ctx) => {
-    const payload = TOPIC_PAYLOADS[m.topic];
+    const payload = m.topic.startsWith("chat:") ? ChatTopic : TOPIC_PAYLOADS[m.topic];
     if (!payload) return;
     const r = payload.safeParse(m.data);
     if (!r.success) {
@@ -418,7 +534,7 @@ export const Patch = z.object({
 });
 
 /** Known reasons; the field stays open so the bridge can add more without a version bump. */
-export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable"] as const;
+export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable", "terminal_not_found", "bad_terminal", "too_many_chats"] as const;
 export const Stale = z.object({
   type: z.literal("stale"),
   topic: Topic,

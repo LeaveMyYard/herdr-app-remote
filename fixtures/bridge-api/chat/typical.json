@@ -1,0 +1,10 @@
+{
+  "terminal": "t3",
+  "lines": [
+    [{ "t": "●", "b": true }, { "t": " I split the parser into three passes." }],
+    [],
+    [{ "t": "  src/parse/mod.rs      " }, { "t": "+84", "fg": 2 }, { "t": " " }, { "t": "-212", "fg": 1 }],
+    [{ "t": "● Tests pass: 212 passed, 0 failed.", "fg": "#ff8700" }],
+    [{ "t": "✻ Waiting for your answer", "fg": 8, "d": true, "i": true, "u": true, "bg": "#010203", "r": true }]
+  ]
+}

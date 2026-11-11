@@ -2,27 +2,30 @@ import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 
-interface Board {
-  ref: string;
-  hash: string;
-  /** Regions of the design render that this slice leaves out on purpose (painted out of both images). */
-  skip?: Rect[];
-}
-
-const BOARDS: readonly Board[] = [
-  { ref: "PhoneAgentsBasic", hash: "#/agents" },
-  { ref: "PhoneUsage", hash: "#/usage" },
-  { ref: "PhoneMissing", hash: "#/usage/missing" },
+/**
+ * \`fixture\` selects the fake data behind the screen (main.tsx); \`nav: false\` is a full-screen sheet with no tab bar.
+ * \`skip\` is a region of the design render that this slice leaves out on purpose (painted out of both images).
+ */
+const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[] }[] = [
+  { ref: "PhoneAgentsBasic", url: "/#/agents" },
+  { ref: "PhoneUsage", url: "/#/usage" },
+  { ref: "PhoneMissing", url: "/#/usage/missing" },
+  { ref: "PhoneAgents", url: "/?fixture=agents#/agents" },
+  { ref: "PhoneSwarm", url: "/?fixture=swarm#/swarm/sp-1" },
+  { ref: "PhonePeek", url: "/?fixture=peek#/swarm/peek/t2%00a9f8e7d6", nav: false },
+  // Chat's terminal text, spinner, tile and footer slot (S16's key bar and composer) are masked in the page.
+  { ref: "PhoneChat", url: "/#/chat/a-1", nav: false },
   // PhoneInbox: the board's fourth row ("delivered" placeholder) and the footer with its "Seen" button are not
-  // in the read-only slice (answering, acknowledging and closed-row placeholders belong to S11).
-  { ref: "PhoneInbox", hash: "#/inbox", skip: [{ x: 0, y: 372, width: 390, height: 124 }] },
+  // in the read-only slice: PLAN S11 owns them.
+  { ref: "PhoneInbox", url: "/#/inbox", skip: [{ x: 0, y: 372, width: 390, height: 124 }] },
 ];
 
 for (const board of BOARDS) {
   test(`${board.ref} matches the design render`, async ({ page }, info) => {
-    await page.goto(`/${board.hash}`);
+    const nav = board.nav !== false;
+    await page.goto(board.url);
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForSelector(".tabbar");
+    await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek], .chat-head");
     const masks: Rect[] = [
       ...(await page.$$eval("[data-vis-mask]", (els) =>
         els.map((e) => {
@@ -50,7 +53,7 @@ for (const board of BOARDS) {
       inter: document.fonts.check('14px "Inter"'),
     }));
     expect(layout.overflowX).toBeLessThanOrEqual(0);
-    expect(layout.tabBarBottom).toBe(layout.innerHeight);
+    if (nav) expect(layout.tabBarBottom).toBe(layout.innerHeight);
     expect(layout.inter).toBe(true);
   });
 }

@@ -84,7 +84,7 @@ One JSON object per text frame, each with a `type`.
 | `welcome` | `api`, `bridge`, `epoch` | `epoch` is random per bridge start. |
 | `snap` | `topic`, `epoch`, `seq`, `data` | Full state of a topic. |
 | `patch` | `topic`, `seq`, `ops` | RFC 6902 operations (`add remove replace move copy test`); paths are RFC 6901 JSON Pointers. |
-| `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`. The field is open. |
+| `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`, and for `chat:<t>` `terminal_not_found`, `bad_terminal`, `too_many_chats`. The field is open. |
 | `res` | `id`, `ok`, `code?`, `unknown_effect?` | Result of an `act`. `code` is required when `ok` is false; `unknown_effect` is only valid when `ok` is false. |
 | `event` | `topic`, `name`, `data` | Fire-and-forget notification. |
 | `pong` | | Reply to `ping` (not in the plan's list; added so clients can detect dead sockets). |
@@ -93,7 +93,7 @@ One JSON object per text frame, each with a `type`.
 
 `host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`.
 
-Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`. `usage` is `UsageTopic` (below). The other payloads are defined by their slices; until then `snap.data` is open.
+Payload schemas defined so far: `host` is `HostState` (see mod-link v1), `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`, `usage` is `UsageTopic` (below) and `panorama` is described below. The other payloads are defined by their slices; until then `snap.data` is open.
 
 ### The `usage` topic
 
@@ -109,10 +109,18 @@ Source: `usagebar collect --format v1 [--all] --panes <JSON>` (agent-usage `docs
 - `act`: `usage.refresh {}` collects now and answers when it is done; `usage.set_filter {filter}` switches between Open panes and All (shared by every client), clears `report` at once and collects again. Both acts collect even with no subscriber (they are explicit requests; the polling is what is subscription-gated). A failed collect answers `ok: false` with the error as `code`. Any other `act` kind is not the usage topic's.
 - Plugin states: `plugins.usage` decides what the Usage tab shows. `missing`, `too_old` and `broken` show the Missing screen; `ready`, `stale` and `not_running` show the panel.
 
+### `chat:<t>` (read-only)
+
+`<t>` is a terminal id (`t3`, or `vps/t7` on another machine): it must match `TERMINAL_ID` in the protocol package (no leading dash, no spaces, at most 64 characters per part), or the topic goes `stale` with `bad_terminal` and `hc` is never run.
+
+Payload: `{terminal, lines, truncated?}`. `lines` is an array of lines, each an array of spans `{t, fg?, bg?, b?, d?, i?, u?, r?}`. `t` is printable text only; the bridge has already turned ANSI into these fields and dropped every other escape sequence and control character. `fg` and `bg` are a palette index 0 to 15 (the theme's ANSI colours) or `#rrggbb`. `r` is reverse video. A client renders `t` as text, never as HTML. At most 500 lines are kept (`truncated` says older ones were dropped).
+
+Source: while at least one client is subscribed, the bridge runs `hc read <t> --lines 200` once a second (never overlapping, backing off to 5 s while it fails) and `hc ls --json` on the first read and every tenth one after, to notice a terminal that has closed (`stale` `terminal_not_found`). Nothing runs with no subscriber, and at most 6 chats are read at once (`too_many_chats`). `hc events` is not used: it has not been tested against a live core (PLAN section 8). The `hc ls --json` shape is likewise unverified, so its output is read tolerantly and an unrecognised shape is ignored. The topic needs the `view` capability and sends nothing to the terminal; input is `terminal.send` (S16).
+
 ### Resume and consistency
 
 - `seq` is per topic within an epoch. A `snap` sets the topic's `seq`; each `patch` for that topic carries previous + 1. `hello.resume.seqs` maps each topic to the last `seq` the client applied. `patch` carries no `epoch`: a bridge restart is detected through `welcome.epoch`, after which the client resubscribes and gets fresh `snap`s. A `seq` gap on a topic means the client re-subscribes to that topic only and receives a fresh `snap`.
-- `snap.data` is validated against the topic payload schema where one is defined (`host`, `plugins`, `usage`).
+- `snap.data` is validated against the topic payload schema where one is defined (`host`, `plugins`, `usage`, `panorama`).
 - Each bridge start gets a random epoch. A client that resumes with an unknown epoch, or whose seq has a gap, gets a fresh `snap`.
 - iOS kills background sockets, so the PWA reconnects on `visibilitychange` and `online`.
 - There is no optimistic UI: the UI changes only on `snap`, `patch` or `res`.
@@ -162,6 +170,21 @@ Mapping to states (`packages/bridge/src/plugins/`):
 Probes run every 30 s with a 10 s timeout each (SIGTERM, then SIGKILL after 0.5 s; the probe is reported `broken` at once); `host` is re-derived every second. A probe that throws reports `broken`. `detail` is a short fixed sentence; it never carries CLI output or a path.
 
 Plugin JS the bridge loads (panorama `contract.js`, inbox `feed.js` and `commands.js`) is read once, compared with the plugin's own `install.json` hash, and imported from those same bytes. A file with any import (found by a lexer) is refused, so inbox `model/*` (which imports its siblings) is not loadable this way. The bridge does not need it: `model/*` is the popup's state machine over the database snapshot, and everything the phone reads is in the feed. See the inbox topic below.
+
+### `panorama` topic
+
+Source: `packages/protocol/src/bridge-api.ts` (`PanoramaTopic`), built by `packages/bridge/src/panorama/`. Fixtures: `fixtures/bridge-api/panorama/`.
+
+`{mode, stale, aged, error, collected_at, roots[]}`:
+
+- `mode`: `rich` needs a lease owner (`host.shared["panorama.feed.owner"]` not null) and a feed (a retained one counts); otherwise `basic`, with no roots, and the phone shows the stock Agents list.
+- The feed is `<appHome>/data/panorama/feed.json`, read at most once a second and validated by panorama's own `contract.js` (`readResult`). A missing, oversized, unreadable or invalid feed never replaces the last good one: `stale` is true, `error` is one of `feed missing`, `feed unreadable`, `feed too large`, or `feed invalid`, and the retained roots stay. If `contract.js` stops verifying (hash or load), nothing from the feed is trusted: the topic is `basic` with `error` `contract unavailable`, and the retained roots are not shown. A feed that never read is `basic` with the error. A feed with no roots and no error is a real empty swarm.
+- `aged`: the feed is older than 15 s (or unstamped, or from the future; `contract.js` `aged`). Terminal numbers prove nothing then, so no join is applied: every root has `agent_id`, `space_id` null and `live` false. A root whose address matches a live host row is `shadowed`, so the Agents list doesn't show it twice. A stale feed that is not aged keeps its joins.
+- A root joins a host agent only by exact address: `host == "herdr-core"`, a non-null `terminal`, equal to the host agent's `terminal_id` (the link mod mirrors `agents().address` there). Never by cwd, title, pane id or session id; a remote address (`vps/t7`) never matches a local one. `title` is the host agent's name when joined, else the feed title, else `tab_label`, else `pane_id`.
+- `agents[]` of a root are the feed's agents, parents before children, with `parent` normalised (dangling, self and cyclic parents are `null`). Statuses are the feed's codes (`q run rev wait blk fail done cxl inf lost bg stale`, plus `idle` for a root and `unknown` for a code this version doesn't know); root `working` is `run` and `blocked` is `blk`. Long display text is cut at 1000 characters. Transcript paths are never sent.
+- `inbox` is the root's complete open-question id list; the phone derives `?N` from it (a union, never root plus agent lengths).
+
+The phone shows Swarm for a space from the roots joined to it; while `aged` nothing is joined, so it shows every retained root with a notice rather than an empty swarm. Peek shows feed fields only. A transcript needs a source the feed doesn't provide (it carries only a local path), so the Transcript view appears only when a later slice supplies one.
 
 ### Action results
 

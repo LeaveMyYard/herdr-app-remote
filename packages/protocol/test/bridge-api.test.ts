@@ -60,4 +60,19 @@ describe("bridge-api", () => {
     expect(bridgeApi.InboxRow.safeParse({ ...base, kind: "wat" }).success).toBe(true);
     expect(bridgeApi.InboxRow.safeParse({ ...base, kind: "alert" }).success).toBe(false);
   });
+
+  it("extracts a safe terminal id from chat topics only", () => {
+    expect(bridgeApi.chatTerminal("chat:t3")).toBe("t3");
+    expect(bridgeApi.chatTerminal("chat:vps/t7")).toBe("vps/t7");
+    for (const bad of ["host", "chat:", "chat:-h", "chat:--lines", "chat:a b", "chat:a;b", "chat:../x", "chat:a/b/c", "chat:/t1", "chat:" + "x".repeat(65)]) {
+      expect(bridgeApi.chatTerminal(bad), bad).toBeNull();
+    }
+  });
+
+  it("validates a chat snap against the chat payload and rejects a topic name with a newline", () => {
+    const snap = (data: unknown) => ({ type: "snap", topic: "chat:t3", epoch: "e", seq: 1, data });
+    expect(bridgeApi.ServerMessage.safeParse(snap({ terminal: "t3", lines: [[{ t: "x" }]] })).success).toBe(true);
+    expect(bridgeApi.ServerMessage.safeParse(snap({ terminal: "t3", lines: [[{ t: "x", fg: "#GGGGGG" }]] })).success).toBe(false);
+    expect(bridgeApi.Topic.safeParse("chat:t3\n").success).toBe(false);
+  });
 });
