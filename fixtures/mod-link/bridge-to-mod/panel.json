@@ -1,0 +1,28 @@
+{
+  "type": "panel",
+  "seq": 3,
+  "view": {
+    "status": "serving",
+    "url": "https://desk-1.example-tailnet.ts.net",
+    "checks": [
+      { "id": "bridge", "label": "Bridge running", "detail": "up 2h 14m", "state": "ok" },
+      { "id": "serve", "label": "Serving on the tailnet", "detail": "desk-1.example-tailnet.ts.net", "state": "ok" }
+    ],
+    "devices": [
+      {
+        "id": "d-0000000000000001",
+        "name": "Phone 1",
+        "login": "user-1@example",
+        "state": "pending",
+        "caps": { "view": true, "inbox.answer": true, "navigate": false, "terminal.input": false, "push": false },
+        "terminal_input_until": null,
+        "created_at": 1700000000000,
+        "last_seen": null,
+        "live": 0
+      }
+    ],
+    "plugins": [{ "id": "usage", "name": "agent-usage", "state": "too_old", "powers": "Usage", "detail": "update it" }],
+    "activity": [{ "ts": 1700000001000, "text": "Phone 1 asked to pair" }],
+    "pairing": { "url": "https://desk-1.example-tailnet.ts.net/pair#c=AAAAAAAAAAAAAAAAAAAAAA", "expires_at": 1700000300000, "qr": ["0000", "0110", "0110", "0000"] }
+  }
+}

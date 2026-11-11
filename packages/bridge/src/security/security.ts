@@ -154,6 +154,11 @@ export class Security {
     return this.store.paused;
   }
 
+  /** The serve name and owner login now in force, or null before setup. */
+  get serveIdentity(): ServeIdentity | null {
+    return this.serve ? { ...this.serve } : null;
+  }
+
   /** Refuses everything except `/healthz` and drops every live connection. Persists. */
   pause(): void {
     if (this.store.paused) return;

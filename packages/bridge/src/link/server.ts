@@ -37,7 +37,9 @@ export type LinkLogEvent =
   | { event: "auth_failed"; reason: "not_hello" | "bad_hello" | "bad_token" | "timeout" | "too_long" | "closed" | "evicted" }
   | { event: "link"; copy: Copy; replaced: boolean }
   | { event: "unlink"; copy: Copy }
-  | { event: "dropped_line"; copy: Copy; reason: "invalid" | "panel_state" | "stale_seq" | "unknown_result" }
+  | { event: "dropped_line"; copy: Copy; reason: "invalid" | "panel_state" | "stale_seq" | "unknown_result" | "link_panel_act" }
+  | { event: "panel_invalid" }
+  | { event: "panel_act"; kind: string; ok: boolean; code?: string }
   | { event: "dropped_peer"; copy: Copy; reason: "too_long" | "idle" | "backpressure" }
   | { event: "run_refused"; name: string; error: modLink.RunRefusal };
 
@@ -59,6 +61,13 @@ export type RunOutcome =
       unknown_effect: boolean;
     };
 
+/** What the bridge supplies for the desktop panel (S13): the view to show and the desktop-only operations. */
+export interface PanelHandlers {
+  view(): modLink.PanelView;
+  /** Runs one already validated panel act. Never throws (a throw answers `failed`). */
+  act(kind: modLink.PanelActName, args: Record<string, unknown>): Promise<{ ok: true } | { ok: false; code: string }> | { ok: true } | { ok: false; code: string };
+}
+
 interface Pending {
   resolve: (r: RunOutcome) => void;
   timer: NodeJS.Timeout;
@@ -74,6 +83,9 @@ interface Conn {
   lastInbound: number;
   pending: Map<string, Pending>;
   closed: boolean;
+  /** Last panel view written on this connection (serialized), for panel connections. */
+  panelSent: string | null;
+  panelSeq: number;
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "::ffff:127.0.0.1"]);
@@ -100,6 +112,7 @@ export class LinkServer extends EventEmitter {
   private pingTimer: NodeJS.Timeout | null = null;
   private runCounter = 0;
   private lastHostSnapshot: HostSnapshot | null = null;
+  private panelHandlers: PanelHandlers | null = null;
 
   constructor(options: LinkServerOptions) {
     super();
@@ -182,12 +195,46 @@ export class LinkServer extends EventEmitter {
     });
   }
 
-  /** Shows a toast through a mod copy. Returns false when that copy is not linked. */
-  notify(level: modLink.Notify["level"], message: string, copy: Copy = "link"): boolean {
+  /** Shows a toast through a mod copy. Returns false when that copy is not linked. `action: "open_panel"` makes the toast open the Remote panel. */
+  notify(level: modLink.Notify["level"], message: string, copy: Copy = "link", action?: modLink.Notify["action"]): boolean {
     const conn = this.slots.get(copy);
     if (!conn) return false;
-    this.send(conn, { type: "notify", level, message: message.slice(0, 500) });
+    this.send(conn, { type: "notify", level, message: message.slice(0, 500), ...(action ? { action } : {}) });
     return true;
+  }
+
+  /** Supplies the panel's view and operations. Until set, a panel copy gets nothing and its acts are refused. */
+  setPanel(handlers: PanelHandlers | null): void {
+    this.panelHandlers = handlers;
+    this.pushPanel();
+  }
+
+  /** Whether the panel copy is linked (the bridge only builds the view then). */
+  get panelConnected(): boolean {
+    return this.slots.has("panel");
+  }
+
+  /** Sends the panel copy the current view when it differs from the last one sent on its connection. */
+  pushPanel(): void {
+    const conn = this.slots.get("panel");
+    const h = this.panelHandlers;
+    if (!conn || conn.closed || !h) return;
+    let json: string;
+    try {
+      json = JSON.stringify(h.view());
+    } catch {
+      return;
+    }
+    if (json === conn.panelSent) return;
+    // The view was built by the bridge; parse it back so only the schema's fields can ever leave.
+    const parsed = modLink.PanelView.safeParse(JSON.parse(json));
+    if (!parsed.success) {
+      this.log({ event: "panel_invalid" });
+      return;
+    }
+    conn.panelSent = json;
+    conn.panelSeq += 1;
+    this.send(conn, { type: "panel", seq: conn.panelSeq, view: parsed.data });
   }
 
   async close(): Promise<void> {
@@ -217,6 +264,8 @@ export class LinkServer extends EventEmitter {
       lastInbound: Date.now(),
       pending: new Map(),
       closed: false,
+      panelSent: null,
+      panelSeq: 0,
     };
     this.conns.add(conn);
     socket.setNoDelay(true);
@@ -300,6 +349,7 @@ export class LinkServer extends EventEmitter {
     if (previous) this.drop(previous);
     this.log({ event: "link", copy: hello.copy, replaced: Boolean(previous) });
     this.emit("link", { copy: hello.copy, hello });
+    if (hello.copy === "panel") this.pushPanel();
   }
 
   private reject(conn: Conn, reason: Extract<LinkLogEvent, { event: "auth_failed" }>["reason"]): void {
@@ -356,9 +406,36 @@ export class LinkServer extends EventEmitter {
         }
         return;
       }
+      case "panel_act":
+        if (copy !== "panel") {
+          this.log({ event: "dropped_line", copy, reason: "link_panel_act" });
+          return;
+        }
+        void this.onPanelAct(conn, msg);
+        return;
       case "pong":
         return;
     }
+  }
+
+  private async onPanelAct(conn: Conn, msg: modLink.PanelAct): Promise<void> {
+    const check = modLink.checkPanelAct(msg.kind, msg.args);
+    let res: { ok: true } | { ok: false; code: string };
+    if (!check.ok) {
+      res = { ok: false, code: check.error };
+    } else if (!this.panelHandlers) {
+      res = { ok: false, code: "unavailable" };
+    } else {
+      try {
+        res = await this.panelHandlers.act(check.kind, check.args);
+      } catch {
+        res = { ok: false, code: "failed" };
+      }
+    }
+    this.log(res.ok ? { event: "panel_act", kind: check.ok ? check.kind : "(refused)", ok: true } : { event: "panel_act", kind: check.ok ? check.kind : "(refused)", ok: false, code: res.code });
+    if (conn.closed) return;
+    this.send(conn, { type: "panel_res", id: msg.id, ok: res.ok, ...(res.ok ? {} : { code: res.code.slice(0, 40) }) });
+    this.pushPanel();
   }
 
   private congested(conn: Conn): boolean {

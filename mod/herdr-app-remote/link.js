@@ -19,6 +19,10 @@ export const HEALTHY_MS = 5000;
 /** Bridge-to-mod line limit (LINE_LIMITS.bridgeToMod). */
 export const MAX_LINE = 1024 * 1024;
 const MAX_TOAST = 500;
+/** A panel act that gets no `panel_res` in this long is reported as timed out. */
+export const ACT_TIMEOUT_MS = 10000;
+/** The key command that shows the Remote panel (main.js handles `open`). */
+const OPEN_ACTION = 'herdr-app-remote.open';
 
 const LEVELS = Object.freeze(Object.assign(Object.create(null), { info: 'info', warn: 'warning', error: 'error' }));
 
@@ -64,6 +68,8 @@ export class Link {
    * @param {() => unknown} [o.unreachable]   called, not awaited, when an attempt found no usable bridge
    * @param {(host: string, port: number) => Promise<any>} [o.connect]
    * @param {number} [o.healthyMs]
+   * @param {(view: object, cx: object) => void} [o.onPanel]   the panel copy got a `panel` view (raw: the caller checks it)
+   * @param {(up: boolean, cx: object) => void} [o.onStatus]   the connection came up or went down
    */
   constructor(o) {
     this.copy = o.copy;
@@ -75,6 +81,10 @@ export class Link {
     this.healthyMs = o.healthyMs ?? HEALTHY_MS;
     this.trustFn = o.trust ?? (async () => true);
     this.unreachableFn = o.unreachable ?? (() => {});
+    this.panelFn = o.onPanel ?? (() => {});
+    this.statusFn = o.onStatus ?? (() => {});
+    this.acts = new Map(); // panel act id -> resolve
+    this.actCounter = 0;
     this.unblock = null; // ends the reader's pending read() when the connection is dropped
     this.closed = false;
     this.sock = null;
@@ -144,11 +154,13 @@ export class Link {
         const info = this.helloInfo();
         await this.write(sock, { type: 'hello', v: 1, token: rt.token, copy: this.copy, layout: info.layout, app: info.app });
         if (this.copy === 'link') cx.spawn(async (cx) => this.sender(cx, sock));
-        healthy = await this.reader(sock, dropped);
+        this.statusFn(true, cx);
+        healthy = await this.reader(cx, sock, dropped);
       } catch {
         // connect refused, no runtime, write or read failed: retry below
       }
       this.drop();
+      if (reached && !this.closed) this.statusFn(false, cx);
       if (this.closed) return;
       if (!reached) {
         try {
@@ -170,7 +182,33 @@ export class Link {
     const u = this.unblock;
     this.unblock = null;
     if (u) u();
+    for (const [id, resolve] of this.acts) {
+      this.acts.delete(id);
+      resolve({ ok: false, code: 'link_lost' });
+    }
     this.poke();
+  }
+
+  /**
+   * The panel copy asks the bridge for a desktop-only operation (approve, revoke, a capability, pause,
+   * a pairing code: `PANEL_ACT_ARGS` in mod-link.ts). The bridge validates it against its own strict
+   * allowlist; this only carries it. Resolves `{ok, code?}`; never rejects.
+   */
+  act(cx, kind, args) {
+    const sock = this.sock;
+    if (this.copy !== 'panel' || !sock || this.closed) return Promise.resolve({ ok: false, code: 'no_link' });
+    this.actCounter += 1;
+    const id = `p-${this.actCounter}`;
+    return new Promise((resolve) => {
+      this.acts.set(id, resolve);
+      cx.spawn(async (cx) => {
+        await cx.sleep(ACT_TIMEOUT_MS);
+        if (this.acts.delete(id)) resolve({ ok: false, code: 'timeout' });
+      });
+      this.write(sock, { type: 'panel_act', id, kind, args }).catch(() => {
+        if (this.acts.delete(id)) resolve({ ok: false, code: 'no_link' });
+      });
+    });
   }
 
   /** Writes one line; failures close the connection (the reader then ends). */
@@ -212,7 +250,7 @@ export class Link {
   }
 
   /** Reads lines until EOF, error or drop. Resolves true if any message arrived. */
-  async reader(sock, dropped) {
+  async reader(cx, sock, dropped) {
     let parts = []; // unterminated bytes, waiting for their newline
     let size = 0;
     let got = false;
@@ -234,13 +272,13 @@ export class Link {
         start = i + 1;
         if (line.trim() === '') continue;
         got = true;
-        this.handle(sock, line);
+        this.handle(cx, sock, line);
         if (this.sock !== sock) return got;
       }
     }
   }
 
-  handle(sock, line) {
+  handle(cx, sock, line) {
     let msg;
     try {
       msg = JSON.parse(line);
@@ -256,9 +294,18 @@ export class Link {
     } else if (msg.type === 'notify') {
       const level = typeof msg.level === 'string' ? LEVELS[msg.level] : undefined;
       if (!level || typeof msg.message !== 'string') return;
+      const n = { title: 'Remote', body: msg.message.slice(0, MAX_TOAST), level };
+      if (msg.action === 'open_panel') n.action = { name: OPEN_ACTION };
       try {
-        this.notifyFn({ title: 'Remote', body: msg.message.slice(0, MAX_TOAST), level });
+        this.notifyFn(n);
       } catch { /* a toast is best-effort */ }
+    } else if (this.copy === 'panel' && msg.type === 'panel') {
+      this.panelFn(msg.view, cx);
+    } else if (this.copy === 'panel' && msg.type === 'panel_res') {
+      const resolve = typeof msg.id === 'string' ? this.acts.get(msg.id) : undefined;
+      if (!resolve) return;
+      this.acts.delete(msg.id);
+      resolve(msg.ok === true ? { ok: true } : { ok: false, code: typeof msg.code === 'string' ? msg.code.slice(0, 40) : 'failed' });
     }
   }
 
