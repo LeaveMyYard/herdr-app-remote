@@ -343,17 +343,22 @@ describe("usage driver edge cases", () => {
 
   it("usage.refresh during a filter switch collects under the new filter", async () => {
     let release: () => void = () => undefined;
-    const { runner } = stub((call) => (call.args.includes("--all") ? okRun() : new Promise<RunResult>((r) => (release = () => r(okRun())))));
+    const { runner } = stub((call) => (call.args.includes("--all") ? new Promise<RunResult>((r) => setTimeout(() => r(okRun()), 30)) : new Promise<RunResult>((r) => (release = () => r(okRun())))));
     const { hub } = setup(runner);
     const slow = driver!.refresh();
     const switching = driver!.act("usage.set_filter", { filter: "all" });
     await settle();
-    const refreshing = driver!.act("usage.refresh", {});
+    let atAnswer: bridgeApi.UsageTopic | undefined;
+    const refreshing = driver!.act("usage.refresh", {}).then((r) => {
+      atAnswer = topic(hub);
+      return r;
+    });
     await settle();
     release();
     await slow;
-    await switching;
     expect(await refreshing).toEqual({ ok: true });
-    expect(topic(hub).report?.filter).toBe("all");
+    // The answer means a report under the new filter exists, not that a dropped run ended.
+    expect(atAnswer?.report?.filter).toBe("all");
+    await switching;
   });
 });
