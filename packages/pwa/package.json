@@ -1,0 +1,12 @@
+{
+  "name": "@herdr-remote/pwa",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "sh -c 'tsc -p tsconfig.json' --",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": { "@herdr-remote/protocol": "workspace:*" }
+}

@@ -1,0 +1,1 @@
+{ "type": "hello", "v": 1, "token": "token-123", "copy": "link", "layout": "herdr-remote", "app": { "version": "0.0.1" } }

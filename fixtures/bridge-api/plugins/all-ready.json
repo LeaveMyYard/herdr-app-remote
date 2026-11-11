@@ -1,0 +1,7 @@
+{
+  "panorama": { "state": "ready" },
+  "inbox": { "state": "ready" },
+  "usage": { "state": "ready" },
+  "hc": { "state": "ready" },
+  "host": { "state": "ready" }
+}

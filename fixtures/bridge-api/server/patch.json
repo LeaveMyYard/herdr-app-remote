@@ -1,0 +1,13 @@
+{
+  "type": "patch",
+  "topic": "host",
+  "seq": 2,
+  "ops": [
+    { "op": "replace", "path": "/agents/0/state", "value": "idle" },
+    { "op": "add", "path": "/spaces/-", "value": { "id": "space-3", "name": "Project Gamma", "focused": false } },
+    { "op": "remove", "path": "/panes/2" },
+    { "op": "test", "path": "/layout_name", "value": "herdr-remote" },
+    { "op": "move", "from": "/panes/1", "path": "/panes/0" },
+    { "op": "copy", "from": "/spaces/0", "path": "/spaces/-" }
+  ]
+}

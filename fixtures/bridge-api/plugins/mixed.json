@@ -1,0 +1,7 @@
+{
+  "panorama": { "state": "not_running", "detail": "no feed owner" },
+  "inbox": { "state": "too_old" },
+  "usage": { "state": "missing" },
+  "hc": { "state": "broken", "detail": "hc --version failed" },
+  "host": { "state": "stale" }
+}

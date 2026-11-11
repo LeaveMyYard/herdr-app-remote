@@ -1,0 +1,14 @@
+{
+  "spaces": [{ "id": "space-1", "name": "Project Alpha", "focused": true }],
+  "agents": [
+    { "id": "agent-1", "name": "Agent 1", "harness": "claude", "state": "idle", "space_id": "space-1" },
+    { "id": "agent-2", "name": "Agent 2", "harness": "claude", "state": "done", "space_id": "space-1" },
+    { "id": "agent-3", "name": "Agent 3", "harness": "codex", "state": "error", "space_id": "space-1" }
+  ],
+  "terminals": [],
+  "panes": [{ "id": "pane-1", "space_id": "space-1", "kind": "terminal" }],
+  "focused": { "space_id": "space-1", "pane_id": "pane-1", "agent_id": null },
+  "theme": { "name": "Theme 2", "mode": "dark" },
+  "layout_name": "panorama-remote",
+  "shared": { "panorama.feed.owner": null }
+}
