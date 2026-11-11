@@ -1,0 +1,25 @@
+{
+  "mode": "rich",
+  "stale": false,
+  "aged": false,
+  "error": null,
+  "collected_at": 1800000000.0,
+  "roots": [
+    {
+      "key": "",
+      "agent_id": "agent-1",
+      "space_id": "space-1",
+      "terminal": "t1",
+      "live": true,
+      "shadowed": false,
+      "harness": "claude",
+      "title": "Agent 1",
+      "tab_no": null,
+      "status": "run",
+      "inbox": [],
+      "hidden_finished": 0,
+      "last_activity": null,
+      "agents": []
+    }
+  ]
+}

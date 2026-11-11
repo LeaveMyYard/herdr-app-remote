@@ -1,25 +1,25 @@
-import { useEffect, useState } from "react";
-import type { bridgeApi } from "@herdr-remote/protocol";
+import { useEffect, useState, type ReactNode } from "react";
 import { Banner } from "./components/Banner";
 import { TabBar } from "./components/TabBar";
+import type { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { chats } from "./chat-fixtures";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
-import { TABS, type Connection, type TabBadges, type TabId } from "./model";
+import { TABS, type Connection, type Space, type TabBadges, type TabId } from "./model";
+import { age } from "./panorama/format";
+import { nodeUid, selectAgents, selectBasic, selectSpaces, swarmScope, type SwarmUi } from "./panorama/select";
 import { AgentsBasic } from "./screens/AgentsBasic";
+import { AgentsRich } from "./screens/AgentsRich";
 import { Chat, ChatPicker } from "./screens/Chat";
+import { Peek, type TranscriptPage } from "./screens/Peek";
 import { Soon } from "./screens/Soon";
+import { Swarm } from "./screens/Swarm";
+import { SwarmUnavailable } from "./screens/SwarmUnavailable";
 import { UsageTab } from "./screens/UsageTab";
 import { demoUsageNow, usageScenario } from "./usage-fixtures";
 
 /** `#/usage/<scenario>`: the demo data the Usage tab shows until the bridge client lands. */
 function scenarioFromHash(hash: string): string | undefined {
   return hash.replace(/^#\/?/, "").split("/")[1];
-}
-
-/** `#/chat/<agent>`: the agent whose chat is open. */
-function chatFromHash(hash: string): string | undefined {
-  const parts = hash.replace(/^#\/?/, "").split("/");
-  return parts[0] === "chat" ? parts[1] : undefined;
 }
 
 function tabFromHash(hash: string): TabId {
@@ -43,28 +43,73 @@ function useConnection(override?: Connection): Connection {
   return override ?? { status: online ? "online" : "offline" };
 }
 
+/** What the bridge's `host` and `panorama` topics hold, once a client feeds them in (until then, fixtures). */
+export interface AppData {
+  host: HostState;
+  panorama?: bridgeApi.PanoramaTopic;
+  /** Space facts the host topic doesn't carry (branch, behind, detached). */
+  spaceExtra?: Record<string, Partial<Space>>;
+  /** POSIX seconds; defaults to the clock. */
+  now?: number;
+  /** Swarm open/selected state to start from. */
+  swarmUi?: SwarmUi;
+  /** A transcript page for Peek; no source exists yet. */
+  transcript?: TranscriptPage | undefined;
+}
+
 export interface AppProps {
   connection?: Connection;
   tabBadges?: TabBadges;
+  data?: AppData | undefined;
 }
 
-export function App({ connection, tabBadges = badges }: AppProps) {
-  const [tab, setTab] = useState<TabId>(() => tabFromHash(window.location.hash));
+function parts(hash: string): string[] {
+  return hash.replace(/^#\/?/, "").split("/");
+}
+
+/** A hash from the address bar can be malformed; never let it throw during render. */
+function decode(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
+function useNowSeconds(fixed?: number): number {
+  const [now, setNow] = useState(() => fixed ?? Date.now() / 1000);
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash(window.location.hash));
+    if (fixed !== undefined) return;
+    const t = setInterval(() => setNow(Date.now() / 1000), 30_000);
+    return () => clearInterval(t);
+  }, [fixed]);
+  return fixed ?? now;
+}
+
+export function App({ connection, tabBadges = badges, data }: AppProps) {
+  const [tab, setTab] = useState<TabId>(() => tabFromHash(window.location.hash));
+  const [hash, setHash] = useState(() => window.location.hash);
+  const [swarmUi, setSwarmUi] = useState<SwarmUi | null>(data?.swarmUi ?? null);
+  const now = useNowSeconds(data?.now);
+  useEffect(() => {
+    const onHash = () => {
+      setTab(tabFromHash(window.location.hash));
+      setHash(window.location.hash);
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  const conn = useConnection(connection);
+  const topic = data?.panorama;
+  const rich = topic?.mode === "rich";
+  const base = useConnection(connection);
+  // A retained feed that is old or failed to read shows the stale banner; a connection problem outranks it.
+  const conn: Connection =
+    !connection && base.status === "online" && rich && topic.stale && (tab === "agents" || tab === "swarm")
+      ? { status: "stale", age: topic.collected_at !== null ? age(topic.collected_at, now) : undefined, reason: topic.error ?? "feed" }
+      : base;
   const [scenarioName, setScenarioName] = useState(() => scenarioFromHash(window.location.hash));
   useEffect(() => {
     const onHash = () => setScenarioName(scenarioFromHash(window.location.hash));
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-  const [chatId, setChatId] = useState(() => chatFromHash(window.location.hash));
-  useEffect(() => {
-    const onHash = () => setChatId(chatFromHash(window.location.hash));
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -76,14 +121,35 @@ export function App({ connection, tabBadges = badges }: AppProps) {
     setTab(t);
   };
 
+  const route = parts(hash);
+  const peekUid = tab === "swarm" && rich && route[1] === "peek" && route[2] ? decode(route[2]) : null;
+  const peeked = peekUid && topic ? findNode(topic, peekUid) : null;
+  if (peeked && data && topic) {
+    const space = peeked.root.space_id !== null ? data.host.spaces.find((s) => s.id === peeked.root.space_id)?.name : undefined;
+    return (
+      <div className="hd ph">
+        <Peek
+          root={peeked.root}
+          node={peeked.node}
+          spaceName={space ?? null}
+          now={now}
+          transcript={data.transcript}
+          closeHref={`#/swarm/${peeked.root.space_id !== null ? encodeURIComponent(peeked.root.space_id) : "all"}`}
+          openRootHref={peeked.root.live ? `#/chat/${peeked.root.agent_id ?? ""}` : undefined}
+        />
+      </div>
+    );
+  }
+
   // An open chat is a full screen with no tab bar, as on the board.
-  const chat = tab === "chat" && chatId ? agents.find((a) => a.id === chatId) : undefined;
-  if (chat) {
-    const demo = chats[chat.id];
+  const chatList = data ? selectBasic(data.host) : agents;
+  const chatAgent = tab === "chat" && route[1] ? chatList.find((a) => a.id === decode(route[1] ?? "")) : undefined;
+  if (chatAgent) {
+    const demo = data ? undefined : chats[chatAgent.id];
     return (
       <div className="hd ph">
         <Chat
-          agent={demo?.agent ?? { name: chat.name, folder: chat.tab, harness: chat.harness, status: chat.status }}
+          agent={demo?.agent ?? { name: chatAgent.name, folder: chatAgent.tab, harness: chatAgent.harness, status: chatAgent.status }}
           topic={demo?.topic}
           question={demo?.question}
         />
@@ -91,28 +157,60 @@ export function App({ connection, tabBadges = badges }: AppProps) {
     );
   }
 
+  let screen: ReactNode;
+  if (tab === "chat") {
+    screen = <ChatPicker agents={chatList} />;
+  } else if (tab === "agents") {
+    screen =
+      data && rich ? (
+        <AgentsRich view={selectAgents(data.host, topic, data.spaceExtra)} />
+      ) : data ? (
+        <AgentsBasic host={host} spaces={selectSpaces(data.host)} agents={selectBasic(data.host)} />
+      ) : (
+        <AgentsBasic host={host} spaces={spaces} agents={agents} />
+      );
+  } else if (tab === "swarm" && data && rich) {
+    const seg = route[1] ? decode(route[1]) : null;
+    const wanted = seg === "all" ? null : seg && seg !== "peek" ? seg : (data.host.focused.space_id ?? null);
+    const scope = swarmScope(data.host, topic, wanted);
+    const ui = swarmUi ?? { open: Object.fromEntries(scope.roots.map((r) => [r.key, true])), sel: null };
+    const notice = topic.aged
+      ? "The feed is more than 15 s old, so agents aren't matched to spaces. Showing the last collection."
+      : topic.error
+        ? `The feed can't be read (${topic.error}). Showing the last good collection.`
+        : undefined;
+    screen = <Swarm scope={scope} ui={ui} onUi={setSwarmUi} now={now} transcript={data.transcript !== undefined} notice={notice} />;
+  } else if (tab === "swarm") {
+    screen = <SwarmUnavailable host={host} error={topic?.error ?? null} plugins={plugins} />;
+  } else if (tab === "usage") {
+    screen = (
+      <UsageTab
+        host={host}
+        state={scenario.state}
+        topic={usageTopic}
+        plugins={plugins.map((p) => (p.name === "agent-usage" ? { ...p, state: scenario.state } : p))}
+        installCommand={usageInstallCommand}
+        now={scenario.fixedNow ? demoUsageNow : undefined}
+        onFilter={(f) => setUsageFilter((m) => ({ ...m, [scenario.name]: f }))}
+        onRefresh={() => undefined}
+      />
+    );
+  } else {
+    screen = <Soon title={TABS.find((t) => t.id === tab)?.label ?? ""} />;
+  }
+
   return (
     <div className="hd ph">
       <Banner connection={conn} />
-      {tab === "chat" ? (
-        <ChatPicker agents={agents} />
-      ) : tab === "agents" ? (
-        <AgentsBasic host={host} spaces={spaces} agents={agents} />
-      ) : tab === "usage" ? (
-        <UsageTab
-          host={host}
-          state={scenario.state}
-          topic={usageTopic}
-          plugins={plugins.map((p) => (p.name === "agent-usage" ? { ...p, state: scenario.state } : p))}
-          installCommand={usageInstallCommand}
-          now={scenario.fixedNow ? demoUsageNow : undefined}
-          onFilter={(f) => setUsageFilter((m) => ({ ...m, [scenario.name]: f }))}
-          onRefresh={() => undefined}
-        />
-      ) : (
-        <Soon title={TABS.find((t) => t.id === tab)?.label ?? ""} />
-      )}
+      {screen}
       <TabBar active={tab} badges={tabBadges} onSelect={select} />
     </div>
   );
+}
+
+function findNode(topic: bridgeApi.PanoramaTopic, uid: string) {
+  for (const root of topic.roots) {
+    for (const node of root.agents) if (nodeUid(root, node.id) === uid) return { root, node };
+  }
+  return null;
 }

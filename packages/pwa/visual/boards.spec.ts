@@ -2,20 +2,24 @@ import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 
-const BOARDS = [
-  { ref: "PhoneAgentsBasic", hash: "#/agents" },
-  { ref: "PhoneUsage", hash: "#/usage" },
-  { ref: "PhoneMissing", hash: "#/usage/missing" },
-  // A chat is full screen: no tab bar. Its footer slot (S16's key bar and composer) is masked.
-  { ref: "PhoneChat", hash: "#/chat/a-1", tabbar: false },
-] as const;
+/** `fixture` selects the fake data behind the screen (main.tsx); `nav: false` is a full-screen sheet with no tab bar. */
+const BOARDS: readonly { ref: string; url: string; nav?: boolean }[] = [
+  { ref: "PhoneAgentsBasic", url: "/#/agents" },
+  { ref: "PhoneUsage", url: "/#/usage" },
+  { ref: "PhoneMissing", url: "/#/usage/missing" },
+  { ref: "PhoneAgents", url: "/?fixture=agents#/agents" },
+  { ref: "PhoneSwarm", url: "/?fixture=swarm#/swarm/sp-1" },
+  { ref: "PhonePeek", url: "/?fixture=peek#/swarm/peek/t2%00a9f8e7d6", nav: false },
+  // Chat's terminal text, spinner, tile and footer slot (S16's key bar and composer) are masked in the page.
+  { ref: "PhoneChat", url: "/#/chat/a-1", nav: false },
+];
 
 for (const board of BOARDS) {
   test(`${board.ref} matches the design render`, async ({ page }, info) => {
-    await page.goto(`/${board.hash}`);
+    const nav = board.nav !== false;
+    await page.goto(board.url);
     await page.evaluate(() => document.fonts.ready);
-    const tabbar = !("tabbar" in board) || board.tabbar;
-    await page.waitForSelector(tabbar ? ".tabbar" : ".chat-head");
+    await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek], .chat-head");
     const masks: Rect[] = await page.$$eval("[data-vis-mask]", (els) =>
       els.map((e) => {
         const r = e.getBoundingClientRect();
@@ -40,7 +44,7 @@ for (const board of BOARDS) {
       inter: document.fonts.check('14px "Inter"'),
     }));
     expect(layout.overflowX).toBeLessThanOrEqual(0);
-    if (tabbar) expect(layout.tabBarBottom).toBe(layout.innerHeight);
+    if (nav) expect(layout.tabBarBottom).toBe(layout.innerHeight);
     expect(layout.inter).toBe(true);
   });
 }

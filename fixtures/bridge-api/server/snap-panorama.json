@@ -1,0 +1,76 @@
+{
+  "type": "snap",
+  "topic": "panorama",
+  "epoch": "epoch-1",
+  "seq": 1,
+  "data": {
+    "mode": "rich",
+    "stale": false,
+    "aged": false,
+    "error": null,
+    "collected_at": 1800000000.0,
+    "roots": [
+      {
+        "key": "[\"root\",\"herdr-core\",\"t1\"]",
+        "agent_id": "agent-1",
+        "space_id": "space-1",
+        "terminal": "t1",
+        "live": true,
+        "shadowed": false,
+        "harness": "claude",
+        "title": "Agent 1",
+        "tab_no": null,
+        "status": "run",
+        "inbox": [
+          3
+        ],
+        "hidden_finished": 0,
+        "last_activity": null,
+        "agents": [
+          {
+            "id": "n1",
+            "parent": null,
+            "harness": "claude",
+            "title": "Title n1",
+            "role": "Explore",
+            "model": "opus",
+            "status": "run",
+            "activity": "working",
+            "last_message": "",
+            "pending": [],
+            "question_ids": [],
+            "error": null,
+            "tool_calls": 1,
+            "started": 1800000000.0,
+            "ended": null,
+            "last_at": 1800000100.0,
+            "seq": 0
+          },
+          {
+            "id": "n2",
+            "parent": "n1",
+            "harness": "claude",
+            "title": "Title n1",
+            "role": "Explore",
+            "model": "opus",
+            "status": "blk",
+            "activity": "working",
+            "last_message": "",
+            "pending": [
+              "needs permission"
+            ],
+            "question_ids": [
+              3
+            ],
+            "error": null,
+            "tool_calls": 1,
+            "started": 1800000000.0,
+            "ended": null,
+            "last_at": 1800000100.0,
+            "seq": 0
+          }
+        ]
+      }
+    ]
+  }
+}
