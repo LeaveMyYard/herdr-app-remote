@@ -1,0 +1,48 @@
+{
+  "step": 4,
+  "steps": [
+    {
+      "id": "installed",
+      "state": "done",
+      "title": "Tailscale installed",
+      "detail": "Found tailscale 1.76.1 on this computer"
+    },
+    {
+      "id": "signed_in",
+      "state": "done",
+      "title": "Signed in to a tailnet",
+      "detail": "example-tailnet · this computer is desk-1"
+    },
+    {
+      "id": "https",
+      "state": "done",
+      "title": "HTTPS on the tailnet",
+      "detail": "Needed for the Home Screen app and push"
+    },
+    {
+      "id": "serving",
+      "state": "current",
+      "title": "Share herdr on the tailnet",
+      "detail": "Runs tailscale serve for the bridge. Only devices on your tailnet can reach it.",
+      "problem": {
+        "code": "serve_disabled",
+        "message": "x",
+        "url": "https://evil.example/enable"
+      }
+    },
+    {
+      "id": "phone",
+      "state": "todo",
+      "title": "Add your phone",
+      "detail": "Install Tailscale on the phone and sign in to the same tailnet, then scan the QR code."
+    }
+  ],
+  "serving": "off",
+  "port": 8443,
+  "url": null,
+  "login": null,
+  "can_start": false,
+  "can_stop": false,
+  "busy": false,
+  "checked_at": 1762862400000
+}

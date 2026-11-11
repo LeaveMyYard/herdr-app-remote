@@ -48,17 +48,34 @@ cp "$here/sidecar.mjs" "$here/inner.sh" "$here/lib.sh" "$rig/bin/"
 repo=$(cd "$here/.." && pwd -P)
 mkdir -p "$rig/home/.config/herdr-app/mods/herdr-app-remote"
 cp "$repo"/mod/herdr-app-remote/*.js "$repo"/mod/herdr-app-remote/*.svg "$repo"/mod/herdr-app-remote/mod.json "$rig/home/.config/herdr-app/mods/herdr-app-remote/"
-cp "$here/link-harness.mjs" "$here/inbox-harness.mjs" "$here/panel-harness.mjs" "$rig/bin/"
+cp "$here/link-harness.mjs" "$here/inbox-harness.mjs" "$here/panel-harness.mjs" "$here/pairing-harness.mjs" "$here/serve-standin.mjs" "$here/phone.mjs" "$rig/bin/"
+# `tailscale` inside the rig is always the fake CLI (it replays recorded outputs and keeps its serve config in
+# $rig/ts); the real one is never reachable: tailscaled's socket dir is hidden below and the fake comes first.
+mkdir -p "$rig/fakebin" "$rig/ts" "$rig/bin/tailscale-fixtures"
+cp "$repo/packages/bridge/test/fake-tailscale.mjs" "$rig/bin/"
+cp "$repo"/packages/bridge/test/fixtures/tailscale/* "$rig/bin/tailscale-fixtures/"
+printf '{}\n' > "$rig/ts/serve.json"
+: > "$rig/ts/calls.log"
+cat > "$rig/fakebin/tailscale" <<'EOT'
+#!/bin/sh
+FAKE_TS_FIXTURES=/mnt/r/bin/tailscale-fixtures exec node /mnt/r/bin/fake-tailscale.mjs /mnt/r/ts "$@"
+EOT
+chmod +x "$rig/fakebin/tailscale"
+ts_hide=""
+for d in /run/tailscale /var/run/tailscale; do
+  [ -d "$d" ] && [ ! -L "$d" ] && ts_hide="$ts_hide --tmpfs $d"
+done
 cp "$here/scenarios/$scenario.sh" "$rig/scenarios/"
 echo "rig: $rig"
 rc=0
 bwrap --dev-bind / / \
   --tmpfs /run/user \
   --tmpfs "$HOME/.config/herdr-app" \
+  $ts_hide \
   --bind "$rig" "$rig" \
   --tmpfs /mnt --bind "$rig" /mnt/r \
   --unshare-pid --proc /proc --unshare-net --die-with-parent --new-session \
-  env -i PATH="$PATH" TERM=xterm-256color LANG="${LANG:-C.UTF-8}" \
+  env -i PATH="/mnt/r/fakebin:$PATH" TERM=xterm-256color LANG="${LANG:-C.UTF-8}" \
     RIG=/mnt/r REPO="$repo" SECS="$secs" SCENARIO="$scenario" \
     HOME=/mnt/r/home XDG_CONFIG_HOME=/mnt/r/home/.config XDG_STATE_HOME=/mnt/r/home/.local/state \
     XDG_RUNTIME_DIR=/mnt/r/run HERDR_APP_HOME=/mnt/r/home/.config/herdr-app \

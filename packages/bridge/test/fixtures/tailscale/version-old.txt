@@ -1,0 +1,3 @@
+1.50.1
+  tailscale commit: 0123456789abcdef0123456789abcdef01234567
+  go version: go1.21.1

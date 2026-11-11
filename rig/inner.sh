@@ -12,6 +12,12 @@ run_user=${RIG_RUN_USER:-/run/user}
 case "${HERDR_APP_HOME:-}" in "$RIG"/*) ;; *) say "ABORT: app home is not inside the rig"; exit 1;; esac
 case "${HOME:-}" in "$RIG"/*) ;; *) say "ABORT: HOME is not inside the rig"; exit 1;; esac
 [ -n "${HC_SESSION:-}" ] || { say "ABORT: HC_SESSION unset"; exit 1; }
+# The real tailscaled must be out of reach, and `tailscale` must be the rig's fake.
+# RIG_TS_DIRS is only for the guard tests (they point it at an empty dir); run.sh never sets it.
+for d in ${RIG_TS_DIRS:-/run/tailscale /var/run/tailscale}; do
+  [ -z "$(ls -A "$d" 2>/dev/null)" ] || { say "ABORT: tailscaled's socket dir is visible ($d)"; exit 1; }
+done
+[ "$(command -v tailscale)" = "$RIG/fakebin/tailscale" ] || { say "ABORT: tailscale is not the rig's fake"; exit 1; }
 
 hc_sock=$(hc server status 2>&1 | grep -oE '/[^ ]*\.sock' | head -1)
 [ -n "$hc_sock" ] || hc_sock="$XDG_RUNTIME_DIR/herdr-core/$HC_SESSION.sock"

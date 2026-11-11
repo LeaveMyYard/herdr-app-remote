@@ -553,6 +553,95 @@ export const Welcome = z.object({
   epoch: z.string().min(1),
 });
 
+// ---- setup topic (S14): the desktop's Tailscale setup checks and serve state ----
+
+/** The five setup steps, in order (DesktopSetup board). */
+export const SETUP_STEPS = ["installed", "signed_in", "https", "serving", "phone"] as const;
+export const SetupStepId = z.enum(SETUP_STEPS);
+export type SetupStepId = z.infer<typeof SetupStepId>;
+
+/** `done`, the first step not done is `current`, the ones after it are `todo`. */
+export const SetupStepState = z.enum(["done", "current", "todo"]);
+
+/**
+ * Why a step is not done. `message` is a fixed sentence (never CLI output). `fix` is a command the
+ * person runs themselves (the bridge never runs it); `url` is a Tailscale admin page.
+ */
+export const SETUP_PROBLEMS = [
+  "not_installed",
+  "too_old",
+  "daemon_down",
+  "needs_login",
+  "stopped",
+  "tagged",
+  "magicdns_off",
+  "https_off",
+  "port_taken",
+  "funnel_on",
+  "operator",
+  "serve_disabled",
+  "not_ours",
+  "failed",
+  "unknown",
+  "no_device",
+] as const;
+export const SetupProblemCode = z.enum(SETUP_PROBLEMS);
+export type SetupProblemCode = z.infer<typeof SetupProblemCode>;
+
+export const SetupProblem = z
+  .object({
+    code: SetupProblemCode,
+    message: z.string().min(1).max(300),
+    fix: z.string().min(1).max(200).optional(),
+    url: z.string().startsWith("https://login.tailscale.com/").max(300).optional(),
+  })
+  .strict();
+export type SetupProblem = z.infer<typeof SetupProblem>;
+
+export const SetupStep = z
+  .object({
+    id: SetupStepId,
+    state: SetupStepState,
+    title: z.string().min(1),
+    detail: z.string(),
+    problem: SetupProblem.optional(),
+  })
+  .strict();
+export type SetupStep = z.infer<typeof SetupStep>;
+
+/**
+ * How the serve port is configured:
+ * - `ours`: our handler, created by this bridge (it may remove it);
+ * - `identical`: exactly our handler, but not created by us (used, never removed);
+ * - `off`: nothing on the port;
+ * - `foreign`: something else is on the port (never changed);
+ * - `funnel`: Funnel is on for the port (never served);
+ * - `unknown`: tailscale could not tell.
+ */
+export const SetupServing = z.enum(["ours", "identical", "off", "foreign", "funnel", "unknown"]);
+export type SetupServing = z.infer<typeof SetupServing>;
+
+export const SetupTopic = z
+  .object({
+    /** 1-based index of the current step; 6 when every step is done. */
+    step: z.number().int().min(1).max(6),
+    steps: z.array(SetupStep).length(5),
+    serving: SetupServing,
+    /** The HTTPS port `tailscale serve` uses for the bridge (PLAN §7.8). */
+    port: z.number().int().min(1).max(65535),
+    /** The tailnet URL of the PWA, once served. */
+    url: z.string().startsWith("https://").nullable(),
+    /** The owner login the bridge requires (`Tailscale-User-Login`), once served. */
+    login: z.string().nullable(),
+    can_start: z.boolean(),
+    can_stop: z.boolean(),
+    /** A start, stop or check is running. */
+    busy: z.boolean(),
+    checked_at: z.number().int().nullable(),
+  })
+  .strict();
+export type SetupTopic = z.infer<typeof SetupTopic>;
+
 /** Payload schemas defined so far; other topics stay open until their slices define them. */
 const TOPIC_PAYLOADS: Partial<Record<string, z.ZodTypeAny>> = {
   host: HostState,
@@ -561,6 +650,7 @@ const TOPIC_PAYLOADS: Partial<Record<string, z.ZodTypeAny>> = {
   usage: UsageTopic,
 
   inbox: InboxTopic,
+  setup: SetupTopic,
 };
 
 export const Snap = z
@@ -651,3 +741,4 @@ export type Patch = z.infer<typeof Patch>;
 export type Stale = z.infer<typeof Stale>;
 export type Res = z.infer<typeof Res>;
 export type Event = z.infer<typeof Event>;
+

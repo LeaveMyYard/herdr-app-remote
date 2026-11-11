@@ -3,6 +3,10 @@ import { bridgeApi } from "@herdr-remote/protocol";
 import { applyPatch, type Json } from "../src/patch.js";
 import { toRes } from "../src/hub.js";
 import { HOST, fixture, join, newHub } from "./helpers.js";
+import { readFileSync } from "node:fs";
+
+const setupFixture = (name: string): Json =>
+  JSON.parse(readFileSync(new URL(`../../../fixtures/bridge-api/setup/${name}.json`, import.meta.url), "utf8")) as Json;
 
 describe("hub snap/patch", () => {
   it("welcomes, snaps on sub, then patches with seq + 1", async () => {
@@ -129,8 +133,8 @@ describe("hub snap/patch", () => {
     const { client, send } = await join(hub);
     await send({ type: "sub", topics: ["host", "setup"] });
     hub.publish("host", fixture("idle-and-done"));
-    hub.publish("setup", { q: 1 });
-    hub.publish("setup", { q: 2 });
+    hub.publish("setup", setupFixture("ready-to-serve"));
+    hub.publish("setup", setupFixture("served"));
     hub.setStale("setup", "source_unavailable");
     await send({ type: "ping" });
     await send({ type: "act", id: "a1", kind: "x", args: {} });
