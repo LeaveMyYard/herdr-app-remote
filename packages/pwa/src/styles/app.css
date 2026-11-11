@@ -1,0 +1,109 @@
+/* App shell and the two S6 screens. Values follow design/PhoneAgentsBasic and design/PhoneMissing;
+   colours come from the generated tokens (tokens.generated.css). */
+*{box-sizing:border-box}
+:root{
+  /* Safe areas. In a browser tab (and the visual harness) the design's fixed insets apply;
+     installed to the Home Screen, the device's own insets do. */
+  --sat:50px;
+  --sab:30px;
+}
+@media (display-mode: standalone){
+  :root{
+    --sat:max(env(safe-area-inset-top),20px);
+    --sab:max(env(safe-area-inset-bottom),8px);
+  }
+}
+html,body{margin:0;height:100%;background:var(--t-chrome);overscroll-behavior:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+#root{height:100%}
+.hd{font-family:Inter,system-ui,sans-serif;font-optical-sizing:none /* the boards use the text cut at every size */;color:var(--t-foreground);-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01" 0;-webkit-tap-highlight-color:transparent}
+.hd a{color:inherit;text-decoration:none}
+.hd button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0;margin:0}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.row{display:flex;align-items:center;min-width:0}
+.col{display:flex;flex-direction:column;min-width:0}
+.f1{flex:1;min-width:0}
+.nf{flex:none}
+.tr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes hd-spin{to{transform:rotate(360deg)}}
+.spin{animation:hd-spin .9s linear infinite}
+@media (prefers-reduced-motion: reduce){.spin{animation-duration:3s}}
+
+.ph{position:relative;width:100%;height:100dvh;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
+.screen{min-height:0;overflow:hidden auto}
+.app-header{padding:var(--sat) 8px 0 16px;gap:8px;height:calc(var(--sat) + 44px)}
+.app-logo{width:24px;height:24px;border-radius:6px}
+.app-title{font-size:17px;font-weight:600}
+.icon-btn{width:44px;height:44px;justify-content:center;color:var(--t-muted)}
+
+/* The desktop sidebar proportions, scaled up for a phone. */
+.z{zoom:1.2;width:100%}
+.sblock{background:var(--t-chrome);font-size:13px}
+.section-head{height:31px;padding:0 10px 0 16px;justify-content:space-between;font-size:11.5px;color:var(--t-dim)}
+.plus-btn{width:26px;height:26px;justify-content:center;border-radius:6px;color:var(--t-dim)}
+.space-list{padding:0 8px 14px;gap:4px}
+.srow{height:37px;padding:0 8px;display:flex;flex-direction:column;justify-content:center;border-radius:8px;flex:none}
+.srow[data-selected]{background:var(--t-selected)}
+.space-line{gap:9px}
+.space-avatar{display:flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;border-radius:5px;font-size:10.5px;font-weight:700;color:#fff}
+.space-name{flex-shrink:0;max-width:150px;color:var(--t-foreground);font-size:13px}
+.space-meta{gap:5px;justify-content:flex-end;font-size:11.5px;color:var(--t-dim)}
+.behind{color:var(--t-ansi1)}
+.agents-block{border-top:1px solid var(--t-border)}
+.agents-head{height:41px;padding:14px 16px 5px;gap:6px}
+.agents-label{font-size:11.5px;font-weight:500;color:var(--t-dim)}
+.agents-scope{font-size:11px;color:var(--t-foreground)}
+.agents-list{padding:0 8px}
+.group-head{height:30px;padding:0 8px;gap:6px;font-size:11px;font-weight:500;color:var(--t-dim)}
+.arow{height:37px;padding:0 8px;display:flex;align-items:center;border-radius:8px;font-size:12.5px}
+.arow:active{background:var(--t-hover)}
+.arow-icon{margin-right:8px;display:flex}
+.arow-icon img{width:14px;height:14px}
+.arow-name{gap:5px}
+.arow-title{max-width:150px;color:var(--t-foreground)}
+.arow-tab{color:var(--t-dim)}
+.arow-age{margin-right:8px;font-size:11px;color:var(--t-dim)}
+.needs-pill{display:flex;align-items:center;flex:none;height:18px;padding:0 6px;border-radius:5px;background:#f0705f26;font-size:10.5px;font-weight:600;color:var(--t-blocked)}
+.work-spinner{display:inline-block;flex:none;width:12px;height:12px;background:var(--spinner-working) center/contain no-repeat;margin:0 1px}
+.dot{flex:none;width:7px;height:7px;margin:0 3px;border-radius:4px}
+.dot-done{background:var(--t-done)}
+.dot-idle{background:var(--t-idle)}
+.hint-card{margin:14px 8px 0;padding:10px 12px;gap:3px;border-radius:8px;border:1px dashed var(--t-input)}
+.hint-title{font-size:12.5px}
+.hint-body{font-size:11.5px;color:var(--t-muted)}
+
+/* Missing-plugin screen */
+.status-spacer{height:calc(var(--sat) - 6px)}
+.screen-title{height:50px;padding:0 14px;border-bottom:1px solid var(--t-border);font-weight:600}
+.missing{min-height:0;padding:24px;align-items:center;justify-content:center;gap:14px;text-align:center}
+.missing-icon{width:64px;height:64px;justify-content:center;border-radius:14px;background:var(--t-background);border:1px solid var(--t-border);color:var(--t-muted)}
+.missing-head{margin:0;font-size:17px;font-weight:600;line-height:1.4}
+.missing-body{margin:0;font-size:14px;color:var(--t-muted);line-height:1.5;max-width:300px}
+.cmd-block{width:100%;gap:6px;text-align:left}
+.cmd-label{font-size:12px;color:var(--t-dim)}
+.cmd-row{gap:8px;padding:6px 6px 6px 12px;border-radius:9px;background:var(--t-background);border:1px solid var(--t-border)}
+.cmd-text{font-size:12px;overflow-wrap:anywhere}
+.hd .cmd-copy{height:44px;padding:0 14px;border-radius:7px;background:var(--t-raised);font-size:13px}
+.missing-foot{margin:0;font-size:12.5px;color:var(--t-dim)}
+.plugin-card{margin:0 16px 10px;padding:12px 14px;gap:8px;border-radius:10px;background:var(--t-background);border:1px solid var(--t-border)}
+.plugin-card-head{font-size:11.5px;color:var(--t-dim)}
+.plugin-row{gap:8px;font-size:13px}
+.plugin-dot{width:7px;height:7px;border-radius:4px;background:var(--t-dim)}
+.plugin-state{font-size:12px;color:var(--t-dim)}
+.plugin-row[data-state=ready] .plugin-dot{background:var(--t-ansi2)}
+.plugin-row[data-state=ready] .plugin-state{color:var(--t-ansi2)}
+.plugin-row[data-state=outdated] .plugin-state{color:var(--t-working)}
+.plugin-row[data-state=outdated] .plugin-dot{background:var(--t-working)}
+.plugin-row[data-state=error] .plugin-state{color:var(--t-blocked)}
+.plugin-row[data-state=error] .plugin-dot{background:var(--t-blocked)}
+
+/* Tab bar */
+.tabbar{display:flex;align-items:center;flex:none;padding:8px 8px var(--sab);background:var(--t-chrome);border-top:1px solid var(--t-border)}
+.hd .tab{display:flex;flex-direction:column;flex:1;min-width:0;height:50px;align-items:center;justify-content:center;gap:3px;font-size:11px;color:var(--t-muted);position:relative}
+.hd .tab[data-active=true]{color:var(--t-foreground)}
+.tab-badge{display:flex;align-items:center;position:absolute;top:3px;left:54%;min-width:18px;height:18px;padding:0 4px;border-radius:5px;justify-content:center;background:var(--fill);border:1px solid var(--hb);color:var(--ink);font-size:11px;font-weight:700;line-height:1}
+
+/* Connection and stale banner, floating above the tab bar so screens keep their layout */
+.banner{position:absolute;left:8px;right:8px;bottom:calc(59px + var(--sab) + 8px);z-index:2;display:flex;align-items:center;gap:8px;min-height:36px;padding:8px 12px;border-radius:8px;background:var(--cf);border:1px solid var(--cb);color:var(--hue);font-size:12.5px}
+.banner-dot{flex:none;width:7px;height:7px;border-radius:4px;background:var(--hue)}
+.banner[data-status=connecting] .banner-dot{animation:hd-breathe 1.6s ease-in-out infinite}
+@keyframes hd-breathe{0%,100%{opacity:.7}50%{opacity:1}}

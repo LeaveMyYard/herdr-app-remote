@@ -22,3 +22,22 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm -r test
+
+  visual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @herdr-remote/pwa exec playwright install --with-deps chromium webkit
+      - run: pnpm --filter @herdr-remote/pwa visual
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: visual-diffs
+          path: packages/pwa/test-results
+          retention-days: 7
