@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { bridgeApi } from "@herdr-remote/protocol";
 import { createBridgeServer, type BridgeServer } from "../src/server.js";
@@ -493,6 +493,30 @@ describe("pairing", () => {
     expect(activity()).toContain("Phone 1: pairing request expired");
   });
 
+  it("a pending cookie stops working at the pending deadline, before any sweep", async () => {
+    await start();
+    const r = await pair(sec.issueCode().code);
+    const cookie = cookieOf(r);
+    expect((await http("GET", "/api/v1/me", { ...OK_GET, Cookie: cookie })).status).toBe(200);
+    clock += PENDING_TTL_MS - 1;
+    expect((await http("GET", "/api/v1/me", { ...OK_GET, Cookie: cookie })).status).toBe(200);
+    clock += 1;
+    expect((await http("GET", "/api/v1/me", { ...OK_GET, Cookie: cookie })).status).toBe(401);
+  });
+
+  it("long emoji names are cut by code point and still load after a restart", async () => {
+    await start();
+    const r = await pair(sec.issueCode().code, OK_POST, "\u{1F600}".repeat(40));
+    const name = (JSON.parse(r.body) as { device: { name: string } }).device.name;
+    expect([...name]).toHaveLength(32);
+    expect(name).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    const r2 = await pair(sec.issueCode().code, OK_POST, "\u{1F600}".repeat(40));
+    expect([...(JSON.parse(r2.body) as { device: { name: string } }).device.name]).toHaveLength(32);
+    await srv.close();
+    await start();
+    expect(sec.devices()).toHaveLength(2);
+  });
+
   it("default names count up, and rejecting a pending device removes it", async () => {
     await start();
     const a = await pair(sec.issueCode().code);
@@ -612,6 +636,48 @@ describe("capabilities", () => {
     expect(await sec.act(client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
     expect(closes).toEqual([CLOSE_REVOKED]);
     expect(acts).toHaveLength(1);
+  });
+
+  it("a dropped client can't act while its close is pending, and is terminated soon after", async () => {
+    await start();
+    const { id } = await pairedDevice();
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const mk = () => {
+        const c = { closes: [] as number[], terminated: 0 };
+        const client = {
+          principal: { deviceId: id },
+          send: () => undefined,
+          close: (code: number) => void c.closes.push(code),
+          terminate: () => void (c.terminated += 1),
+        };
+        return { c, client };
+      };
+      // A peer that ignores the close frame keeps a readable socket: view off must still stop it.
+      const a = mk();
+      sec.onConnect(a.client);
+      sec.setCap(id, "view", false);
+      expect(a.c.closes).toEqual([CLOSE_NO_VIEW]);
+      expect(await sec.act(a.client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
+      expect(a.c.terminated).toBe(0);
+      vi.advanceTimersByTime(1000);
+      expect(a.c.terminated).toBe(1);
+      sec.setCap(id, "view", true);
+
+      // Same login, new serve host: the old socket is dropped and can't act either.
+      const b = mk();
+      sec.onConnect(b.client);
+      sec.setServe({ host: "desk-2.example-tailnet.ts.net", login: OWNER });
+      expect(b.c.closes).toEqual([CLOSE_REVOKED]);
+      expect(await sec.act(b.client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: false, code: "unpaired" });
+      // A fresh connection of the same device is fine.
+      const c = mk();
+      sec.onConnect(c.client);
+      expect(await sec.act(c.client, "inbox.ack", { id: "A1" })).toMatchObject({ ok: true });
+      expect(acts).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("an act from a device of a previous owner login, or still pending, is refused", async () => {

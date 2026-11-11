@@ -123,7 +123,7 @@ Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plug
 
 The device is re-checked before every `act`, so a revoke or pause refuses the next one. An `act` that is already running when it lands still completes.
 
-WebSocket close codes: `4001` the device was revoked (or the serve name or owner login changed), `4002` remote access was paused, `4003` `view` was turned off. A client that gets one of these should not reconnect on its own.
+WebSocket close codes: `4001` the device was revoked (or the serve name or owner login changed), `4002` remote access was paused, `4003` `view` was turned off. A client that gets one of these should not reconnect on its own. From the moment the bridge sends the close, that connection's `act`s are refused. The transport is terminated 1 s later, whether or not the peer answered the close.
 
 ### Plugin states
 

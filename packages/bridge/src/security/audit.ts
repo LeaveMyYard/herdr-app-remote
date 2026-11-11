@@ -32,7 +32,9 @@ const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u206
 /** Makes a short label safe to log: no control characters, collapsed spaces, capped length. */
 export function cleanLabel(s: string, max = 40): string {
   const t = s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+  const chars = [...t];
+  // Cut by code point, so an emoji is never split into a lone surrogate.
+  return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : t;
 }
 
 /** An identifier (question id, terminal id, tab id) only if it looks like one; never free text. */

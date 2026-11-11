@@ -23,6 +23,8 @@ export interface HubClient {
   send(msg: ServerMessage): void;
   /** Closes the connection. */
   close(code: number, reason: string): void;
+  /** Drops the transport at once, without waiting for the peer's close handshake. */
+  terminate?(): void;
 }
 
 export interface ActResult {

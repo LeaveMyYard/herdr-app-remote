@@ -171,6 +171,9 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
       close(code, reason) {
         ws.close(code, reason);
       },
+      terminate() {
+        ws.terminate();
+      },
     };
     const conn = hub.connect(client);
     // Frames are handled strictly in order, so `act` results can't overtake a later `sub`.

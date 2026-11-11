@@ -20,7 +20,8 @@ const CapsSchema = z
 const DeviceSchema = z
   .object({
     id: z.string().regex(/^d-[0-9a-f]{16}$/),
-    name: z.string().min(1).max(32),
+    /** At most 32 code points (the limit `cleanLabel` applies). */
+    name: z.string().min(1).refine((s) => [...s].length <= 32, "name longer than 32 characters"),
     /** The `Tailscale-User-Login` that paired it. */
     login: z.string().min(1),
     /** sha256 (hex) of the device token. The token itself is never stored. */
@@ -54,11 +55,13 @@ export function newDeviceId(): string {
  */
 export class DeviceStore {
   private readonly file: string;
+  private readonly dir: string;
   private data: DevicesFile;
 
   constructor(dir: string) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(dir, 0o700);
+    this.dir = dir;
     this.file = join(dir, DEVICES_FILE);
     if (existsSync(this.file)) {
       chmodSync(this.file, 0o600);
@@ -140,6 +143,13 @@ export class DeviceStore {
     }
     closeSync(fd);
     renameSync(tmp, this.file);
+    // Make the rename itself durable, so a crash can't bring back a revoked device.
+    const dfd = openSync(this.dir, "r");
+    try {
+      fsyncSync(dfd);
+    } finally {
+      closeSync(dfd);
+    }
   }
 }
 

@@ -63,6 +63,8 @@ const BODY_LIMIT = 1024;
 export const CLOSE_REVOKED = 4001;
 export const CLOSE_PAUSED = 4002;
 export const CLOSE_NO_VIEW = 4003;
+/** How long a dropped client gets to finish the close handshake before it is terminated. */
+const KICK_GRACE_MS = 1000;
 
 const CODE_RE = /^[A-Za-z0-9_-]{22}$/;
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -100,6 +102,12 @@ export class Security {
   private code: { hash: Buffer; expires: number } | null = null;
   private pairFailures: number[] = [];
   private readonly live = new Map<string, Set<HubClient>>();
+  /**
+   * Clients the bridge has dropped. A graceful close leaves the socket readable until the
+   * peer answers (or the close times out), so `act` refuses these outright, and the
+   * transport is terminated shortly after.
+   */
+  private readonly dropped = new WeakSet<HubClient>();
 
   constructor(opts: SecurityOptions) {
     this.store = new DeviceStore(opts.dataDir);
@@ -129,7 +137,17 @@ export class Security {
   }
 
   private closeAll(code: number, reason: string): void {
-    for (const set of this.live.values()) for (const c of [...set]) c.close(code, reason);
+    for (const set of this.live.values()) for (const c of [...set]) this.kick(c, code, reason);
+  }
+
+  /** Closes a client for a security reason: refused from now on, terminated soon. */
+  private kick(c: HubClient, code: number, reason: string): void {
+    this.dropped.add(c);
+    c.close(code, reason);
+    if (c.terminate) {
+      const t = setTimeout(() => c.terminate?.(), KICK_GRACE_MS);
+      t.unref();
+    }
   }
 
   get paused(): boolean {
@@ -299,7 +317,7 @@ export class Security {
     for (let n = 2; ; n++) {
       const suffix = ` (${n})`;
       // Stays within the 32-character name the store's schema accepts.
-      const candidate = `${base.slice(0, 32 - suffix.length)}${suffix}`;
+      const candidate = `${[...base].slice(0, 32 - suffix.length).join("")}${suffix}`;
       if (!used.has(candidate)) return candidate;
     }
   }
@@ -423,7 +441,7 @@ export class Security {
   private drop(id: string, code: number, reason: string): void {
     const set = this.live.get(id);
     if (!set) return;
-    for (const c of [...set]) c.close(code, reason);
+    for (const c of [...set]) this.kick(c, code, reason);
   }
 
   // ---- live connections ----
@@ -435,7 +453,7 @@ export class Security {
     // Checked again here: the guard's verdict may be stale if anything async ever runs
     // between it and the upgrade.
     if (id === undefined || !this.mayView(d)) {
-      client.close(this.store.paused ? CLOSE_PAUSED : CLOSE_REVOKED, "not allowed");
+      this.kick(client, this.store.paused ? CLOSE_PAUSED : CLOSE_REVOKED, "not allowed");
       return () => undefined;
     }
     let set = this.live.get(id);
@@ -465,8 +483,10 @@ export class Security {
     if (this.store.paused) return { ok: false, code: "paused" };
     const id = client.principal?.deviceId;
     const d = id !== undefined ? this.store.get(id) : undefined;
-    if (!d || d.state !== "approved" || !this.current(d)) {
-      client.close(CLOSE_REVOKED, "revoked");
+    // The same test as for holding the socket at all (approved, current login, `view`),
+    // plus: a client the bridge already dropped can't act while its close is pending.
+    if (this.dropped.has(client) || !this.mayView(d)) {
+      if (!this.dropped.has(client)) this.kick(client, CLOSE_REVOKED, "revoked");
       return { ok: false, code: "unpaired" };
     }
     let what = describeAct(kind, args);
