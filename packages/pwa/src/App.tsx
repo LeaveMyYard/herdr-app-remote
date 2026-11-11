@@ -149,7 +149,7 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
     return (
       <div className="hd ph">
         <Chat
-          agent={demo?.agent ?? { name: chatAgent.name, folder: chatAgent.tab, harness: chatAgent.harness, status: chatAgent.status }}
+          agent={demo?.agent ?? { name: chatAgent.name, folder: chatAgent.tab, harness: chatAgent.harness === "codex" ? "codex" : "claude", status: chatAgent.status }}
           topic={demo?.topic}
           question={demo?.question}
         />
