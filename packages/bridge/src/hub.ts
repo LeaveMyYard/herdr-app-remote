@@ -10,21 +10,35 @@ const LOG_SIZE = 64;
 /** Subscriptions one connection may hold; the real topic set is small (`chat:<t>` is the open-ended one). */
 const MAX_TOPICS_PER_CONN = 64;
 
+/** Who a connection acts as: set by the request guard at upgrade (S5). */
+export interface Principal {
+  readonly deviceId: string;
+}
+
 /** One connected client, transport-agnostic. */
 export interface HubClient {
+  /** The authenticated device, when the server's guard supplied one. */
+  readonly principal?: Principal;
   /** Sends one server message. Must not throw. */
   send(msg: ServerMessage): void;
   /** Closes the connection. */
   close(code: number, reason: string): void;
+  /** Drops the transport at once, without waiting for the peer's close handshake. */
+  terminate?(): void;
 }
 
 export interface ActResult {
   ok: boolean;
   code?: string;
   unknown_effect?: boolean;
+  /**
+   * The option label the bridge itself resolved for an answer (S11), for the audit log.
+   * Never sent to the client, and never taken from the client's args.
+   */
+  audit_label?: string;
 }
 
-/** Handles an `act`. S5 wraps this with the capability checks and the audit log. */
+/** Handles an `act`. `Security.act` wraps the real handler with capability checks and the audit log. */
 export type ActHandler = (client: HubClient, kind: string, args: Record<string, unknown>) => Promise<ActResult> | ActResult;
 
 interface TopicState {

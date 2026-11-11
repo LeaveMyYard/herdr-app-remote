@@ -3,6 +3,13 @@ import { HostState } from "./host.js";
 
 export const API_VERSION = 1 as const;
 
+/**
+ * The WebSocket subprotocol the client must offer (`new WebSocket(url, [WS_PROTOCOL])`).
+ * Browsers can't add headers to a WS upgrade, so this is the upgrade's CSRF marker in
+ * place of `X-Remote-Api: 1`.
+ */
+export const WS_PROTOCOL = "herdr-remote.v1";
+
 export const PLUGIN_STATES = ["ready", "missing", "too_old", "broken", "stale", "not_running"] as const;
 export const PluginState = z.enum(PLUGIN_STATES);
 export type PluginState = z.infer<typeof PluginState>;
