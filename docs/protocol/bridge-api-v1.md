@@ -17,7 +17,9 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 | Remote access isn't paused | everything | `503 paused` |
 | `Host` is exactly the serve name (sent once) | everything | `403 forbidden` |
 | `Tailscale-User-Login` is exactly the desktop owner's login (sent once) | everything | `403 forbidden` |
-| `Origin` is exactly `https://<serve name>`, and `X-Remote-Api: 1` is present | the WS upgrade and every non-GET request | `403 forbidden` |
+| `Origin` is exactly `https://<serve name>` | the WS upgrade and every non-GET request | `403 forbidden` |
+| `X-Remote-Api: 1` is present | every non-GET request | `403 forbidden` |
+| the client offers the subprotocol `herdr-remote.v1` (`Sec-WebSocket-Protocol`); the bridge echoes it | the WS upgrade | `403 forbidden` |
 | the `__Host-hr-device` cookie names an approved device of the current owner login | the WS upgrade and every non-GET request except `POST /api/v1/pair` | `401 unpaired` |
 | the device has `view` | the WS upgrade | `403 forbidden` |
 
@@ -25,6 +27,7 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 - Tagged devices send no identity headers, so they are refused.
 - Host, identity and Origin failures all answer the same `403 forbidden`, without saying which check failed.
 - GETs have no side effects.
+- **The WS upgrade uses a subprotocol, not a header.** A browser can't add headers to a WebSocket upgrade, so the client opens `new WebSocket(url, ["herdr-remote.v1"])`, and the bridge requires that subprotocol where PLAN §2 first said `X-Remote-Api: 1`. Like the header, a cross-site page can't make a simple request carry it, and the exact `Origin` and the `SameSite=Strict` cookie are required as well.
 
 ### Pairing
 
@@ -32,14 +35,16 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 2. The installed Home Screen app posts `POST /api/v1/pair` with JSON `{code, name?}` (`Content-Type: application/json`, at most 1 KiB).
    - `202 {device}`: the device is now `pending`. The response sets the device cookie: `__Host-hr-device=<256-bit token>; Path=/; Max-Age=34560000; HttpOnly; Secure; SameSite=Strict`. The cookie grants nothing until the desktop approves the device.
    - `403 {error: "bad_code"}`: the code is unknown, expired or already used. Every failure looks the same.
-   - `429 {error: "rate_limited"}` after 10 failed codes within a minute; `429 {error: "too_many_pending"}` while 3 requests are already pending (the code isn't consumed).
+   - `429 {error: "rate_limited"}` after 10 failed codes within a minute; `429 {error: "too_many_pending"}` while 3 requests are already pending (the code isn't consumed). The rate limit is global, not per client. Requests sent at the same moment can exceed it slightly, which doesn't matter against a 128-bit code. A local process that forges the headers can use it to block pairing, but that process could already do worse.
    - `415 json_required`, `413 too_large`, `400 bad_json` for malformed bodies.
-3. The desktop panel and a toast ask "Approve Phone 1?". A request not approved within 10 minutes is dropped.
+3. The desktop panel and a toast ask "Approve Phone 1?". The name the phone sends is only a hint: if it is taken, it gets a suffix ("Phone 1 (2)"). A request not approved within 10 minutes is dropped.
 4. The app polls `GET /api/v1/me` until `device.state` is `approved`, then opens the WebSocket.
+
+PLAN §2 says the phone gets its cookie "on approval". Setting it at pairing time instead is deliberate: the cookie is worthless until approval, and the bridge never has to hold a plaintext token while it waits for the desktop.
 
 `GET /api/v1/me` returns `200 {device: {id, name, login, state, caps, terminal_input_until, created_at, approved_at, last_seen, live}}` for the cookie's device, or `401 {error: "unpaired"}`. `caps` maps each capability to whether it is in effect now.
 
-Only the token's sha256 is stored, in `devices.json` (mode 0600, in a 0700 directory). Devices are revoked and renamed on the desktop only. A revoked device's sockets are closed at once.
+Only the token's sha256 is stored, in `devices.json` (mode 0600, in a 0700 directory). Devices are revoked and renamed on the desktop only. A revoked device's sockets are closed at once, before the change is written to disk, so a failed write can't leave a revoked device streaming. A change of serve name or owner login closes every live socket.
 
 ### Capabilities
 
@@ -57,7 +62,7 @@ There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other 
 
 ### Audit
 
-`activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers, option labels and lengths only, for example "Phone 1 sent 12 chars to t3" or "Phone 1 answered Q119 (Option B)".
+`activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers and lengths only, plus, for an answer, the option label the bridge resolved from its own inbox data. A label sent by the client is never logged. Examples: "Phone 1 sent 12 chars to t3", "Phone 1 answered Q119 (Option B)".
 
 ## WebSocket `/api/v1/ws`
 
@@ -116,7 +121,9 @@ Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plug
 | `paused` | remote access is paused |
 | `internal_error` | the handler threw; always with `unknown_effect: true` |
 
-WebSocket close codes: `4001` the device was revoked, `4002` remote access was paused, `4003` `view` was turned off. A client that gets one of these should not reconnect on its own.
+The device is re-checked before every `act`, so a revoke or pause refuses the next one. An `act` that is already running when it lands still completes.
+
+WebSocket close codes: `4001` the device was revoked (or the serve name or owner login changed), `4002` remote access was paused, `4003` `view` was turned off. A client that gets one of these should not reconnect on its own.
 
 ### Plugin states
 

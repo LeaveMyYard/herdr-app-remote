@@ -61,7 +61,7 @@ export type GuardVerdict =
 
 type Normalized = { allow: true; principal?: Principal } | { allow: false; status: number; reason: string };
 
-function normalize_(v: GuardVerdict): Normalized {
+function toVerdict(v: GuardVerdict): Normalized {
   if (v === true) return { allow: true };
   if (v === false) return { allow: false, status: 403, reason: "forbidden" };
   return v;
@@ -93,7 +93,7 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
   const server = createServer((req, res) => {
     void (async () => {
       try {
-        const v = normalize_(await guard(req, "http"));
+        const v = toVerdict(await guard(req, "http"));
         if (!v.allow) return end(res, v.status, v.reason);
         await route(req, res);
       } catch {
@@ -117,7 +117,12 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
     await serveStatic(staticRoot, path, req, res);
   }
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME });
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: MAX_FRAME,
+    // Echo our subprotocol when offered; the guard decides whether it was required.
+    handleProtocols: (protocols) => (protocols.has(bridgeApi.WS_PROTOCOL) ? bridgeApi.WS_PROTOCOL : false),
+  });
 
   server.on("upgrade", (req, socket, head) => {
     // Node removes its own socket error handler on upgrade; without one, a client reset
@@ -138,7 +143,7 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
       if (path !== "/api/v1/ws") return reject("404 Not Found");
       let v: Normalized;
       try {
-        v = normalize_(await guard(req, "ws"));
+        v = toVerdict(await guard(req, "ws"));
       } catch {
         v = { allow: false, status: 403, reason: "forbidden" };
       }

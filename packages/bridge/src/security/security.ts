@@ -1,11 +1,12 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { bridgeApi } from "@herdr-remote/protocol";
 import type { ActHandler, ActResult, HubClient } from "../hub.js";
 import type { GuardVerdict } from "../server.js";
 import { AuditLog, cleanLabel, describeAct, type AuditEntry, type AuditOptions } from "./audit.js";
 import { ACTION_CAPS, CAPABILITIES, defaultCaps, hasCap, type Capability } from "./caps.js";
 import { DeviceStore, newDeviceId, type Device } from "./devices.js";
-import { readCookie, singleHeader } from "./headers.js";
+import { headerValues, readCookie, singleHeader } from "./headers.js";
 import { qrSvg } from "./qr.js";
 
 /** The tailnet name the PWA is served under, and the desktop owner's Tailscale login. */
@@ -66,7 +67,8 @@ export const CLOSE_NO_VIEW = 4003;
 const CODE_RE = /^[A-Za-z0-9_-]{22}$/;
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
-const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+const sha256buf = (s: string) => createHash("sha256").update(s).digest();
+const sha256 = (s: string) => sha256buf(s).toString("hex");
 
 class HttpError extends Error {
   constructor(
@@ -112,10 +114,22 @@ export class Security {
 
   // ---- configuration ----
 
+  /**
+   * Sets (or clears) the serve name and owner login. A change drops every live socket:
+   * devices of another login are no longer valid, and none are reachable without serve.
+   */
   setServe(serve: ServeIdentity | null): void {
-    this.serve = serve ? { host: serve.host.toLowerCase(), login: serve.login } : null;
+    const next = serve ? { host: serve.host.toLowerCase(), login: serve.login } : null;
+    const same = next !== null && this.serve !== null && next.host === this.serve.host && next.login === this.serve.login;
+    this.serve = next;
+    if (same) return;
     // A pairing code is tied to the URL it was shown with.
     this.code = null;
+    this.closeAll(CLOSE_REVOKED, "serve changed");
+  }
+
+  private closeAll(code: number, reason: string): void {
+    for (const set of this.live.values()) for (const c of [...set]) c.close(code, reason);
   }
 
   get paused(): boolean {
@@ -125,9 +139,11 @@ export class Security {
   /** Refuses everything except `/healthz` and drops every live connection. Persists. */
   pause(): void {
     if (this.store.paused) return;
-    this.store.paused = true;
+    // Drop first: if persisting fails, the sockets are already gone and the error
+    // reaches the caller (the in-memory flag is set either way).
     this.code = null;
-    for (const set of this.live.values()) for (const c of set) c.close(CLOSE_PAUSED, "paused");
+    this.closeAll(CLOSE_PAUSED, "paused");
+    this.store.paused = true;
     this.audit({ event: "pause", text: "Remote access paused" });
     this.changed();
   }
@@ -163,29 +179,43 @@ export class Security {
     const login = singleHeader(req, "tailscale-user-login");
     if (login === undefined || login !== serve.login) return FORBIDDEN;
     if (!safe) {
-      // CSRF: the exact origin, plus a header no cross-site form or simple request can send.
+      // CSRF: the exact origin, plus a marker no cross-site form or simple request can
+      // send. Browsers can't set headers on a WS upgrade, so there it is our subprotocol.
       if (singleHeader(req, "origin") !== `https://${serve.host}`) return FORBIDDEN;
-      if (singleHeader(req, "x-remote-api") !== "1") return FORBIDDEN;
+      if (kind === "ws" ? !offersProtocol(req) : singleHeader(req, "x-remote-api") !== "1") return FORBIDDEN;
       // Only pairing is reachable without an approved device.
       if (kind === "http" && path === "/api/v1/pair") return true;
       const d = this.deviceFor(req);
       if (!d || d.state !== "approved") return deny(401, "unpaired");
       if (kind === "ws") {
-        if (!hasCap(d.caps, "view", this.now())) return FORBIDDEN;
+        if (!this.mayView(d)) return FORBIDDEN;
         return { allow: true, principal: { deviceId: d.id } };
       }
     }
     return true;
   };
 
-  /** The device a request's cookie names, if it is current for the owner login. */
+  /**
+   * The device a request's cookie names, if it is current for the owner login. Read-only:
+   * an expired pending request reads as unknown here and is removed by `sweep` later.
+   */
   private deviceFor(req: IncomingMessage): Device | undefined {
-    this.sweep();
     const token = readCookie(req, DEVICE_COOKIE);
     if (token === undefined || !TOKEN_RE.test(token)) return undefined;
     const d = this.store.byTokenHash(sha256(token));
-    if (!d || !this.serve || d.login !== this.serve.login) return undefined;
+    if (!d || !this.current(d)) return undefined;
     return d;
+  }
+
+  /** Bound to the current owner login, and not an expired pairing request. */
+  private current(d: Device): boolean {
+    if (!this.serve || d.login !== this.serve.login) return false;
+    return d.state === "approved" || this.now() - d.created_at < PENDING_TTL_MS;
+  }
+
+  /** Approved, current, not paused, with `view`: may hold a live socket. */
+  private mayView(d: Device | undefined): d is Device {
+    return !!d && !this.store.paused && d.state === "approved" && this.current(d) && hasCap(d.caps, "view", this.now());
   }
 
   /** Drops pairing requests that were never approved in time. */
@@ -241,7 +271,7 @@ export class Security {
     const asked = typeof body.name === "string" ? cleanLabel(body.name, 32) : "";
     const d: Device = {
       id: newDeviceId(),
-      name: asked || this.defaultName(),
+      name: this.uniqueName(asked || this.defaultName()),
       login: this.serve!.login,
       token_sha256: sha256(token),
       state: "pending",
@@ -262,6 +292,16 @@ export class Security {
     this.onPending?.(this.view(d));
   }
 
+  /** The client's name is a hint: a taken one gets a suffix, so prompts stay unambiguous. */
+  private uniqueName(base: string): string {
+    const used = new Set(this.store.all().map((d) => d.name));
+    if (!used.has(base)) return base;
+    for (let n = 2; ; n++) {
+      const candidate = `${base.slice(0, 26)} (${n})`;
+      if (!used.has(candidate)) return candidate;
+    }
+  }
+
   private defaultName(): string {
     const used = new Set(this.store.all().map((d) => d.name));
     let n = 1;
@@ -277,7 +317,7 @@ export class Security {
     if (this.store.paused) throw new Error("remote access is paused");
     const code = randomBytes(16).toString("base64url");
     const expires = this.now() + CODE_TTL_MS;
-    this.code = { hash: createHash("sha256").update(code).digest(), expires };
+    this.code = { hash: sha256buf(code), expires };
     const url = `https://${this.serve.host}/pair#c=${code}`;
     this.audit({ event: "pair.code", text: "Pairing code shown" });
     return { code, url, svg: qrSvg(url), expires_at: expires };
@@ -291,7 +331,7 @@ export class Security {
       this.code = null;
       return false;
     }
-    const ok = timingSafeEqual(createHash("sha256").update(code).digest(), active.hash);
+    const ok = timingSafeEqual(sha256buf(code), active.hash);
     if (ok) this.code = null;
     return ok;
   }
@@ -336,9 +376,12 @@ export class Security {
 
   /** Refuses a pending request or revokes an approved device; live connections drop now. */
   revoke(id: string): void {
-    const d = this.store.remove(id);
+    const d = this.store.get(id);
     if (!d) throw new Error("no such device");
+    // Drop first, so a failed write (full disk) can't leave a revoked socket streaming.
+    // The store removes the device from memory before it writes, so it is denied either way.
     this.drop(id, CLOSE_REVOKED, "revoked");
+    this.store.remove(id);
     const text = d.state === "pending" ? `${d.name}: pairing refused` : `${d.name} revoked`;
     this.audit({ event: d.state === "pending" ? "pair.reject" : "device.revoke", device: d.name, text });
     this.changed();
@@ -349,6 +392,7 @@ export class Security {
     if (!clean) throw new Error("empty name");
     const d = this.store.get(id);
     if (!d) throw new Error("no such device");
+    if (this.store.all().some((x) => x.id !== id && x.name === clean)) throw new Error("name in use");
     const old = d.name;
     this.store.update(id, (x) => (x.name = clean));
     this.audit({ event: "device.rename", device: clean, text: `${old} renamed to ${clean}` });
@@ -363,11 +407,13 @@ export class Security {
     const d = this.store.get(id);
     if (!d || d.state !== "approved") throw new Error("no such approved device");
     if (until !== null && cap !== "terminal.input") throw new Error("only terminal.input can expire");
+    if (until !== null && (!Number.isSafeInteger(until) || until <= this.now())) throw new Error("until must be a future epoch ms");
+    // Drop first, as in revoke.
+    if (cap === "view" && !on) this.drop(id, CLOSE_NO_VIEW, "view off");
     this.store.update(id, (x) => {
       x.caps[cap] = on;
       if (cap === "terminal.input") x.caps["terminal.input.until"] = on ? until : null;
     });
-    if (cap === "view" && !on) this.drop(id, CLOSE_NO_VIEW, "view off");
     this.audit({ event: "device.cap", device: d.name, text: `${d.name}: ${cap} ${on ? "on" : "off"}` });
     this.changed();
   }
@@ -375,7 +421,7 @@ export class Security {
   private drop(id: string, code: number, reason: string): void {
     const set = this.live.get(id);
     if (!set) return;
-    for (const c of set) c.close(code, reason);
+    for (const c of [...set]) c.close(code, reason);
   }
 
   // ---- live connections ----
@@ -384,21 +430,28 @@ export class Security {
   readonly onConnect = (client: HubClient): (() => void) => {
     const id = client.principal?.deviceId;
     const d = id !== undefined ? this.store.get(id) : undefined;
-    if (id === undefined || !d || d.state !== "approved") {
-      client.close(CLOSE_REVOKED, "revoked");
+    // Checked again here: the guard's verdict may be stale if anything async ever runs
+    // between it and the upgrade.
+    if (id === undefined || !this.mayView(d)) {
+      client.close(this.store.paused ? CLOSE_PAUSED : CLOSE_REVOKED, "not allowed");
       return () => undefined;
     }
     let set = this.live.get(id);
     if (!set) this.live.set(id, (set = new Set()));
     set.add(client);
-    this.store.update(id, (x) => (x.last_seen = this.now()));
-    this.audit({ event: "device.connect", device: d.name, text: `${d.name} connected` });
+    this.bestEffort(() => {
+      this.store.update(id, (x) => (x.last_seen = this.now()));
+      this.audit({ event: "device.connect", device: d.name, text: `${d.name} connected` });
+    });
     this.changed();
     return () => {
       set.delete(client);
       if (set.size === 0) this.live.delete(id);
-      const cur = this.store.update(id, (x) => (x.last_seen = this.now()));
-      if (cur) this.audit({ event: "device.disconnect", device: cur.name, text: `${cur.name} disconnected` });
+      // Runs inside the socket's close listener: a failed write must not crash the bridge.
+      this.bestEffort(() => {
+        const cur = this.store.update(id, (x) => (x.last_seen = this.now()));
+        if (cur) this.audit({ event: "device.disconnect", device: cur.name, text: `${cur.name} disconnected` });
+      });
       this.changed();
     };
   };
@@ -410,11 +463,11 @@ export class Security {
     if (this.store.paused) return { ok: false, code: "paused" };
     const id = client.principal?.deviceId;
     const d = id !== undefined ? this.store.get(id) : undefined;
-    if (!d || d.state !== "approved" || !this.serve || d.login !== this.serve.login) {
+    if (!d || d.state !== "approved" || !this.current(d)) {
       client.close(CLOSE_REVOKED, "revoked");
       return { ok: false, code: "unpaired" };
     }
-    const what = describeAct(kind, args);
+    let what = describeAct(kind, args);
     const cap = ACTION_CAPS.get(kind);
     if (cap === undefined || !this.inner) {
       this.audit({ event: "act", device: d.name, text: `${d.name} ${what}: refused`, ok: false, code: "unsupported_action" });
@@ -430,12 +483,14 @@ export class Security {
     } catch {
       res = { ok: false, code: "internal_error", unknown_effect: true };
     }
+    if (res.audit_label !== undefined) what = describeAct(kind, args, res.audit_label);
     const entry: AuditEntry = { ts: this.now(), event: "act", device: d.name, text: `${d.name} ${what}`, ok: res.ok };
     if (!res.ok) {
       entry.code = res.unknown_effect ? "unknown_effect" : (res.code ?? "failed");
       entry.text += res.unknown_effect ? ": result unknown" : ": failed";
     }
-    this.log.record(entry);
+    this.bestEffort(() => this.log.record(entry));
+    // `audit_label` never reaches the client: the Hub's `toRes` copies only ok/code/unknown_effect.
     return res;
   };
 
@@ -450,6 +505,15 @@ export class Security {
     this.log.record({ ts: this.now(), ...e });
   }
 
+  /** Bookkeeping that must not turn a done security change (or a close) into a throw. */
+  private bestEffort(fn: () => void): void {
+    try {
+      fn();
+    } catch {
+      // last_seen and Activity lines are best-effort; the decision already happened.
+    }
+  }
+
   private changed(): void {
     try {
       this.onChange?.();
@@ -457,6 +521,13 @@ export class Security {
       // A listener's failure must not undo a security change.
     }
   }
+}
+
+/** The client offered our subprotocol (`Sec-WebSocket-Protocol` is a comma list). */
+function offersProtocol(req: IncomingMessage): boolean {
+  return headerValues(req, "sec-websocket-protocol")
+    .flatMap((v) => v.split(","))
+    .some((p) => p.trim() === bridgeApi.WS_PROTOCOL);
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

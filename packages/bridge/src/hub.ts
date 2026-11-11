@@ -29,6 +29,11 @@ export interface ActResult {
   ok: boolean;
   code?: string;
   unknown_effect?: boolean;
+  /**
+   * The option label the bridge itself resolved for an answer (S11), for the audit log.
+   * Never sent to the client, and never taken from the client's args.
+   */
+  audit_label?: string;
 }
 
 /** Handles an `act`. `Security.act` wraps the real handler with capability checks and the audit log. */

@@ -47,19 +47,20 @@ function charCount(v: unknown): number {
 }
 
 /**
- * The redacted description of an action, for the audit log. Only identifiers, option
- * labels and lengths get through: free text and terminal input never do.
+ * The redacted description of an action, for the audit log. Only identifiers, lengths and
+ * the option label the bridge resolved itself (`label`, from the handler's result) get
+ * through: free text, terminal input and anything label-like in the client's args never do.
  */
-export function describeAct(kind: string, args: Record<string, unknown>): string {
+export function describeAct(kind: string, args: Record<string, unknown>, label?: string): string {
   const target = (key: string, fallback: string) => safeId(args[key]) ?? fallback;
   switch (kind) {
     case "terminal.send":
       return `sent ${charCount(args.text)} chars to ${target("terminal", "a terminal")}`;
     case "inbox.answer": {
       const q = target("id", "a question");
-      const label = typeof args.label === "string" ? cleanLabel(args.label) : "";
+      const shown = label !== undefined ? cleanLabel(label) : "";
       const text = charCount(args.text);
-      const what = label ? ` (${label})` : text ? ` (${text} chars)` : "";
+      const what = shown ? ` (${shown})` : text ? ` (${text} chars)` : "";
       return `answered ${q}${what}`;
     }
     case "inbox.draft":

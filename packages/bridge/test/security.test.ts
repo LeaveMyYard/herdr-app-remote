@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import type { bridgeApi } from "@herdr-remote/protocol";
+import { bridgeApi } from "@herdr-remote/protocol";
 import { createBridgeServer, type BridgeServer } from "../src/server.js";
 import type { ActHandler, Hub } from "../src/hub.js";
 import {
@@ -38,7 +38,8 @@ async function start(opts: { inner?: ActHandler | null } = {}) {
     opts.inner ??
     ((_c, kind, args) => {
       acts.push({ kind, args });
-      return { ok: true };
+      // Stands in for S11 resolving the chosen option's label from inbox data.
+      return kind === "inbox.answer" ? { ok: true, audit_label: "Option B" } : { ok: true };
     });
   sec = new Security({
     dataDir: join(dir, "data"),
@@ -114,11 +115,12 @@ interface Sock {
   closed: Promise<number>;
 }
 
-function ws(headers: Headers): Promise<Sock> {
+/** Opens the WS with what a browser controls: its cookies and Origin, plus subprotocols. */
+function ws(headers: Headers, protocols: string[] = [bridgeApi.WS_PROTOCOL]): Promise<Sock> {
   return new Promise((resolve, reject) => {
     const h: Record<string, string> = {};
     for (const [k, v] of Object.entries(headers)) if (typeof v === "string") h[k] = v;
-    const sock = new WebSocket(`ws://127.0.0.1:${port}/api/v1/ws`, { headers: h });
+    const sock = new WebSocket(`ws://127.0.0.1:${port}/api/v1/ws`, protocols, { headers: h });
     const msgs: bridgeApi.ServerMessage[] = [];
     const waiters: (() => void)[] = [];
     sock.on("message", (d) => {
@@ -138,7 +140,7 @@ function ws(headers: Headers): Promise<Sock> {
   });
 }
 
-const wsHeaders = (cookie: string): Headers => ({ ...OK_GET, Origin: ORIGIN, "X-Remote-Api": "1", Cookie: cookie });
+const wsHeaders = (cookie: string): Headers => ({ ...OK_GET, Origin: ORIGIN, Cookie: cookie });
 
 async function greeted(cookie: string): Promise<Sock> {
   const s = await ws(wsHeaders(cookie));
@@ -298,16 +300,21 @@ describe("attack: CSRF", () => {
     expect((await pair(code)).status).toBe(202);
   });
 
-  it("the WS upgrade needs Origin, X-Remote-Api and an approved device cookie", async () => {
+  it("the WS upgrade needs Origin, the herdr-remote.v1 subprotocol and an approved device cookie", async () => {
     await start();
     const { cookie } = await pairedDevice();
     await expect(ws({ ...wsHeaders(cookie), Origin: "https://evil.example" })).rejects.toThrow(/403/);
     await expect(ws({ ...wsHeaders(cookie), Origin: undefined })).rejects.toThrow(/403/);
-    await expect(ws({ ...wsHeaders(cookie), "X-Remote-Api": undefined })).rejects.toThrow(/403/);
+    // Browsers can't set X-Remote-Api on an upgrade; the subprotocol is the marker instead.
+    await expect(ws({ ...wsHeaders(cookie), "X-Remote-Api": "1" }, [])).rejects.toThrow(/403/);
+    await expect(ws(wsHeaders(cookie), ["herdr-remote.v2"])).rejects.toThrow(/403/);
+    await expect(ws(wsHeaders(cookie), ["chat"])).rejects.toThrow(/403/);
     await expect(ws({ ...wsHeaders(cookie), Cookie: undefined })).rejects.toThrow(/401/);
     await expect(ws({ ...wsHeaders(cookie), Cookie: "__Host-hr-device=" + "A".repeat(43) })).rejects.toThrow(/401/);
     await expect(ws({ ...wsHeaders(cookie), Cookie: `${cookie}; ${cookie}` })).rejects.toThrow(/401/);
-    (await greeted(cookie)).ws.close();
+    const ok = await ws(wsHeaders(cookie), ["chat", bridgeApi.WS_PROTOCOL]);
+    expect(ok.ws.protocol).toBe(bridgeApi.WS_PROTOCOL);
+    ok.ws.close();
   });
 
   it("oversized and malformed pairing bodies are refused without hurting the server", async () => {
@@ -358,6 +365,62 @@ describe("attack: revoked device", () => {
     await expect(ws(wsHeaders(cookie))).rejects.toThrow(/401/);
     expect((await http("GET", "/api/v1/me", { ...OK_GET, Cookie: cookie })).status).toBe(401);
     expect(activity()).toContain("Phone 1 revoked");
+  });
+
+  it("revoke, pause and view-off drop live sockets even when devices.json can't be written", async () => {
+    await start();
+    const a = await pairedDevice("Phone 1");
+    const b = await pairedDevice("Phone 2");
+    const c = await pairedDevice("Phone 3");
+    const [sa, sb, sc] = [await greeted(a.cookie), await greeted(b.cookie), await greeted(c.cookie)];
+    const data = join(dir, "data");
+    await chmod(data, 0o500);
+    try {
+      expect(() => sec.revoke(a.id)).toThrow();
+      expect(await sa.closed).toBe(CLOSE_REVOKED);
+      await expect(ws(wsHeaders(a.cookie))).rejects.toThrow(/401/);
+      expect(() => sec.setCap(b.id, "view", false)).toThrow();
+      expect(await sb.closed).toBe(CLOSE_NO_VIEW);
+      expect(() => sec.pause()).toThrow();
+      expect(await sc.closed).toBe(CLOSE_PAUSED);
+      expect((await http("GET", "/api/v1/meta", OK_GET)).status).toBe(503);
+    } finally {
+      await chmod(data, 0o700);
+    }
+  });
+
+  it("changing or clearing serve drops live sockets", async () => {
+    await start();
+    const { cookie } = await pairedDevice();
+    const s1 = await greeted(cookie);
+    sec.setServe({ host: SERVE, login: OWNER });
+    const s2 = await greeted(cookie);
+    expect(s1.ws.readyState).toBe(WebSocket.OPEN);
+    sec.setServe({ host: SERVE, login: "user-2@example" });
+    expect(await s1.closed).toBe(CLOSE_REVOKED);
+    expect(await s2.closed).toBe(CLOSE_REVOKED);
+    sec.setServe({ host: SERVE, login: OWNER });
+    const s3 = await greeted(cookie);
+    sec.setServe(null);
+    expect(await s3.closed).toBe(CLOSE_REVOKED);
+  });
+
+  it("onConnect re-checks the device: stale principals are closed at once", async () => {
+    await start();
+    const { id } = await pairedDevice();
+    const r = await pair(sec.issueCode().code);
+    const pendingId = (JSON.parse(r.body) as { device: { id: string } }).device.id;
+    const closes: number[] = [];
+    const client = (deviceId: string) => ({ principal: { deviceId }, send: () => undefined, close: (c: number) => void closes.push(c) });
+    sec.onConnect(client(pendingId));
+    sec.onConnect(client("d-0000000000000000"));
+    sec.setCap(id, "view", false);
+    sec.onConnect(client(id));
+    sec.setCap(id, "view", true);
+    sec.pause();
+    sec.onConnect(client(id));
+    expect(closes).toEqual([CLOSE_REVOKED, CLOSE_REVOKED, CLOSE_REVOKED, CLOSE_PAUSED]);
+    expect(sec.devices().every((d) => d.live === 0)).toBe(true);
   });
 
   it("turning view off drops the live socket and refuses new ones", async () => {
@@ -441,6 +504,21 @@ describe("pairing", () => {
     expect(activity()).toContain("Phone 1: pairing refused");
     sec.rename(db!.id, "Laptop 1");
     expect(sec.devices()[0]?.name).toBe("Laptop 1");
+    // A client-chosen name is a hint: a taken one gets a suffix; renames can't collide.
+    const c = await pair(sec.issueCode().code, OK_POST, "Laptop 1");
+    expect((JSON.parse(c.body) as { device: { name: string } }).device.name).toBe("Laptop 1 (2)");
+    expect(() => sec.rename(db!.id, "Laptop 1 (2)")).toThrow(/in use/);
+  });
+
+  it("terminal.input expiry must be a future integer", async () => {
+    await start();
+    const { id } = await pairedDevice();
+    for (const bad of [clock, clock - 1, clock + 0.5, Number.POSITIVE_INFINITY, Number.NaN]) {
+      expect(() => sec.setCap(id, "terminal.input", true, bad)).toThrow();
+    }
+    expect(() => sec.setCap(id, "navigate", true, clock + 10)).toThrow();
+    sec.setCap(id, "terminal.input", true, clock + 10);
+    expect(sec.devices()[0]?.terminal_input_until).toBe(clock + 10);
   });
 
   it("devices survive a bridge restart; revocations too", async () => {
@@ -470,7 +548,8 @@ describe("capabilities", () => {
     await start();
     const { cookie, id } = await pairedDevice();
     const s = await greeted(cookie);
-    expect(await act(s, "inbox.answer", { id: "Q119", label: "Option B", text: "secret free text" })).toMatchObject({ ok: true });
+    const answered = await act(s, "inbox.answer", { id: "Q119", label: "secret label", text: "secret free text" });
+    expect(answered).toEqual({ type: "res", id: "a1", ok: true });
     expect(await act(s, "tab.select", { id: "t2" })).toMatchObject({ ok: false, code: "forbidden" });
     expect(await act(s, "terminal.send", { terminal: "t3", text: "ls -la secret" })).toMatchObject({ ok: false, code: "forbidden" });
     expect(await act(s, "push.subscribe", {})).toMatchObject({ ok: false, code: "forbidden" });

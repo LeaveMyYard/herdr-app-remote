@@ -71,8 +71,10 @@ describe("audit redaction", () => {
     expect(describeAct("terminal.send", { terminal: "t3", text: SECRET })).not.toContain("secret");
   });
 
-  it("inbox answers log the option label, never free text", () => {
-    expect(describeAct("inbox.answer", { id: "Q119", label: "Option B" })).toBe("answered Q119 (Option B)");
+  it("inbox answers log the bridge-resolved option label, never client text", () => {
+    expect(describeAct("inbox.answer", { id: "Q119" }, "Option B")).toBe("answered Q119 (Option B)");
+    // A label in the client's args is client text: ignored.
+    expect(describeAct("inbox.answer", { id: "Q119", label: SECRET })).toBe("answered Q119");
     const free = describeAct("inbox.answer", { id: "Q119", text: SECRET });
     expect(free).toBe("answered Q119 (23 chars)");
     expect(describeAct("inbox.draft", { id: "Q1", text: SECRET })).not.toContain("secret");
