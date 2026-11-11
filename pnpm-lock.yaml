@@ -27,6 +27,15 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.5)(jsdom@26.1.0)
 
+  mod:
+    devDependencies:
+      '@herdr-remote/bridge':
+        specifier: workspace:*
+        version: link:../packages/bridge
+      '@herdr-remote/protocol':
+        specifier: workspace:*
+        version: link:../packages/protocol
+
   packages/bridge:
     dependencies:
       '@herdr-remote/protocol':
