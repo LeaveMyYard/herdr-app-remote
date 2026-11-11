@@ -907,3 +907,35 @@ describe("audit health (S16, owed from S5)", () => {
     await fixLog();
   });
 });
+
+describe("cutting a device's sends in flight (S16)", () => {
+  it("tells the app when a device may no longer type, before anything is written", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const cuts: (string | null)[] = [];
+      await start();
+      const a = await pairedDevice("Phone 1");
+      const b = await pairedDevice("Phone 2");
+      sec.close();
+      sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, onCut: (id) => cuts.push(id) });
+      // Setting the first serve identity counts as a change (nothing can be in flight yet).
+      cuts.length = 0;
+      sec.setCap(a.id, "navigate", false);
+      sec.setCap(a.id, "terminal.input", true, clock + 1000);
+      expect(cuts).toEqual([]);
+      sec.setCap(a.id, "terminal.input", false);
+      sec.setCap(a.id, "view", false);
+      sec.setCap(b.id, "terminal.input", true, clock + 1000);
+      clock += 1000;
+      vi.advanceTimersByTime(1000);
+      sec.revoke(b.id);
+      sec.pause();
+      sec.resume();
+      sec.setServe({ host: SERVE, login: "user-2@example" });
+      expect(cuts).toEqual([a.id, a.id, b.id, b.id, null, null]);
+    } finally {
+      sec.close();
+      vi.useRealTimers();
+    }
+  });
+});

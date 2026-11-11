@@ -401,3 +401,4 @@ Defaults taken until the operator says otherwise:
   - Peek can't show transcripts, because those need panorama's private binary.
   - Reusing plugin JS assumes it stays import-free; otherwise we pin vendored copies with a drift check.
 - **Inbox verbs** put answer text on the command line for up to 5 s, where it's visible in the local process list. This comes from app-commands v1.
+- **Terminal input** is on `hc send`'s command line for as long as the send runs (up to 15 s, while someone types at the desktop), visible in the local process list the same way. hc has no stdin form for send.

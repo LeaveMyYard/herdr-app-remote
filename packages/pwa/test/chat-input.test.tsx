@@ -1,8 +1,8 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatAgent, chatTopic } from "../src/chat-fixtures";
-import { terminalInputOf } from "../src/bridge/me";
+import { fetchTerminalInput, terminalInputOf } from "../src/bridge/me";
 import { Chat } from "../src/screens/Chat";
 import { forgetConfirmations, sendWords, textProblem, type ChatInput, type SendOutcome } from "../src/screens/ChatComposer";
 
@@ -54,6 +54,30 @@ describe("Chat composer (terminal.input)", () => {
     expect(box()).toHaveValue("hello agent");
   });
 
+  it("freezes the text while the confirmation is up, so what is confirmed is what is on screen", async () => {
+    const { sent, input: i } = input();
+    render(<Chat {...props} input={i} />);
+    await userEvent.type(box(), "rm -rf build");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(box()).toHaveAttribute("readonly");
+    await userEvent.type(box(), "ls");
+    // Even a change event that gets past readonly (a paste, an IME) is ignored.
+    fireEvent.change(box(), { target: { value: "ls" } });
+    expect(box()).toHaveValue("rm -rf build");
+    await userEvent.click(confirmSend());
+    expect(sent).toEqual(["rm -rf build"]);
+    expect(box()).not.toHaveAttribute("readonly");
+  });
+
+  it("the Send button looks ready with an empty box, as on the board, and sends nothing", async () => {
+    const { sent, input: i } = input();
+    render(<Chat {...props} input={i} />);
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
   it("sends after the confirmation, clears the text, and doesn't ask again for that terminal", async () => {
     const { sent, input: i } = input();
     const { rerender } = render(<Chat {...props} input={i} />);
@@ -98,6 +122,8 @@ describe("Chat composer (terminal.input)", () => {
     [{ ok: false, code: "rate_limited" }, /too fast/],
     [{ ok: false, code: "busy" }, /Still sending/],
     [{ ok: false, code: "terminal_finished" }, /has closed/],
+    [{ ok: false, code: "terminal_blocked" }, /waiting on a dialog/],
+    [{ ok: false, code: "cancelled", unknown_effect: true }, /may have been sent/],
     [{ ok: false, code: "audit_unavailable" }, /can't record/],
     [{ ok: false, code: "timeout", unknown_effect: true }, /may have been sent/],
   ] as [SendOutcome, RegExp][])("says what %j means and keeps the text, never resending", async (reply, words) => {
@@ -122,7 +148,7 @@ describe("Chat composer (terminal.input)", () => {
     vi.useFakeTimers();
     let now = 1_000_000;
     render(<Chat {...props} now={() => now} input={input({ until: now + 60_000 }).input} />);
-    expect(box().getAttribute("placeholder")).toMatch(/^Type to the terminal… \(on until \d\d:\d\d\)$/);
+    expect(box()).toHaveAttribute("placeholder", "Type to the terminal…");
     act(() => {
       now += 60_000;
       vi.advanceTimersByTime(60_000);
@@ -134,6 +160,24 @@ describe("Chat composer (terminal.input)", () => {
   it("an expiry already past shows no composer", () => {
     render(<Chat {...props} now={() => 2_000} input={input({ until: 1_000 }).input} />);
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});
+
+describe("fetchTerminalInput (/api/v1/me)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const reply = (status: number, body: unknown = {}) => vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status })));
+
+  it("reads 200, says off for 401 and 403, and keeps what it had (null) for anything else", async () => {
+    reply(200, { device: { caps: { "terminal.input": true }, terminal_input_until: null } });
+    expect(await fetchTerminalInput()).toEqual({ enabled: true, until: null });
+    reply(401);
+    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null });
+    reply(403);
+    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null });
+    reply(503);
+    expect(await fetchTerminalInput()).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
+    expect(await fetchTerminalInput()).toBeNull();
   });
 });
 

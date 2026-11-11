@@ -37,9 +37,13 @@ export function sendWords(r: SendOutcome): string {
       return "Sending too fast. Wait a few seconds, then send again.";
     case "busy":
       return "Still sending the last one.";
+    case "terminal_blocked":
+      return "The agent is waiting on a dialog at the desktop. Nothing was sent.";
     case "terminal_not_found":
     case "terminal_finished":
       return "This terminal has closed. Nothing was sent.";
+    case "cancelled":
+      return "Typing was turned off while this was sending. It may have been sent: check the terminal.";
     case "audit_unavailable":
       return "The desktop can't record sends right now, so nothing was sent.";
     case "bad_args":
@@ -60,11 +64,6 @@ export function textProblem(text: string): string | null {
   if (n > bridgeApi.TERMINAL_SEND_MAX_CHARS) return `Too long: ${n} of at most ${bridgeApi.TERMINAL_SEND_MAX_CHARS} characters.`;
   return null;
 }
-
-const clock = (ms: number) => {
-  const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
 
 /**
  * The key bar and composer of PhoneChat. `hc send` can only paste text and press Enter (verified in the rig), so the
@@ -147,7 +146,6 @@ export function ChatComposer({ terminal, agentName, input }: { terminal: string;
           <p id="chat-confirm-q" className="chat-confirm-q">
             {asking === "" ? `Press Enter in ${agentName}'s terminal?` : `Type this into ${agentName}'s terminal?`}
           </p>
-          <p className="chat-confirm-d">It is pasted and sent with Enter, as if you typed it at the desktop. You are asked once per terminal.</p>
           <div className="row nf chat-confirm-acts">
             <button type="button" className="chat-btn" onClick={() => setAsking(null)}>
               Cancel
@@ -180,14 +178,18 @@ export function ChatComposer({ terminal, agentName, input }: { terminal: string;
           ref={box}
           rows={1}
           className="f1 chat-text"
-          placeholder={input.until !== null ? `Type to the terminal… (on until ${clock(input.until)})` : "Type to the terminal…"}
+          placeholder="Type to the terminal…"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          // Frozen while a send is asked about or running: the confirmation is for exactly the text on screen.
+          readOnly={busy}
+          onChange={(e) => {
+            if (!busy) setText(e.target.value);
+          }}
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
         />
-        <button type="submit" aria-label="Send" className="row nf chat-send" disabled={busy || text === ""}>
+        <button type="submit" aria-label="Send" className="row nf chat-send" disabled={busy}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
             <path d="M12 19V5M6 11l6-6 6 6" />
           </svg>

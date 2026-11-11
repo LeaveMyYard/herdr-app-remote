@@ -31,6 +31,11 @@ export interface SecurityOptions {
   /** Devices, capabilities or pause changed. */
   onChange?: () => void;
   audit?: Omit<AuditOptions, "dir">;
+  /**
+   * A device (or, with null, every device) just lost the right to type: revoked, paused, `terminal.input` or `view`
+   * turned off or expired, or the serve identity changed. The app kills that device's `hc send` in flight.
+   */
+  onCut?: (deviceId: string | null) => void;
   /** An Activity line could not be written (`ok: false`), or could again after failing (`ok: true`). */
   onAuditHealth?: (h: AuditHealth) => void;
 }
@@ -135,6 +140,7 @@ export class Security {
   private readonly actLimit: RateLimiter;
   private readonly kindLimits = new Map<string, RateLimiter>();
   private readonly onAuditHealth: ((h: AuditHealth) => void) | undefined;
+  private readonly onCut: ((deviceId: string | null) => void) | undefined;
   private health: AuditHealth = { ok: true, since: null, failures: 0 };
   private expiryTimer: NodeJS.Timeout | null = null;
 
@@ -146,6 +152,7 @@ export class Security {
     this.onPending = opts.onPending;
     this.onChange = opts.onChange;
     this.onAuditHealth = opts.onAuditHealth;
+    this.onCut = opts.onCut;
     this.connectLimit = new RateLimiter(CONNECT_LIMIT, this.now);
     this.actLimit = new RateLimiter(ACT_LIMIT, this.now);
     for (const [kind, limit] of KIND_LIMITS) this.kindLimits.set(kind, new RateLimiter(limit, this.now));
@@ -175,6 +182,7 @@ export class Security {
     // A pairing code is tied to the URL it was shown with.
     this.code = null;
     this.closeAll(CLOSE_REVOKED, "serve changed");
+    this.cut(null);
   }
 
   private closeAll(code: number, reason: string): void {
@@ -207,6 +215,7 @@ export class Security {
     // reaches the caller (the in-memory flag is set either way).
     this.code = null;
     this.closeAll(CLOSE_PAUSED, "paused");
+    this.cut(null);
     this.store.paused = true;
     this.audit({ event: "pause", text: "Remote access paused" });
     this.changed();
@@ -257,6 +266,8 @@ export class Security {
         const v = this.connectLimit.take(d.id);
         if (!v.ok) {
           if (v.firstRefusal) this.bestEffort(() => this.audit({ event: "device.rate_limit", device: d.name, text: `${d.name} reconnected too often: refused for a minute`, ok: false, code: "rate_limited" }));
+          // A browser can't see an upgrade's status, and /api/v1/me still answers 200, so the PWA shows this as
+          // offline and keeps retrying with backoff until the window frees (at most a minute). Acceptable for a loop.
           return deny(429, "rate_limited");
         }
         return { allow: true, principal: { deviceId: d.id } };
@@ -453,6 +464,7 @@ export class Security {
     // Drop first, so a failed write (full disk) can't leave a revoked socket streaming.
     // The store removes the device from memory before it writes, so it is denied either way.
     this.drop(id, CLOSE_REVOKED, "revoked");
+    this.cut(id);
     this.store.remove(id);
     const text = d.state === "pending" ? `${d.name}: pairing refused` : `${d.name} revoked`;
     this.audit({ event: d.state === "pending" ? "pair.reject" : "device.revoke", device: d.name, text });
@@ -482,6 +494,7 @@ export class Security {
     if (until !== null && (!Number.isSafeInteger(until) || until <= this.now())) throw new Error("until must be a future epoch ms");
     // Drop first, as in revoke.
     if (cap === "view" && !on) this.drop(id, CLOSE_NO_VIEW, "view off");
+    if (!on && (cap === "view" || cap === "terminal.input")) this.cut(id);
     this.store.update(id, (x) => {
       x.caps[cap] = on;
       if (cap === "terminal.input") x.caps["terminal.input.until"] = on ? until : null;
@@ -513,6 +526,7 @@ export class Security {
         continue;
       }
       expired = true;
+      this.cut(d.id);
       this.bestEffort(() => {
         this.store.update(d.id, (x) => {
           x.caps["terminal.input"] = false;
@@ -694,6 +708,15 @@ export class Security {
       fn();
     } catch {
       // last_seen and Activity lines are best-effort; the decision already happened.
+    }
+  }
+
+  /** Kills sends in flight for a device that may no longer type. Runs before anything is written, like the drops. */
+  private cut(deviceId: string | null): void {
+    try {
+      this.onCut?.(deviceId);
+    } catch {
+      // A listener's failure must not undo a security change.
     }
   }
 

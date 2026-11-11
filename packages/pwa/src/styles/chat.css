@@ -37,7 +37,7 @@
 .hd .chat-key{min-width:44px;height:40px;padding:0 10px;border-radius:7px;border:1px solid var(--t-border);background:var(--t-raised);font-size:12.5px;color:var(--t-foreground)}
 .chat-form{align-items:flex-end;gap:8px;padding:4px 12px 34px}
 .chat-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-.hd .chat-text{min-height:44px;max-height:132px;resize:none;padding:11px 14px;border-radius:10px;border:1px solid var(--t-input);background:var(--t-background);color:var(--t-foreground);font:inherit;font-size:15px}
+.hd .chat-text{min-height:44px;resize:none;padding:11px 14px;border-radius:10px;border:1px solid var(--t-input);background:var(--t-background);color:var(--t-foreground);font:inherit;font-size:15px}
 .hd .chat-send{width:44px;height:44px;justify-content:center;border-radius:10px;background:var(--t-foreground);color:var(--t-background)}
 .hd .chat-send:disabled,.hd .chat-key:disabled{opacity:.45}
 .chat-note{margin:8px 12px 0;font-size:12.5px;color:var(--t-working)}

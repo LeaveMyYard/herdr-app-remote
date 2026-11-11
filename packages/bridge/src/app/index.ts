@@ -113,6 +113,8 @@ export async function startApp(o: AppOptions): Promise<App> {
   const invalid = (topic: string) => (error: string) => log({ event: "invalid_topic", topic, error });
 
   let usage: UsageTopicDriver | undefined = undefined;
+  // `terminal.send` (S16): `hc send` only, under `terminal.input` (expiry, rate limit and audit in Security).
+  const terminal = terminalSendActor({ run, binaries });
   let inboxDriver: InboxTopicDriver | undefined = undefined;
   let push: PushService | undefined = undefined;
   const actors: Actor[] = [
@@ -122,8 +124,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     (_c, kind, args) => inboxDriver?.act(kind, args),
     // `push.subscribe` / `push.unsubscribe` (S17), bound to the device the socket acts as.
     (c, kind, args) => push?.act(c, kind, args),
-    // `terminal.send` (S16): `hc send` only, under `terminal.input` (expiry, rate limit and audit in Security).
-    terminalSendActor({ run, binaries }),
+    terminal,
     navigateActor(o.link),
   ];
   // The desktop panel (S13) hears of security changes and new pairing requests through these two.
@@ -141,6 +142,8 @@ export async function startApp(o: AppOptions): Promise<App> {
       // Step 5 ("Add your phone") follows approvals and revocations.
       setup?.refreshPhone();
     },
+    // A device that may no longer type has its `hc send` in flight killed (hc holds one while the desktop is typed on).
+    onCut: (id) => terminal.cancel(id ?? undefined),
     onAuditHealth: (h) => log({ event: "audit_health", ok: h.ok, failures: h.failures }),
     onPending: (d) => {
       o.link.notify("info", `Approve ${d.name}? Open the Remote panel.`, "link", "open_panel");
@@ -233,7 +236,10 @@ export async function startApp(o: AppOptions): Promise<App> {
     // A check that can't tell keeps the last verdict: `on` keeps refusing, `off` keeps serving (one failed read
     // between two clean ones is not evidence Funnel turned on). With no verdict yet, it refuses.
     if (v.state !== "unknown" || funnel === null || funnel.state === "unknown") funnel = v;
-    if (funnel.state === "on" && before !== "on") hub.closeAll(CLOSE_FUNNEL, "funnel");
+    if (funnel.state === "on" && before !== "on") {
+      hub.closeAll(CLOSE_FUNNEL, "funnel");
+      terminal.cancel();
+    }
     log({ event: "funnel", verdict: v });
     return v;
   };

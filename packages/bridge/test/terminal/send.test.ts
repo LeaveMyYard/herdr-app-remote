@@ -6,7 +6,10 @@ import { readSend, sendArgs, SEND_TIMEOUT_MS, terminalSendActor, TIMEOUT_HOLD_MS
 import { run, type Runner, type RunResult } from "../../src/plugins/exec.js";
 import { fakeCli, tmp } from "../plugins/helpers.js";
 
-/** Outputs of `hc send --json` recorded in the rig (hc 0.1.19). */
+/**
+ * Outputs of `hc send --json` recorded in the rig (hc 0.1.19). `send-blocked.json` is not a recording: the rig has no
+ * program blocked on a dialog, so it is shaped like the others with the `blocked` kind that `hc schema` lists for send.
+ */
 const fx = (n: string) => readFileSync(new URL(`../fixtures/hc/${n}`, import.meta.url), "utf8");
 const res = (code: number | null, stdout: string, error?: RunResult["error"]): RunResult => ({ code, stdout, stderr: "", ...(error ? { error } : {}) });
 /** A refusal: hc prints its `{"error":…}` on stderr and nothing on stdout. */
@@ -39,6 +42,8 @@ describe("readSend (recorded hc outputs)", () => {
     expect(readSend(err(3, fx("send-not-found.json")))).toEqual({ ok: false, code: "terminal_not_found" });
     expect(readSend(err(11, fx("send-finished.json")))).toEqual({ ok: false, code: "terminal_finished" });
     expect(readSend(err(2, fx("send-usage.json")))).toEqual({ ok: false, code: "send_refused" });
+    expect(readSend(err(1, fx("send-blocked.json")))).toEqual({ ok: false, code: "terminal_blocked" });
+    expect(readSend(err(1, '{"error":{"kind":"machine_unknown"}}'))).toEqual({ ok: false, code: "terminal_not_found" });
     expect(readSend(res(null, "", "ENOENT"))).toEqual({ ok: false, code: "hc_missing" });
   });
 
@@ -47,13 +52,17 @@ describe("readSend (recorded hc outputs)", () => {
       res(0, "not json"),
       res(0, "[1]"),
       res(0, '{"error":{"kind":"not_found"}}'),
-      err(9, '{"error":{"kind":"blocked"}}'),
+      err(9, '{"error":{"kind":"something_new"}}'),
       err(1, "garbage"),
       err(3, '{"error":{"kind":"constructor"}}'),
       // A refusal is only believed on stderr, where hc prints it.
       res(3, fx("send-not-found.json")),
       res(null, "", "timeout"),
       res(null, "", "other"),
+      res(null, "", "aborted"),
+      // The schema lists these for send without saying whether anything was typed first.
+      err(1, '{"error":{"kind":"unavailable"}}'),
+      err(1, '{"error":{"kind":"config"}}'),
     ]) {
       expect(readSend(r), JSON.stringify(r)).toMatchObject({ ok: false, unknown_effect: true });
     }
@@ -120,6 +129,27 @@ describe("terminalSendActor", () => {
     expect(calls.map((c) => c.args[4])).toEqual(["one", "three", "four"]);
   });
 
+  it("cancel kills that device's send in flight (an unknown effect), and leaves other devices' alone", async () => {
+    const signals: AbortSignal[] = [];
+    const runner: Runner = (_cmd, _args, { signal }) =>
+      new Promise((resolve) => {
+        signals.push(signal!);
+        signal!.addEventListener("abort", () => resolve(res(null, "", "aborted")));
+        setTimeout(() => resolve(res(0, fx("send-ok.json"))), 50);
+      });
+    const actor = terminalSendActor({ run: runner });
+    const a = actor(client("d-a"), "terminal.send", { terminal: "t3", text: "one" });
+    const b = actor(client("d-b"), "terminal.send", { terminal: "t3", text: "two" });
+    actor.cancel("d-a");
+    expect(await a).toEqual({ ok: false, code: "cancelled", unknown_effect: true });
+    expect(await b).toEqual({ ok: true });
+    expect(signals.map((s) => s.aborted)).toEqual([true, false]);
+    // With no id, every device's send is killed.
+    const c = actor(client("d-c"), "terminal.send", { terminal: "t3", text: "three" });
+    actor.cancel();
+    expect(await c).toMatchObject({ code: "cancelled" });
+  });
+
   it("after a timeout the device stays busy while hc is being killed", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
@@ -154,6 +184,21 @@ printf '%s\\n' '{"started":null,"status":null,"turn":0}'`,
       .split("\u0001")
       .filter(Boolean)
       .map((l) => l.split("\0").slice(0, -1));
+
+  it("an abort kills the running hc at once; an already aborted one never starts", async () => {
+    const slow = fakeCli(dir, "slow-hc", `echo started >> "${join(dir, "slow")}"; sleep 5; echo '{}'`);
+    const ac = new AbortController();
+    const t0 = Date.now();
+    const p = run(slow, ["send"], { timeoutMs: 10_000, signal: ac.signal });
+    await new Promise((r) => setTimeout(r, 100));
+    ac.abort();
+    expect(await p).toMatchObject({ error: "aborted", code: null });
+    expect(Date.now() - t0).toBeLessThan(2000);
+    const before = readFileSync(join(dir, "slow"), "utf8");
+    expect(await run(slow, ["send"], { timeoutMs: 10_000, signal: ac.signal })).toMatchObject({ error: "aborted" });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(readFileSync(join(dir, "slow"), "utf8")).toBe(before);
+  });
 
   it("passes the text through no shell, verbatim", async () => {
     const text = '--force; $(touch pwned) `id` "quoted" \'single\'\nsecond line';

@@ -88,7 +88,8 @@ function Status({ status }: { status: AgentStatus }) {
  * footer is the key bar and composer (S16); otherwise it says typing is off.
  */
 export function Chat({ agent, topic, stale, question, backHref = "#/agents", input, terminal, now = Date.now }: ChatProps) {
-  const typing = useInputOn(input, now) && terminal !== undefined;
+  const on = useInputOn(input, now);
+  const typing = on && input && terminal !== undefined ? { input, terminal } : null;
   const [fit, setFit] = useState(loadFit);
   const toggleFit = () => {
     setFit((f) => {
@@ -166,9 +167,9 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
           <span className="chat-banner-go">Answer ›</span>
         </a>
       ) : null}
-      {typing && input && terminal !== undefined ? (
+      {typing ? (
         <footer className="col nf chat-foot chat-foot-on" data-vis-mask="">
-          <ChatComposer terminal={terminal} agentName={agent.name} input={input} />
+          <ChatComposer terminal={typing.terminal} agentName={agent.name} input={typing.input} />
         </footer>
       ) : (
         <footer className="col nf chat-foot" data-vis-mask="">

@@ -29,8 +29,12 @@ const socks: WebSocket[] = [];
 const ok = (stdout: string): RunResult => ({ code: 0, stdout, stderr: "" });
 
 /** Replays fixed outputs and records every command. Nothing is spawned. */
-const fakeRun: Runner = async (cmd, args) => {
+/** When set, `hc send` waits for its abort signal instead of answering (a send held while the desktop is typed on). */
+let holdSends = false;
+const fakeRun: Runner = async (cmd, args, opts) => {
   calls.push({ cmd, args });
+  if (cmd === "fake-hc" && args[0] === "send" && holdSends)
+    return new Promise((resolve) => opts.signal?.addEventListener("abort", () => resolve({ code: null, stdout: "", stderr: "", error: "aborted" })));
   if (cmd === "fake-tailscale") return tsStatus;
   if (cmd === "fake-hc" && args[0] === "send") return ok('{"started":null,"status":null,"turn":0}\n');
   if (cmd === "fake-hc") return ok("hc 0.9.0\n");
@@ -45,6 +49,7 @@ const funnelOn = (hostPort: string, proxy = "http://127.0.0.1:1"): RunResult =>
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "bridge-app-"));
   calls = [];
+  holdSends = false;
   tsStatus = ok("{}");
   link = new LinkServer({ token: TOKEN });
   await link.listen();
@@ -407,6 +412,19 @@ describe("startApp: topics over the link", () => {
     const text = app!.security.activity().map((e) => e.text);
     expect(text).toContain("Phone 1 (2) sent 17 chars to t3");
     expect(JSON.stringify(app!.security.activity())).not.toContain("secret");
+  });
+
+  it("turning terminal.input off kills a send still held by hc: an unknown effect, not a late keystroke", async () => {
+    await start();
+    holdSends = true;
+    const p = await phone(await paired({ terminal: true }));
+    send(p, { type: "hello", api: 1 });
+    send(p, { type: "act", id: "h1", kind: "terminal.send", args: { terminal: "t3", text: "held" } });
+    const end = Date.now() + 2000;
+    while (!calls.some((c) => c.args[0] === "send") && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+    const id = app!.security.devices().find((d) => d.caps["terminal.input"])!.id;
+    app!.security.setCap(id, "terminal.input", false);
+    expect(await p.until(resOf("h1"))).toMatchObject({ ok: false, code: "cancelled", unknown_effect: true });
   });
 
   it("stop() closes the API listener and leaves the link server to its owner", async () => {
