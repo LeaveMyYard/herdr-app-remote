@@ -1,0 +1,45 @@
+{
+  "mode": "rich",
+  "stale": true,
+  "aged": false,
+  "error": "feed invalid",
+  "collected_at": 1800000000.0,
+  "roots": [
+    {
+      "key": "[\"root\",\"herdr-core\",\"t1\"]",
+      "agent_id": "agent-1",
+      "space_id": "space-1",
+      "terminal": "t1",
+      "live": true,
+      "shadowed": false,
+      "harness": "claude",
+      "title": "Agent 1",
+      "tab_no": null,
+      "status": "run",
+      "inbox": [],
+      "hidden_finished": 0,
+      "last_activity": null,
+      "agents": [
+        {
+          "id": "n1",
+          "parent": null,
+          "harness": "claude",
+          "title": "Title n1",
+          "role": "Explore",
+          "model": "opus",
+          "status": "unknown",
+          "activity": "working",
+          "last_message": "",
+          "pending": [],
+          "question_ids": [],
+          "error": null,
+          "tool_calls": 1,
+          "started": 1800000000.0,
+          "ended": null,
+          "last_at": 1800000100.0,
+          "seq": 0
+        }
+      ]
+    }
+  ]
+}

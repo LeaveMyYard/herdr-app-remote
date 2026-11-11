@@ -1,0 +1,25 @@
+{
+  "mode": "rich",
+  "stale": true,
+  "aged": true,
+  "error": null,
+  "collected_at": 1800000000.0,
+  "roots": [
+    {
+      "key": "[\"root\",\"herdr-core\",\"t1\"]",
+      "agent_id": null,
+      "space_id": null,
+      "terminal": "t1",
+      "live": false,
+      "shadowed": true,
+      "harness": "claude",
+      "title": "Agent 1",
+      "tab_no": null,
+      "status": "run",
+      "inbox": [],
+      "hidden_finished": 0,
+      "last_activity": null,
+      "agents": []
+    }
+  ]
+}

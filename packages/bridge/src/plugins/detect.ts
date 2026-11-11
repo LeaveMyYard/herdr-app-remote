@@ -108,7 +108,7 @@ export async function detectUsage(env: DetectEnv): Promise<PluginStatus> {
   return ok();
 }
 
-async function readFeed(path: string): Promise<{ text: string } | { missing: true } | { error: string }> {
+export async function readFeed(path: string): Promise<{ text: string } | { missing: true } | { error: string }> {
   try {
     const h = await open(path, "r");
     try {

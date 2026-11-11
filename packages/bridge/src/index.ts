@@ -8,5 +8,8 @@ export { detectHc, detectHost, detectInbox, detectPanorama, detectUsage, parseVe
 export { loadPinned, parseReceipt, hasImports, type LoadResult } from "./plugins/loader.js";
 export { run, type Runner, type RunResult } from "./plugins/exec.js";
 export * from "./plugins/constants.js";
+export { PanoramaTopicDriver, PANORAMA_TOPIC, type PanoramaTopicOptions } from "./panorama/topic.js";
+export { buildPanoramaTopic, normalizeParents } from "./panorama/join.js";
+export { FeedReader, loadContract, type Contract, type Feed, type FeedView } from "./panorama/feed.js";
 export { UsageTopicDriver, USAGE_TOPIC, USAGE_INTERVAL_MS, USAGE_TIMEOUT_MS, panesArg, normalizeReport, tilde, type UsageTopicOptions } from "./usage.js";
 export * from "./link/index.js";
