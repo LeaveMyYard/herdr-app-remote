@@ -208,6 +208,22 @@ describe("Keys sheet (S16b)", () => {
     expect(document.activeElement).toBe(button);
   });
 
+  it("switching to another terminal closes the sheet", async () => {
+    const i = chatInput(keysInput().keys);
+    const { rerender } = render(<Chat {...props} input={i} />);
+    await openSheet();
+    rerender(<Chat {...props} terminal="t4" input={i} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("switching terminal closes the sheet on the keys-only bar too", async () => {
+    const i = chatInput(keysInput().keys, { enabled: false });
+    const { rerender } = render(<Chat {...props} input={i} />);
+    await openSheet();
+    rerender(<Chat {...props} terminal="t4" input={i} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("labels are text, never HTML", async () => {
     const menu = { rev: "0123456789abcdef", keys: [{ id: "x", label: "<b>X</b>", keys: ["esc"] }] };
     render(<Chat {...props} input={chatInput(keysInput({ menu }).keys)} />);
