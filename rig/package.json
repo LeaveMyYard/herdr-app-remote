@@ -1,0 +1,12 @@
+{
+  "name": "@herdr-remote/rig",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node -e \"0\"",
+    "typecheck": "node --check sidecar.mjs",
+    "test": "vitest run",
+    "rig": "sh run.sh"
+  }
+}
