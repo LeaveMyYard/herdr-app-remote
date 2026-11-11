@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -8,8 +8,12 @@ const rigDir = resolve(import.meta.dirname, "..");
 
 // A private rig dir: inner.sh is run without bwrap, with fake hc/herdr-app that would fail the
 // test loudly if a guard let execution reach them.
+const made: string[] = [];
+afterAll(() => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
+
 function sandbox() {
   const root = mkdtempSync(join(tmpdir(), "rig-guard-"));
+  made.push(root);
   const bin = join(root, "fakebin");
   mkdirSync(bin);
   for (const t of ["hc", "herdr-app", "node", "mutter", "dbus-run-session"]) {
@@ -49,6 +53,23 @@ describe("inner.sh ABORT guards", () => {
     expect(r.stdout).toContain("ABORT: app home is not inside the rig");
   });
 
+  it("aborts when HOME is outside the rig", () => {
+    const { root, bin } = sandbox();
+    const r = runInner({ XDG_RUNTIME_DIR: `${root}/run`, HERDR_APP_HOME: `${root}/h`, HOME: "/home/user-1", HC_SESSION: "x" }, root, bin);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("ABORT: HOME is not inside the rig");
+  });
+
+  it("aborts when the hc socket is outside the rig", () => {
+    const { root, bin } = sandbox();
+    writeFileSync(join(bin, "hc"), `#!/bin/sh\necho "socket /tmp/elsewhere/s.sock"\n`);
+    chmodSync(join(bin, "hc"), 0o755);
+    const r = runInner({ XDG_RUNTIME_DIR: `${root}/run`, HERDR_APP_HOME: `${root}/h`, HOME: `${root}/h`, HC_SESSION: "x" }, root, bin);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("ABORT: hc socket outside the rig");
+    expect(existsSync(`${root}/reached`)).toBe(false);
+  });
+
   it("aborts when HC_SESSION is unset", () => {
     const { root, bin } = sandbox();
     const r = runInner({ XDG_RUNTIME_DIR: `${root}/run`, HERDR_APP_HOME: `${root}/h`, HOME: `${root}/h` }, root, bin);
@@ -82,10 +103,17 @@ it("aborts when /run/user is visible", () => {
 });
 
 describe("run.sh outer guards", () => {
-  it("aborts when the scratch dir is under /run/user", () => {
-    const r = spawnSync("sh", [join(rigDir, "run.sh"), "isolation", "/run/user/1000/rig-scratch"], { encoding: "utf8" });
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/ABORT: scratch dir under \/run\/user|ABORT: missing tool/);
+  // Never creates anything: the path is judged before mkdir (the dir must not exist afterwards).
+  it.each([
+    ["/run/user/1000/rig-guard-test-scratch", "ABORT: scratch dir under /run/user"],
+    ["/run/user/../user/1000/rig-guard-test-scratch2", "ABORT: scratch dir under /run/user"],
+    [`${process.env.HOME}/.config/herdr-app/rig-guard-test-scratch`, "ABORT: scratch dir inside the live app home"],
+  ])("aborts before creating %s", (path, msg) => {
+    expect(existsSync(path)).toBe(false);
+    const r = spawnSync("sh", [join(rigDir, "run.sh"), "isolation", path], { encoding: "utf8" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(msg);
+    expect(existsSync(path)).toBe(false);
   });
 
   it("aborts on an unknown scenario", () => {

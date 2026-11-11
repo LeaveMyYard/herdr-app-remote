@@ -11,6 +11,10 @@ scenario=${1:?scenario name (rig/scenarios/<name>.sh)}
 base=${2:?scratch dir}
 secs=${3:-45}
 [ -f "$here/scenarios/$scenario.sh" ] || { echo "ABORT: no such scenario: $scenario" >&2; exit 2; }
+# Judge the path BEFORE creating anything: a scratch dir under /run/user must never be made.
+want=$(realpath -m -- "$base")
+case "$want" in /run/user|/run/user/*) echo "ABORT: scratch dir under /run/user" >&2; exit 1;; esac
+case "$want" in "$HOME/.config/herdr-app"|"$HOME/.config/herdr-app"/*) echo "ABORT: scratch dir inside the live app home" >&2; exit 1;; esac
 mkdir -p "$base"
 base=$(cd "$base" && pwd -P)
 case "$base" in /run/user|/run/user/*) echo "ABORT: scratch dir under /run/user" >&2; exit 1;; esac
