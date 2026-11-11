@@ -1,0 +1,1 @@
+{"error":{"hint":"see `hc --help`","kind":"usage","message":"unexpected argument '-x' found tip: to pass '-x' as a value, use '-- -x'"}}

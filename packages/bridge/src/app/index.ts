@@ -19,6 +19,7 @@ import { PluginsTopicDriver } from "../plugins/topic.js";
 import { PushService, type PushOptions } from "../push/service.js";
 import { Security, type DeviceView, type ServeIdentity } from "../security/security.js";
 import { createBridgeServer, type BridgeServer, type GuardVerdict } from "../server.js";
+import { terminalSendActor } from "../terminal/send.js";
 import { UsageTopicDriver } from "../usage.js";
 import type { Json } from "../patch.js";
 import { navigateActor, routeActs, type Actor } from "./act.js";
@@ -77,7 +78,9 @@ export interface AppOptions {
 export type AppLogEvent =
   | { event: "api_listening"; port: number }
   | { event: "funnel"; verdict: FunnelVerdict }
-  | { event: "invalid_topic"; topic: string; error: string };
+  | { event: "invalid_topic"; topic: string; error: string }
+  /** The Activity log could not be written (`ok: false`), or can be again. The panel's Status shows it too. */
+  | { event: "audit_health"; ok: boolean; failures: number };
 
 export interface App {
   readonly hub: Hub;
@@ -119,6 +122,8 @@ export async function startApp(o: AppOptions): Promise<App> {
     (_c, kind, args) => inboxDriver?.act(kind, args),
     // `push.subscribe` / `push.unsubscribe` (S17), bound to the device the socket acts as.
     (c, kind, args) => push?.act(c, kind, args),
+    // `terminal.send` (S16): `hc send` only, under `terminal.input` (expiry, rate limit and audit in Security).
+    terminalSendActor({ run, binaries }),
     navigateActor(o.link),
   ];
   // The desktop panel (S13) hears of security changes and new pairing requests through these two.
@@ -136,6 +141,7 @@ export async function startApp(o: AppOptions): Promise<App> {
       // Step 5 ("Add your phone") follows approvals and revocations.
       setup?.refreshPhone();
     },
+    onAuditHealth: (h) => log({ event: "audit_health", ok: h.ok, failures: h.failures }),
     onPending: (d) => {
       o.link.notify("info", `Approve ${d.name}? Open the Remote panel.`, "link", "open_panel");
       o.onPending?.(d);
@@ -257,6 +263,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     plugins.stop();
     await host.stop().catch(() => {});
     await server.close().catch(() => {});
+    security.close();
     throw e;
   }
   const tick = () => {
@@ -299,6 +306,7 @@ export async function startApp(o: AppOptions): Promise<App> {
       plugins.stop();
       await host.stop();
       await server.close();
+      security.close();
     },
   };
 }

@@ -11,7 +11,10 @@ import {
   CLOSE_NO_VIEW,
   CLOSE_PAUSED,
   CLOSE_REVOKED,
+  ACT_LIMIT,
   CODE_TTL_MS,
+  CONNECT_LIMIT,
+  KIND_LIMITS,
   MAX_PENDING,
   PAIR_FAIL_LIMIT,
   PENDING_TTL_MS,
@@ -57,6 +60,7 @@ beforeEach(async () => {
   clock = 1_000_000;
 });
 afterEach(async () => {
+  sec?.close();
   await srv?.close();
   await rm(dir, { recursive: true, force: true });
 });
@@ -720,5 +724,186 @@ describe("pause", () => {
     await start();
     expect((await http("GET", "/healthz", { Host: "127.0.0.1" })).status).toBe(200);
     expect((await http("POST", "/healthz", { Host: "127.0.0.1" })).status).toBe(403);
+  });
+});
+
+// ---- S16: terminal input expiry, rate limits, audit health ----
+
+describe("terminal.input expiry (S16)", () => {
+  const client = (id: string) => ({ principal: { deviceId: id }, send: () => undefined, close: () => undefined });
+
+  it("is turned off when its time is up: in devices.json, in Activity and for the panel", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const changed = vi.fn();
+      await start();
+      const { id } = await pairedDevice();
+      sec.close();
+      sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: (_c, kind, args) => (acts.push({ kind, args }), { ok: true }), onChange: changed });
+      sec.setCap(id, "terminal.input", true, clock + 60_000);
+      expect(await sec.act(client(id), "terminal.send", { terminal: "t3", text: "hi" })).toMatchObject({ ok: true });
+      changed.mockClear();
+      clock += 60_000;
+      vi.advanceTimersByTime(60_000);
+      expect(changed).toHaveBeenCalled();
+      expect(activity()).toContain("Phone 1: terminal.input expired");
+      const stored = JSON.parse(await readFile(join(dir, "data", "devices.json"), "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+      expect(stored.devices[0]?.caps).toMatchObject({ "terminal.input": false, "terminal.input.until": null });
+      expect(sec.devices()[0]).toMatchObject({ terminal_input_until: null, caps: { "terminal.input": false } });
+      expect(await sec.act(client(id), "terminal.send", { terminal: "t3", text: "hi" })).toMatchObject({ ok: false, code: "forbidden" });
+      expect(acts).toHaveLength(1);
+    } finally {
+      sec.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("a grant that ran out while the bridge was down is off at start", async () => {
+    await start();
+    const { id } = await pairedDevice();
+    sec.setCap(id, "terminal.input", true, clock + 1000);
+    sec.close();
+    await srv.close();
+    clock += 5000;
+    await start();
+    expect(activity()).toContain("Phone 1: terminal.input expired");
+    const stored = JSON.parse(await readFile(join(dir, "data", "devices.json"), "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+    expect(stored.devices[0]?.caps["terminal.input"]).toBe(false);
+    sec.close();
+  });
+
+  it("turning it off, or on with no limit, disarms the timer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await start();
+      const { id } = await pairedDevice();
+      sec.setCap(id, "terminal.input", true, clock + 1000);
+      sec.setCap(id, "terminal.input", true);
+      clock += 2000;
+      vi.advanceTimersByTime(2000);
+      expect(activity()).not.toContain("Phone 1: terminal.input expired");
+      expect(sec.devices()[0]?.caps["terminal.input"]).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      sec.close();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("rate limits (S16, owed from S5)", () => {
+  const client = (id: string) => ({ principal: { deviceId: id }, send: () => undefined, close: () => undefined });
+
+  it("an act loop is refused past the limit, with one Activity line per window, and recovers", async () => {
+    await start();
+    const { id } = await pairedDevice();
+    const c = client(id);
+    for (let i = 0; i < ACT_LIMIT.max; i++) expect(await sec.act(c, "inbox.ack", { key: "alert:1" })).toMatchObject({ ok: true });
+    const before = activity().length;
+    for (let i = 0; i < 20; i++) expect(await sec.act(c, i % 2 ? "inbox.ack" : "exec", { cmd: "x" })).toMatchObject({ ok: false, code: "rate_limited" });
+    const added = activity().slice(before);
+    expect(added).toEqual(["Phone 1 sent actions too fast: refused"]);
+    expect(acts).toHaveLength(ACT_LIMIT.max);
+    clock += ACT_LIMIT.windowMs;
+    expect(await sec.act(c, "inbox.ack", { key: "alert:1" })).toMatchObject({ ok: true });
+  });
+
+  it("one device's loop does not limit another", async () => {
+    await start();
+    const a = await pairedDevice("Phone 1");
+    const b = await pairedDevice("Phone 2");
+    for (let i = 0; i <= ACT_LIMIT.max; i++) await sec.act(client(a.id), "inbox.ack", {});
+    expect(await sec.act(client(a.id), "inbox.ack", {})).toMatchObject({ code: "rate_limited" });
+    expect(await sec.act(client(b.id), "inbox.ack", {})).toMatchObject({ ok: true });
+  });
+
+  it("terminal.send has its own tighter limit, counted only once the capability allows it", async () => {
+    await start();
+    const { id } = await pairedDevice();
+    const c = client(id);
+    const max = KIND_LIMITS.get("terminal.send")!.max;
+    // Refused sends (capability off) don't use up the send window.
+    for (let i = 0; i < 3; i++) expect(await sec.act(c, "terminal.send", { terminal: "t3", text: "x" })).toMatchObject({ code: "forbidden" });
+    sec.setCap(id, "terminal.input", true);
+    for (let i = 0; i < max; i++) expect(await sec.act(c, "terminal.send", { terminal: "t3", text: "hello" })).toMatchObject({ ok: true });
+    expect(await sec.act(c, "terminal.send", { terminal: "t3", text: "hello" })).toMatchObject({ ok: false, code: "rate_limited" });
+    expect(await sec.act(c, "terminal.send", { terminal: "t3", text: "hello" })).toMatchObject({ ok: false, code: "rate_limited" });
+    expect(acts.filter((a) => a.kind === "terminal.send")).toHaveLength(max);
+    expect(activity().filter((t) => t === "Phone 1 terminal.send: too fast, refused")).toHaveLength(1);
+    // Other kinds are not held back by it.
+    expect(await sec.act(c, "inbox.ack", {})).toMatchObject({ ok: true });
+    clock += KIND_LIMITS.get("terminal.send")!.windowMs;
+    expect(await sec.act(c, "terminal.send", { terminal: "t3", text: "hello" })).toMatchObject({ ok: true });
+    expect(activity()).toContain("Phone 1 sent 5 chars to t3");
+  });
+
+  it("a reconnect loop gets 429 past the limit, logged once, and only for that device", async () => {
+    await start();
+    const a = await pairedDevice("Phone 1");
+    const b = await pairedDevice("Phone 2");
+    for (let i = 0; i < CONNECT_LIMIT.max; i++) {
+      const s = await ws(wsHeaders(a.cookie));
+      s.ws.close();
+      await s.closed;
+    }
+    await expect(ws(wsHeaders(a.cookie))).rejects.toThrow(/429/);
+    await expect(ws(wsHeaders(a.cookie))).rejects.toThrow(/429/);
+    expect(activity().filter((t) => t === "Phone 1 reconnected too often: refused for a minute")).toHaveLength(1);
+    const other = await ws(wsHeaders(b.cookie));
+    other.ws.close();
+    await other.closed;
+    clock += CONNECT_LIMIT.windowMs;
+    const again = await ws(wsHeaders(a.cookie));
+    again.ws.close();
+    await again.closed;
+  });
+
+});
+
+describe("audit health (S16, owed from S5)", () => {
+  const client = (id: string) => ({ principal: { deviceId: id }, send: () => undefined, close: () => undefined });
+  const breakLog = async () => {
+    const f = join(dir, "data", "activity.jsonl");
+    await rm(f, { force: true });
+    // A directory where the file should be: every append fails with EISDIR.
+    await import("node:fs/promises").then((fs) => fs.mkdir(f));
+  };
+  const fixLog = () => rm(join(dir, "data", "activity.jsonl"), { recursive: true, force: true });
+
+  it("a failed write is flagged, refuses terminal.send until a line goes through, and clears", async () => {
+    const health = vi.fn();
+    await start();
+    const { id } = await pairedDevice();
+    sec.close();
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: (_c, kind, args) => (acts.push({ kind, args }), { ok: true }), onAuditHealth: health });
+    sec.setCap(id, "terminal.input", true);
+    expect(sec.auditHealth).toEqual({ ok: true, since: null, failures: 0 });
+    await breakLog();
+    // The act itself still completes (the decision was made); its lost line is flagged.
+    expect(await sec.act(client(id), "inbox.ack", {})).toMatchObject({ ok: true });
+    expect(sec.auditHealth).toMatchObject({ ok: false, since: clock, failures: 1 });
+    expect(health).toHaveBeenLastCalledWith({ ok: false, since: clock, failures: 1 });
+    // terminal.send's only safeguard is its audit line: refused while the log is failing.
+    expect(await sec.act(client(id), "terminal.send", { terminal: "t3", text: "hello" })).toMatchObject({ ok: false, code: "audit_unavailable" });
+    expect(acts.filter((a) => a.kind === "terminal.send")).toHaveLength(0);
+    expect(sec.auditHealth.failures).toBe(2);
+    await fixLog();
+    // The next refusal line goes through: the flag clears and the following send runs.
+    expect(await sec.act(client(id), "terminal.send", { terminal: "t3", text: "hello" })).toMatchObject({ ok: false, code: "audit_unavailable" });
+    expect(sec.auditHealth.ok).toBe(true);
+    expect(health).toHaveBeenLastCalledWith({ ok: true, since: null, failures: 0 });
+    expect(await sec.act(client(id), "terminal.send", { terminal: "t3", text: "hello" })).toMatchObject({ ok: true });
+    expect(activity()).toContain("Phone 1 sent 5 chars to t3");
+    sec.close();
+  });
+
+  it("a refusal whose line can't be written is still a refusal, not an internal error", async () => {
+    await start();
+    const { id } = await pairedDevice();
+    await breakLog();
+    expect(await sec.act(client(id), "terminal.send", { terminal: "t3", text: "x" })).toEqual({ ok: false, code: "forbidden" });
+    expect(await sec.act(client(id), "exec", {})).toEqual({ ok: false, code: "unsupported_action" });
+    expect(sec.auditHealth.ok).toBe(false);
+    await fixLog();
   });
 });

@@ -1,9 +1,10 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import claudeIcon from "../assets/claude.svg";
 import codexIcon from "../assets/codex.svg";
 import { AnsiText } from "../components/AnsiText";
 import type { AgentStatus } from "../model";
+import { ChatComposer, type ChatInput } from "./ChatComposer";
 
 const HARNESS_ICON = { claude: claudeIcon, codex: codexIcon } as const;
 
@@ -30,6 +31,25 @@ export interface ChatProps {
   stale?: string | undefined;
   question?: ChatQuestion | undefined;
   backHref?: string;
+  /** Typing to the terminal (S16). Without it, or while `terminal.input` is off or has run out, the chat is read-only. */
+  input?: ChatInput | undefined;
+  /** The terminal the composer sends to; required for the composer to show. */
+  terminal?: string | undefined;
+  now?: () => number;
+}
+
+/** Whether the composer shows: on, and not past its expiry. Re-renders when the expiry passes. */
+function useInputOn(input: ChatInput | undefined, now: () => number): boolean {
+  const until = input?.enabled ? input.until : null;
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (until === null) return;
+    const left = until - now();
+    if (left <= 0) return;
+    const t = setTimeout(() => bump((n) => n + 1), Math.min(left, 2 ** 31 - 1));
+    return () => clearTimeout(t);
+  }, [until, now]);
+  return !!input?.enabled && (until === null || now() < until);
 }
 
 /** What each `stale` reason means for this screen. An unknown reason still says the text may be old. */
@@ -64,10 +84,11 @@ function Status({ status }: { status: AgentStatus }) {
 }
 
 /**
- * Read-only chat: the terminal's text, an inbox banner when a question waits, and a footer that says input is off.
- * Sending is S16 (`terminal.input`); this screen has no composer and no keys.
+ * The chat: the terminal's text, an inbox banner when a question waits, and a footer. With `terminal.input` on, the
+ * footer is the key bar and composer (S16); otherwise it says typing is off.
  */
-export function Chat({ agent, topic, stale, question, backHref = "#/agents" }: ChatProps) {
+export function Chat({ agent, topic, stale, question, backHref = "#/agents", input, terminal, now = Date.now }: ChatProps) {
+  const typing = useInputOn(input, now) && terminal !== undefined;
   const [fit, setFit] = useState(loadFit);
   const toggleFit = () => {
     setFit((f) => {
@@ -145,9 +166,15 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents" }: C
           <span className="chat-banner-go">Answer ›</span>
         </a>
       ) : null}
-      <footer className="col nf chat-foot" data-vis-mask="">
-        <p className="chat-ro">Read-only here. Typing to the terminal is off for this device.</p>
-      </footer>
+      {typing && input && terminal !== undefined ? (
+        <footer className="col nf chat-foot chat-foot-on" data-vis-mask="">
+          <ChatComposer terminal={terminal} agentName={agent.name} input={input} />
+        </footer>
+      ) : (
+        <footer className="col nf chat-foot" data-vis-mask="">
+          <p className="chat-ro">Read-only here. Typing to the terminal is off for this device.</p>
+        </footer>
+      )}
     </>
   );
 }

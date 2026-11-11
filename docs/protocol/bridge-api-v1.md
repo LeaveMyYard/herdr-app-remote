@@ -66,9 +66,25 @@ Checked by the bridge for every `act`:
 
 There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other kind is refused and logged.
 
+`terminal.input` is turned on from the desktop's Remote panel, with no limit or for a chosen time. When the time is up the bridge turns it off by itself: in `devices.json`, in Activity ("Phone 1: terminal.input expired") and in the panel. A grant that ran out while the bridge was down is turned off when it starts. Every check also compares the time, so an expired grant is refused even before that happens.
+
+### Rate limits
+
+Per approved device, on top of the pairing limit above:
+
+| what | limit | past it |
+|---|---|---|
+| WebSocket upgrades | 20 per minute | `429 rate_limited` on the upgrade |
+| `act`s of any kind and outcome | 30 per 10 s | `res` `rate_limited` |
+| `terminal.send` (counted once the capability allows it) | 6 per 10 s | `res` `rate_limited` |
+
+A refusal for a limit is written to Activity once per filled window, not once per attempt, so a looping client can't flood the log. The windows slide: the next attempt is allowed once the oldest counted one is older than the window.
+
 ### Audit
 
 `activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers and lengths only, plus, for an answer, the option label the bridge resolved from its own inbox data. A label sent by the client is never logged. Examples: "Phone 1 sent 12 chars to t3", "Phone 1 answered Q119 (Option B)".
+
+A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send` alone is refused (`audit_unavailable`) while the log is failing, because its audit line is its whole safeguard; the refusal's own line is the probe that clears the flag.
 
 ### Web Push (S17)
 
@@ -175,7 +191,18 @@ The desktop panel reaches `check`, `start` and `stop` through the mod link (S13'
 
 Payload: `{terminal, lines, truncated?}`. `lines` is an array of lines, each an array of spans `{t, fg?, bg?, b?, d?, i?, u?, r?}`. `t` is printable text only; the bridge has already turned ANSI into these fields and dropped every other escape sequence and control character. `fg` and `bg` are a palette index 0 to 15 (the theme's ANSI colours) or `#rrggbb`. `r` is reverse video. A client renders `t` as text, never as HTML. At most 500 lines are kept (`truncated` says older ones were dropped).
 
-Source: while at least one client is subscribed, the bridge runs `hc read <t> --lines 200` once a second (never overlapping, backing off to 5 s while it fails) and `hc ls --json` on the first read and every tenth one after, to notice a terminal that has closed (`stale` `terminal_not_found`). Nothing runs with no subscriber, and at most 6 chats are read at once (`too_many_chats`). `hc events` is not used: it has not been tested against a live core (PLAN section 8). The `hc ls --json` shape is likewise unverified, so its output is read tolerantly and an unrecognised shape is ignored. The topic needs the `view` capability and sends nothing to the terminal; input is `terminal.send` (S16).
+Source: while at least one client is subscribed, the bridge runs `hc read <t> --lines 200` once a second (never overlapping, backing off to 5 s while it fails) and `hc ls --json` on the first read and every tenth one after, to notice a terminal that has closed (`stale` `terminal_not_found`). Nothing runs with no subscriber, and at most 6 chats are read at once (`too_many_chats`). `hc events` is not used: it has not been tested against a live core (PLAN section 8). The `hc ls --json` shape is likewise unverified, so its output is read tolerantly and an unrecognised shape is ignored. The topic needs the `view` capability and sends nothing to the terminal; input is `terminal.send` (S16, below).
+
+### `terminal.send` (S16)
+
+`act terminal.send {terminal, text}` types into a terminal. It needs `terminal.input`. The bridge runs exactly `hc send --json -- <terminal> <text>`, with no shell: hc pastes the text and presses Enter. The `--` matters: without it a text such as `--force` would be read as hc's own flag. `--force` itself is never passed, so hc still refuses to type into a program that is blocked on a dialog.
+
+- `terminal` must match `TERMINAL_ID`. `text` is at most 4000 characters and may hold newlines and tabs but no other control character (ESC above all), no DEL and no C1 control (`TerminalSendArgs` in the protocol package); `\r` is refused, so a client sends `\n`. An empty `text` presses Enter alone. Anything else is `bad_args`, and hc doesn't run.
+- That is all `hc send` can do: checked in the rig against hc 0.1.19, it has no special keys (Esc, Tab, Ctrl-C, arrows). Those belong to a separate `hc keys`, which is not exposed. The PWA's key bar therefore has only ⏎ (an empty send) and `/` (which types a slash into the composer and sends nothing).
+- One send runs at a time per device; a second while one runs is `busy`. A send that times out (15 s; hc waits for a person at the desktop to stop typing) holds the device for one more second while hc is killed.
+- Results: `ok` when hc exits 0 with a JSON object. hc prints a refusal as `{"error":{"kind":…}}` on stderr; the kinds that mean nothing was typed map to `terminal_not_found` (`not_found`, `needs_target`), `terminal_finished` (`finished`) and `send_refused` (`usage`, `invalid_params`). `hc_missing` when hc isn't installed. Anything else (another exit, another kind, bad output, `timeout`) may have typed: `send_failed` or `timeout` with `unknown_effect`. The PWA says so and re-reads the chat; it never sends again by itself.
+- Activity records the length only: "Phone 1 sent 12 chars to t3". The text is never logged, echoed in a `res`, or kept.
+- The PWA asks before the first send to each terminal while it is open ("Type this into Agent 1's terminal?"); the bridge doesn't depend on that.
 
 ### Resume and consistency
 
@@ -211,6 +238,8 @@ Source: while at least one client is subscribed, the bridge runs `hc read <t> --
 | `unpaired` | the device was revoked, or isn't approved; the socket is closed too |
 | `paused` | remote access is paused |
 | `internal_error` | the handler threw; always with `unknown_effect: true` |
+| `rate_limited` | the device is over a rate limit (see Rate limits) |
+| `audit_unavailable` | `terminal.send` while Activity can't be written |
 
 The device is re-checked before every `act`, so a revoke or pause refuses the next one. An `act` that is already running when it lands still completes.
 

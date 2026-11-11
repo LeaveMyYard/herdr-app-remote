@@ -32,6 +32,7 @@ const ok = (stdout: string): RunResult => ({ code: 0, stdout, stderr: "" });
 const fakeRun: Runner = async (cmd, args) => {
   calls.push({ cmd, args });
   if (cmd === "fake-tailscale") return tsStatus;
+  if (cmd === "fake-hc" && args[0] === "send") return ok('{"started":null,"status":null,"turn":0}\n');
   if (cmd === "fake-hc") return ok("hc 0.9.0\n");
   if (cmd === "fake-inbox") return ok("herdr-inbox app v1\n");
   if (cmd === "fake-usagebar" || (cmd === "/usr/bin/env" && args.includes("collect"))) return ok(USAGE_DOC);
@@ -130,13 +131,14 @@ function http(method: string, path: string, headers: Headers, body?: string) {
   });
 }
 
-async function paired(caps: { navigate?: boolean } = {}): Promise<string> {
+async function paired(caps: { navigate?: boolean; terminal?: boolean } = {}): Promise<string> {
   const { code } = app!.security.issueCode();
   const r = await http("POST", "/api/v1/pair", OK_POST, JSON.stringify({ code, name: "Phone 1" }));
   expect(r.status).toBe(202);
   const id = (JSON.parse(r.body) as { device: { id: string } }).device.id;
   app!.security.approve(id);
   if (caps.navigate) app!.security.setCap(id, "navigate", true);
+  if (caps.terminal) app!.security.setCap(id, "terminal.input", true);
   const sc = r.headers["set-cookie"];
   return (Array.isArray(sc) ? sc[0]! : sc!).split(";")[0]!;
 }
@@ -387,6 +389,24 @@ describe("startApp: topics over the link", () => {
     expect(read.args.slice(0, 2)).toEqual(["read", "t3"]);
     // Read-only: nothing is ever sent to a terminal.
     expect(calls.some((c) => c.args.includes("send"))).toBe(false);
+  });
+
+  it("terminal.send runs hc send only with terminal.input, and Activity holds the length, never the text", async () => {
+    await start();
+    const off = await phone(await paired());
+    send(off, { type: "hello", api: 1 });
+    send(off, { type: "act", id: "s0", kind: "terminal.send", args: { terminal: "t3", text: "secret words here" } });
+    expect(await off.until(resOf("s0"))).toMatchObject({ ok: false, code: "forbidden" });
+    expect(calls.some((c) => c.args[0] === "send")).toBe(false);
+
+    const on = await phone(await paired({ terminal: true }));
+    send(on, { type: "hello", api: 1 });
+    send(on, { type: "act", id: "s1", kind: "terminal.send", args: { terminal: "t3", text: "secret words here" } });
+    expect(await on.until(resOf("s1"))).toMatchObject({ ok: true });
+    expect(calls.filter((c) => c.args[0] === "send")).toEqual([{ cmd: "fake-hc", args: ["send", "--json", "--", "t3", "secret words here"] }]);
+    const text = app!.security.activity().map((e) => e.text);
+    expect(text).toContain("Phone 1 (2) sent 17 chars to t3");
+    expect(JSON.stringify(app!.security.activity())).not.toContain("secret");
   });
 
   it("stop() closes the API listener and leaves the link server to its owner", async () => {

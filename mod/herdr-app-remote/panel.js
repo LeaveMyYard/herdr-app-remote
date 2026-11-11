@@ -24,7 +24,7 @@ const CAPS = Object.freeze([
   ['view', 'View', 'See agents, the inbox and usage'],
   ['inbox.answer', 'Answer questions', 'Answer, draft and dismiss in the inbox'],
   ['navigate', 'Navigate', 'Focus agents, tabs and spaces on this computer'],
-  ['terminal.input', 'Terminal input', 'Send keys and text to terminals'],
+  ['terminal.input', 'Terminal input', 'Type text into terminals, then Enter'],
   ['push', 'Notifications', 'Receive push notifications'],
 ]);
 

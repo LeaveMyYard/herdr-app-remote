@@ -40,6 +40,7 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const p of peers.splice(0)) p.destroy();
   driver.stop();
+  security.close();
   await server.close();
   await rm(dir, { recursive: true, force: true });
 });
@@ -142,6 +143,21 @@ describe("panel acts", () => {
     expect(d.terminal_input_until).toBeGreaterThanOrEqual(before + 3_600_000);
     expect(await act(p, "device.cap", { id: APPROVED, cap: "terminal.input", on: false })).toMatchObject({ ok: true });
     expect(security.devices().find((x) => x.id === APPROVED)!.caps["terminal.input"]).toBe(false);
+  });
+
+  it("a failing Activity log shows as a bad Status check, and clears when it writes again", async () => {
+    const { mkdir } = await import("node:fs/promises");
+    expect(driver.view().checks.some((c) => c.id === "audit")).toBe(false);
+    await mkdir(join(dir, "activity.jsonl"));
+    // The rename is done; its Activity line is not, and the caller hears of it.
+    expect(() => security.rename(APPROVED, "Laptop 2")).toThrow();
+    expect(security.auditHealth.ok).toBe(false);
+    const check = driver.view().checks.find((c) => c.id === "audit");
+    expect(check).toMatchObject({ state: "bad", label: "Activity log can't be written" });
+    expect(check?.detail).toMatch(/^1 entry lost since \d\d:\d\d; terminal input is refused until it works$/);
+    await rm(join(dir, "activity.jsonl"), { recursive: true });
+    security.rename(APPROVED, "Laptop 3");
+    expect(driver.view().checks.some((c) => c.id === "audit")).toBe(false);
   });
 
   it("minutes on any other capability, or on off, is refused and changes nothing", async () => {

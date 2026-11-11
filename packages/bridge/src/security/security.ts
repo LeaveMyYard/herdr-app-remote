@@ -8,6 +8,7 @@ import { ACTION_CAPS, CAPABILITIES, defaultCaps, hasCap, type Capability } from 
 import { DeviceStore, newDeviceId, type Device } from "./devices.js";
 import { headerValues, readCookie, singleHeader } from "./headers.js";
 import { qrSvg } from "./qr.js";
+import { RateLimiter, type Limit } from "./rate.js";
 
 /** The tailnet name the PWA is served under, and the desktop owner's Tailscale login. */
 export interface ServeIdentity {
@@ -30,6 +31,17 @@ export interface SecurityOptions {
   /** Devices, capabilities or pause changed. */
   onChange?: () => void;
   audit?: Omit<AuditOptions, "dir">;
+  /** An Activity line could not be written (`ok: false`), or could again after failing (`ok: true`). */
+  onAuditHealth?: (h: AuditHealth) => void;
+}
+
+/** Whether the Activity log is being written. A failed write is flagged here and in the desktop panel. */
+export interface AuditHealth {
+  ok: boolean;
+  /** Epoch ms of the first failed write since the last good one; null while ok. */
+  since: number | null;
+  /** Failed writes since the last good one. */
+  failures: number;
 }
 
 /** What the desktop panel sees of a device. Never includes the token hash. */
@@ -58,6 +70,17 @@ export const MAX_PENDING = 3;
 /** Failed code redemptions allowed per minute before `/api/v1/pair` answers 429. */
 export const PAIR_FAIL_LIMIT = 10;
 const BODY_LIMIT = 1024;
+
+/** WebSocket upgrades one approved device may make per minute; past it the upgrade answers 429 (a reconnect loop). */
+export const CONNECT_LIMIT: Limit = { max: 20, windowMs: 60_000 };
+/** `act`s one device may send per 10 s, of any kind and outcome (refused ones count: they are audited too). */
+export const ACT_LIMIT: Limit = { max: 30, windowMs: 10_000 };
+/** Tighter limits for single kinds, on top of {@link ACT_LIMIT}. A person sends a few messages, not a stream. */
+export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([["terminal.send", { max: 6, windowMs: 10_000 }]]);
+/** Kinds that must not run while the Activity log can't be written: their whole safeguard is the audit line. */
+const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send"]);
+/** setTimeout's ceiling (about 24.8 days); a later expiry is re-armed when this fires. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /** WebSocket close codes the bridge uses for security drops. */
 export const CLOSE_REVOKED = 4001;
@@ -108,6 +131,12 @@ export class Security {
    * transport is terminated shortly after.
    */
   private readonly dropped = new WeakSet<HubClient>();
+  private readonly connectLimit: RateLimiter;
+  private readonly actLimit: RateLimiter;
+  private readonly kindLimits = new Map<string, RateLimiter>();
+  private readonly onAuditHealth: ((h: AuditHealth) => void) | undefined;
+  private health: AuditHealth = { ok: true, since: null, failures: 0 };
+  private expiryTimer: NodeJS.Timeout | null = null;
 
   constructor(opts: SecurityOptions) {
     this.store = new DeviceStore(opts.dataDir);
@@ -116,8 +145,20 @@ export class Security {
     this.inner = opts.inner;
     this.onPending = opts.onPending;
     this.onChange = opts.onChange;
+    this.onAuditHealth = opts.onAuditHealth;
+    this.connectLimit = new RateLimiter(CONNECT_LIMIT, this.now);
+    this.actLimit = new RateLimiter(ACT_LIMIT, this.now);
+    for (const [kind, limit] of KIND_LIMITS) this.kindLimits.set(kind, new RateLimiter(limit, this.now));
     this.serve = null;
     this.setServe(opts.serve ?? null);
+    // A `terminal.input` that ran out while the bridge was down is turned off now.
+    this.scheduleExpiry();
+  }
+
+  /** Stops the expiry timer. The store and the log need no closing. */
+  close(): void {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
   }
 
   // ---- configuration ----
@@ -212,6 +253,12 @@ export class Security {
       if (!d || d.state !== "approved") return deny(401, "unpaired");
       if (kind === "ws") {
         if (!this.mayView(d)) return FORBIDDEN;
+        // Counted only for upgrades that would be allowed, so a refused stranger can't use up a device's window.
+        const v = this.connectLimit.take(d.id);
+        if (!v.ok) {
+          if (v.firstRefusal) this.bestEffort(() => this.audit({ event: "device.rate_limit", device: d.name, text: `${d.name} reconnected too often: refused for a minute`, ok: false, code: "rate_limited" }));
+          return deny(429, "rate_limited");
+        }
         return { allow: true, principal: { deviceId: d.id } };
       }
     }
@@ -439,8 +486,46 @@ export class Security {
       x.caps[cap] = on;
       if (cap === "terminal.input") x.caps["terminal.input.until"] = on ? until : null;
     });
-    this.audit({ event: "device.cap", device: d.name, text: `${d.name}: ${cap} ${on ? "on" : "off"}` });
+    this.scheduleExpiry();
+    const limit = cap === "terminal.input" && on && until !== null ? ` until ${new Date(until).toISOString().slice(0, 16)}Z` : "";
+    this.audit({ event: "device.cap", device: d.name, text: `${d.name}: ${cap} ${on ? "on" : "off"}${limit}` });
     this.changed();
+  }
+
+  // ---- terminal.input expiry ----
+
+  /**
+   * Turns off every `terminal.input` whose time is up, and arms a timer for the next one. `hasCap` already reads an
+   * expired grant as off at every check; this makes it off in `devices.json`, says so in Activity and tells the
+   * panel, so nothing shows a grant that no longer works.
+   */
+  private scheduleExpiry(): void {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
+    const now = this.now();
+    let next = Infinity;
+    let expired = false;
+    for (const d of this.store.all()) {
+      const until = d.caps["terminal.input.until"];
+      if (!d.caps["terminal.input"] || until === null) continue;
+      if (until > now) {
+        next = Math.min(next, until);
+        continue;
+      }
+      expired = true;
+      this.bestEffort(() => {
+        this.store.update(d.id, (x) => {
+          x.caps["terminal.input"] = false;
+          x.caps["terminal.input.until"] = null;
+        });
+      });
+      this.bestEffort(() => this.audit({ event: "device.cap", device: d.name, text: `${d.name}: terminal.input expired` }));
+    }
+    if (expired) this.changed();
+    if (next !== Infinity) {
+      this.expiryTimer = setTimeout(() => this.scheduleExpiry(), Math.max(1, Math.min(next - now, MAX_TIMER_MS)));
+      this.expiryTimer.unref();
+    }
   }
 
   private drop(id: string, code: number, reason: string): void {
@@ -495,14 +580,30 @@ export class Security {
       return { ok: false, code: "unpaired" };
     }
     let what = describeAct(kind, args);
+    // Before anything else, so a loop of refused or unknown acts can't flood Activity either.
+    const lim = this.actLimit.take(d.id);
+    if (!lim.ok) {
+      if (lim.firstRefusal) this.bestEffort(() => this.audit({ event: "act", device: d.name, text: `${d.name} sent actions too fast: refused`, ok: false, code: "rate_limited" }));
+      return { ok: false, code: "rate_limited" };
+    }
     const cap = ACTION_CAPS.get(kind);
     if (cap === undefined || !this.inner) {
-      this.audit({ event: "act", device: d.name, text: `${d.name} ${what}: refused`, ok: false, code: "unsupported_action" });
+      this.bestEffort(() => this.audit({ event: "act", device: d.name, text: `${d.name} ${what}: refused`, ok: false, code: "unsupported_action" }));
       return { ok: false, code: "unsupported_action" };
     }
     if (!hasCap(d.caps, cap, this.now())) {
-      this.audit({ event: "act", device: d.name, text: `${d.name} ${what}: refused`, ok: false, code: "forbidden" });
+      this.bestEffort(() => this.audit({ event: "act", device: d.name, text: `${d.name} ${what}: refused`, ok: false, code: "forbidden" }));
       return { ok: false, code: "forbidden" };
+    }
+    const kindLim = this.kindLimits.get(kind)?.take(d.id);
+    if (kindLim && !kindLim.ok) {
+      if (kindLim.firstRefusal) this.bestEffort(() => this.audit({ event: "act", device: d.name, text: `${d.name} ${kind}: too fast, refused`, ok: false, code: "rate_limited" }));
+      return { ok: false, code: "rate_limited" };
+    }
+    if (NEEDS_AUDIT.has(kind) && !this.health.ok) {
+      // Writing the refusal is also the probe: once a line goes through, the flag clears and the next send runs.
+      this.bestEffort(() => this.audit({ event: "act", device: d.name, text: `${d.name} ${what}: refused, Activity can't be written`, ok: false, code: "audit_unavailable" }));
+      return { ok: false, code: "audit_unavailable" };
     }
     let res: ActResult;
     try {
@@ -516,7 +617,7 @@ export class Security {
       entry.code = res.unknown_effect ? "unknown_effect" : (res.code ?? "failed");
       entry.text += res.unknown_effect ? ": result unknown" : ": failed";
     }
-    this.bestEffort(() => this.log.record(entry));
+    this.bestEffort(() => this.record(entry));
     // `audit_label` never reaches the client: the Hub's `toRes` copies only ok, code, unknown_effect, message and closed.
     return res;
   };
@@ -553,8 +654,38 @@ export class Security {
     return this.log.tail(n);
   }
 
+  /** Whether Activity is being written; a failing log is flagged in the desktop panel. */
+  get auditHealth(): AuditHealth {
+    return { ...this.health };
+  }
+
   private audit(e: Omit<AuditEntry, "ts">): void {
-    this.log.record({ ts: this.now(), ...e });
+    this.record({ ts: this.now(), ...e });
+  }
+
+  /** Every Activity write goes through here, so a failure is flagged (and still thrown to the caller). */
+  private record(entry: AuditEntry): void {
+    try {
+      this.log.record(entry);
+    } catch (e) {
+      const first = this.health.ok;
+      this.health = { ok: false, since: this.health.since ?? this.now(), failures: this.health.failures + 1 };
+      if (first) this.healthChanged();
+      throw e;
+    }
+    if (!this.health.ok) {
+      this.health = { ok: true, since: null, failures: 0 };
+      this.healthChanged();
+    }
+  }
+
+  private healthChanged(): void {
+    try {
+      this.onAuditHealth?.(this.auditHealth);
+    } catch {
+      // A listener's failure must not hide the audit failure itself.
+    }
+    this.changed();
   }
 
   /** Bookkeeping that must not turn a done security change (or a close) into a throw. */

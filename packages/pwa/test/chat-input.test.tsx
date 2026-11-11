@@ -1,0 +1,153 @@
+import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { chatAgent, chatTopic } from "../src/chat-fixtures";
+import { terminalInputOf } from "../src/bridge/me";
+import { Chat } from "../src/screens/Chat";
+import { forgetConfirmations, sendWords, textProblem, type ChatInput, type SendOutcome } from "../src/screens/ChatComposer";
+
+// Fake data only.
+function input(over: Partial<ChatInput> = {}, reply: SendOutcome = { ok: true }) {
+  const sent: string[] = [];
+  const send = vi.fn(async (text: string) => {
+    sent.push(text);
+    return reply;
+  });
+  return { sent, send, input: { enabled: true, until: null, send, ...over } satisfies ChatInput };
+}
+
+const props = { agent: chatAgent, topic: chatTopic, terminal: "t3" };
+const box = () => screen.getByRole("textbox", { name: "Message to the agent" });
+const confirm = () => screen.getByRole("alertdialog");
+
+beforeEach(() => forgetConfirmations());
+afterEach(() => vi.useRealTimers());
+
+describe("Chat composer (terminal.input)", () => {
+  it("is read-only while terminal.input is off, or without an input", () => {
+    const { rerender } = render(<Chat {...props} input={input({ enabled: false }).input} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText(/Read-only here/)).toBeInTheDocument();
+    rerender(<Chat {...props} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("shows the composer and only the keys hc send can press", () => {
+    render(<Chat {...props} input={input().input} />);
+    expect(box()).toHaveAttribute("placeholder", "Type to the terminal…");
+    const keys = screen.getByRole("toolbar", { name: "Keys" });
+    expect([...keys.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["Enter", "Type a slash"]);
+    for (const k of ["Esc", "Tab", "⇧Tab", "Ctrl-C", "↑", "↓"]) expect(screen.queryByRole("button", { name: k })).toBeNull();
+    expect(screen.queryByText(/Read-only here/)).toBeNull();
+  });
+
+  it("asks before the first send to a terminal; Cancel sends nothing", async () => {
+    const { sent, input: i } = input();
+    render(<Chat {...props} input={i} />);
+    await userEvent.type(box(), "hello agent");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(confirm()).toHaveTextContent("Type this into Agent 1 · Parser rewrite's terminal?");
+    expect(sent).toEqual([]);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(sent).toEqual([]);
+    expect(box()).toHaveValue("hello agent");
+  });
+
+  it("sends after the confirmation, clears the text, and doesn't ask again for that terminal", async () => {
+    const { sent, input: i } = input();
+    const { rerender } = render(<Chat {...props} input={i} />);
+    await userEvent.type(box(), "first");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(confirmSend());
+    expect(sent).toEqual(["first"]);
+    expect(box()).toHaveValue("");
+    await userEvent.type(box(), "second");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(sent).toEqual(["first", "second"]);
+    // Another terminal asks again.
+    rerender(<Chat {...props} terminal="t4" input={i} />);
+    await userEvent.type(box(), "third");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(confirm()).toBeInTheDocument();
+    expect(sent).toEqual(["first", "second"]);
+  });
+
+  it("⏎ presses Enter alone (an empty send, confirmed the first time) and keeps the draft", async () => {
+    const { sent, input: i } = input();
+    render(<Chat {...props} input={i} />);
+    await userEvent.type(box(), "draft");
+    await userEvent.click(screen.getByRole("button", { name: "Enter" }));
+    expect(confirm()).toHaveTextContent("Press Enter in");
+    await userEvent.click(confirmSend());
+    expect(sent).toEqual([""]);
+    expect(box()).toHaveValue("draft");
+  });
+
+  it("/ types a slash into the composer and sends nothing", async () => {
+    const { sent, input: i } = input();
+    render(<Chat {...props} input={i} />);
+    await userEvent.click(screen.getByRole("button", { name: "Type a slash" }));
+    expect(box()).toHaveValue("/");
+    expect(sent).toEqual([]);
+  });
+
+  it.each([
+    [{ ok: false, code: "forbidden" }, /off for this device/],
+    [{ ok: false, code: "rate_limited" }, /too fast/],
+    [{ ok: false, code: "busy" }, /Still sending/],
+    [{ ok: false, code: "terminal_finished" }, /has closed/],
+    [{ ok: false, code: "audit_unavailable" }, /can't record/],
+    [{ ok: false, code: "timeout", unknown_effect: true }, /may have been sent/],
+  ] as [SendOutcome, RegExp][])("says what %j means and keeps the text, never resending", async (reply, words) => {
+    const { sent, input: i } = input({}, reply);
+    render(<Chat {...props} input={i} />);
+    await userEvent.type(box(), "hello");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(confirmSend());
+    expect(screen.getByRole("status")).toHaveTextContent(words);
+    expect(box()).toHaveValue("hello");
+    expect(sent).toEqual(["hello"]);
+  });
+
+  it("refuses control characters and overlong text before sending", () => {
+    expect(textProblem("ok\n\ttab")).toBeNull();
+    expect(textProblem("esc \u001b[A")).toMatch(/control characters/);
+    expect(textProblem("x".repeat(4001))).toMatch(/Too long/);
+    expect(sendWords({ ok: false, code: "something_new" })).toBe("Not sent.");
+  });
+
+  it("goes read-only by itself when the expiry passes", () => {
+    vi.useFakeTimers();
+    let now = 1_000_000;
+    render(<Chat {...props} now={() => now} input={input({ until: now + 60_000 }).input} />);
+    expect(box().getAttribute("placeholder")).toMatch(/^Type to the terminal… \(on until \d\d:\d\d\)$/);
+    act(() => {
+      now += 60_000;
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText(/Read-only here/)).toBeInTheDocument();
+  });
+
+  it("an expiry already past shows no composer", () => {
+    render(<Chat {...props} now={() => 2_000} input={input({ until: 1_000 }).input} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});
+
+describe("terminalInputOf (/api/v1/me)", () => {
+  it("reads the capability and expiry, and anything odd as off", () => {
+    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: 5 } })).toEqual({ enabled: true, until: 5 });
+    expect(terminalInputOf({ device: { caps: { "terminal.input": "yes" } } })).toEqual({ enabled: false, until: null });
+    expect(terminalInputOf(null)).toEqual({ enabled: false, until: null });
+    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: "soon" } })).toEqual({ enabled: true, until: null });
+  });
+});
+
+/** The confirmation's own Send button (the composer has one too). */
+function confirmSend(): HTMLElement {
+  const dlg = confirm();
+  return [...dlg.querySelectorAll("button")].find((b) => b.textContent === "Send")! as HTMLElement;
+}

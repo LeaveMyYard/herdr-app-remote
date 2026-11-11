@@ -10,6 +10,7 @@ import { nodeUid, selectAgents, selectBasic, selectSpaces, swarmScope, type Swar
 import { AgentsBasic } from "./screens/AgentsBasic";
 import { AgentsRich } from "./screens/AgentsRich";
 import { Chat, ChatPicker } from "./screens/Chat";
+import type { ChatInput } from "./screens/ChatComposer";
 import { Inbox } from "./screens/Inbox";
 import { Peek, type TranscriptPage } from "./screens/Peek";
 import { Soon } from "./screens/Soon";
@@ -78,7 +79,7 @@ export interface LiveSources {
   onUsageFilter: (filter: bridgeApi.UsageTopic["filter"]) => void;
   onUsageRefresh: () => Promise<unknown>;
   /** The open chat's `chat:<t>` topic (LiveApp subscribes it from the route). */
-  chat?: { topic: bridgeApi.ChatTopic | undefined; stale: string | null } | undefined;
+  chat?: { topic: bridgeApi.ChatTopic | undefined; stale: string | null; terminal?: string; input?: ChatInput | undefined } | undefined;
   /** Sends an inbox `act` (draft, answer, dismiss, retry, stop showing, ack); resolves with the bridge's `res`. */
   inboxAct?: ActFn | undefined;
   /** Web Push on this phone (S17): the Inbox shows the notifications row with it. */
@@ -241,6 +242,8 @@ export function App({ connection, tabBadges, data, live, act }: AppProps) {
           topic={live ? live.chat?.topic : demo?.topic}
           stale={live?.chat?.stale ?? undefined}
           question={demo?.question}
+          input={live?.chat?.input}
+          terminal={live?.chat?.terminal}
         />
       </div>
     );

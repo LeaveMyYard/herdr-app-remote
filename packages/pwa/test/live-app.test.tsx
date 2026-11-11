@@ -5,7 +5,9 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BridgeClient } from "../src/bridge/client";
+import type { TerminalInputView } from "../src/bridge/me";
 import { hostNameFrom, LiveApp } from "../src/LiveApp";
+import { forgetConfirmations } from "../src/screens/ChatComposer";
 import { demoUsage } from "../src/usage-fixtures";
 import { FakeSocket } from "./fake-socket";
 
@@ -27,6 +29,8 @@ const flush = () => act(async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 });
 
+let terminalInput: TerminalInputView | null;
+let meReads: number;
 async function mount(hash = "#/agents") {
   window.location.hash = hash;
   client = new BridgeClient({
@@ -39,7 +43,16 @@ async function mount(hash = "#/agents") {
     checkMe: async () => me,
   });
   client.start();
-  render(<LiveApp client={client} hostName="desk-1" />);
+  render(
+    <LiveApp
+      client={client}
+      hostName="desk-1"
+      readTerminalInput={async () => {
+        meReads += 1;
+        return terminalInput;
+      }}
+    />,
+  );
   await flush();
 }
 
@@ -58,6 +71,9 @@ const subs = (s: FakeSocket) => s.ofType("sub").flatMap((m) => m.topics as strin
 beforeEach(() => {
   sockets = [];
   me = 200;
+  terminalInput = { enabled: false, until: null };
+  meReads = 0;
+  forgetConfirmations();
 });
 afterEach(() => {
   client.stop();
@@ -134,6 +150,67 @@ describe("LiveApp", () => {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
     expect(subs(s)).toContain("chat:term-2");
+  });
+});
+
+describe("LiveApp terminal input", () => {
+  const openChat = async () => {
+    await mount();
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: HOST });
+    await act(async () => {
+      window.location.hash = "#/chat/agent-2";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    await flush();
+    return s;
+  };
+
+  it("reads /api/v1/me only while a chat is open, and stays read-only while terminal.input is off", async () => {
+    await mount();
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: HOST });
+    expect(meReads).toBe(0);
+    await act(async () => {
+      window.location.hash = "#/chat/agent-2";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    await flush();
+    expect(meReads).toBe(1);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("sends terminal.send to the chat's terminal, and reads me again when the bridge says forbidden", async () => {
+    terminalInput = { enabled: true, until: null };
+    const s = await openChat();
+    await userEvent.type(screen.getByRole("textbox", { name: "Message to the agent" }), "run the tests");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    const dlg = screen.getByRole("alertdialog");
+    await userEvent.click([...dlg.querySelectorAll("button")].find((b) => b.textContent === "Send")!);
+    const sent = s.ofType("act").at(-1)!;
+    expect(sent).toMatchObject({ kind: "terminal.send", args: { terminal: "term-2", text: "run the tests" } });
+    const reads = meReads;
+    terminalInput = { enabled: false, until: null };
+    await recv(s, { type: "res", id: sent.id, ok: false, code: "forbidden" });
+    await flush();
+    expect(meReads).toBe(reads + 1);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText(/Read-only here/)).toBeInTheDocument();
+  });
+
+  it("an unknown effect re-reads the chat and is not sent again", async () => {
+    terminalInput = { enabled: true, until: null };
+    const s = await openChat();
+    await userEvent.click(screen.getByRole("button", { name: "Enter" }));
+    const dlg = screen.getByRole("alertdialog");
+    await userEvent.click([...dlg.querySelectorAll("button")].find((b) => b.textContent === "Send")!);
+    const sent = s.ofType("act").at(-1)!;
+    const before = subs(s).filter((t) => t === "chat:term-2").length;
+    await recv(s, { type: "res", id: sent.id, ok: false, code: "timeout", unknown_effect: true });
+    await flush();
+    expect(subs(s).filter((t) => t === "chat:term-2").length).toBe(before + 1);
+    expect(s.ofType("act").filter((a) => a.kind === "terminal.send")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(/may have been sent/);
   });
 });
 

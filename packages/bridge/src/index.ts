@@ -23,3 +23,4 @@ export { startApp, DEFAULT_API_PORT, FUNNEL_CHECK_MS, FUNNEL_RETRY_MS, CLOSE_FUN
 export { PanelDriver, duration, type PanelDriverOptions } from "./panel/driver.js";
 export * as tailscale from "./tailscale/index.js";
 export { PushService, summarize, PUSH_TTL_S, type PushGate, type PushOptions } from "./push/service.js";
+export { terminalSendActor, readSend, sendArgs, TERMINAL_SEND, SEND_TIMEOUT_MS, TIMEOUT_HOLD_MS, type TerminalSendOptions } from "./terminal/send.js";

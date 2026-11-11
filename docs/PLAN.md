@@ -380,7 +380,7 @@ Defaults taken until the operator says otherwise:
 
 ## 8. Unverified risks
 
-- **hc:** `hc events` hasn't been tested against a live core, and it's unknown whether `hc send` can send special keys. This gates the key bar.
+- **hc:** `hc events` hasn't been tested against a live core. `hc send` was checked in the rig (S16, hc 0.1.19): it pastes text and presses Enter, and has no special keys (those are `hc keys`, not exposed), so the key bar is text-only: ⏎ and `/`. Refusals come as JSON on stderr.
 - **Tailscale serve:**
   - Identity headers: the exact set, their absence for tagged nodes, and local forgery (hence the cookie).
   - On Linux it needs `tailscale set --operator=$USER`.

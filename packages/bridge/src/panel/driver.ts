@@ -44,6 +44,12 @@ export function duration(ms: number): string {
   return h < 48 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d`;
 }
 
+/** `14:05`, in the bridge's local time. */
+function clockOf(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 export class PanelDriver {
   private readonly o: PanelDriverOptions;
   private readonly now: () => number;
@@ -91,6 +97,11 @@ export class PanelDriver {
         ? { id: "link", label: "Linked to herdr-app", detail: "the Remote layout block is live", state: "ok" }
         : { id: "link", label: "Not linked to herdr-app", detail: "this layout has no Remote block", state: "warn" },
     );
+    const audit = security.auditHealth;
+    if (!audit.ok) {
+      const n = audit.failures === 1 ? "1 entry" : `${audit.failures} entries`;
+      checks.push({ id: "audit", label: "Activity log can't be written", detail: `${n} lost since ${clockOf(audit.since ?? now)}; terminal input is refused until it works`, state: "bad" });
+    }
     if (paused) checks.push({ id: "paused", label: "Remote access paused", detail: "Every phone is refused until you resume", state: "warn" });
 
     const topic = this.o.hub.get("plugins") as bridgeApi.PluginsTopic | undefined;
