@@ -1,1 +1,1 @@
-{ "type": "run", "id": "run-1", "name": "space.select", "args": { "space_id": "space-1" } }
+{ "type": "run", "id": "run-1", "name": "space.select", "args": { "id": "space-1" } }

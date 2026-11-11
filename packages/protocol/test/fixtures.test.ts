@@ -12,6 +12,7 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   host: HostState,
   "mod-link/mod-to-bridge": modLink.ModToBridge,
   "mod-link/bridge-to-mod": modLink.BridgeToMod,
+  "mod-link/runtime": modLink.Runtime,
   "bridge-api/client": bridgeApi.ClientMessage,
   "bridge-api/server": bridgeApi.ServerMessage,
   "bridge-api/meta": bridgeApi.Meta,
@@ -54,6 +55,15 @@ describe("fixtures", () => {
       expect(r.success, r.success ? "" : JSON.stringify(r.error.issues)).toBe(true);
       if (r.success) expect(r.data).toEqual(json);
     });
+  });
+
+  it("every valid run fixture passes the allowlist", () => {
+    const runs = valid.filter((f) => (f.json as { type?: string }).type === "run");
+    expect(runs.length).toBeGreaterThan(0);
+    for (const { json } of runs) {
+      const r = json as { name: string; args: unknown };
+      expect(modLink.checkRun(r.name, r.args)).toEqual({ ok: true, name: r.name, args: r.args });
+    }
   });
 
   describe.each(invalid)("invalid $file", ({ json, schema }) => {
