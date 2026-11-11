@@ -1,0 +1,27 @@
+/* PhoneInbox (design/PhoneInbox). Colours come from the generated tokens. */
+.ib-head{padding:56px 16px 8px;gap:2px}
+.hd .ib-h1{margin:0;font-size:26px;font-weight:600;line-height:1.4}
+.ib-headsub{font-size:13px;color:var(--t-muted)}
+.ib-main{min-height:0;overflow:hidden auto;background:var(--t-popover);border-top:1px solid var(--t-border)}
+.ib-listhead{padding:14px 16px 10px;font-size:15px}
+.hd .ib-listtitle{margin:0;font-size:15px;font-weight:600;line-height:1.4}
+.ib-count{font-size:12px;color:var(--t-muted)}
+.ib-list{margin:0;padding:0;list-style:none}
+.hd .ib-row{display:flex;flex-direction:column;gap:4px;width:100%;padding:12px 16px;border-top:1px solid var(--t-border);text-align:left;cursor:pointer}
+.hd .ib-row[data-selected]{background:var(--t-selected)}
+.ib-line{gap:8px;font-size:15px}
+.ib-cursor{width:12px;font-size:12px;color:var(--t-accent)}
+.ib-num{font-size:12px;color:var(--t-muted)}
+.ib-title{color:var(--t-foreground)}
+.ib-chip{font-size:11.5px;color:var(--t-accent)}
+.ib-meta{font-size:11.5px;color:var(--t-muted)}
+.ib-sub{padding-left:20px;font-size:13px;color:var(--t-muted)}
+.ib-row[data-tone=alert] .ib-line{color:var(--t-blocked)}
+.ib-row[data-tone=alert] .ib-title,.ib-row[data-tone=alert] .ib-num{color:var(--t-blocked)}
+.ib-row[data-tone=info] .ib-title,.ib-row[data-tone=info] .ib-num{color:var(--t-muted)}
+.ib-row[data-tone=dim] .ib-title,.ib-row[data-tone=dim] .ib-num{color:var(--t-dim)}
+.ib-notice{margin:10px 16px 0;padding:8px 12px;border-radius:8px;font-size:12.5px;line-height:1.45;background:var(--t-background);border:1px solid var(--t-border);color:var(--t-muted)}
+.ib-notice[data-tone=warn]{color:var(--t-working)}
+.ib-empty{align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center}
+.ib-empty-head{margin:0;font-size:17px;font-weight:600}
+.ib-empty-body{margin:0;max-width:300px;font-size:14px;line-height:1.5;color:var(--t-muted)}

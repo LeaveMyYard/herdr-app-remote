@@ -1,0 +1,20 @@
+{
+  "plugin": "ready",
+  "state": "ok",
+  "stale": false,
+  "problem": null,
+  "generated_at": 1800000000.5,
+  "errors": [],
+  "incomplete": null,
+  "empty": false,
+  "waiting": 2,
+  "alerts": 1,
+  "entries": [
+    {
+      "key": "alert:1",
+      "kind": "alert",
+      "actions": [],
+      "new": false
+    }
+  ]
+}

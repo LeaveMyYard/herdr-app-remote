@@ -236,6 +236,202 @@ export type UsageTopic = z.infer<typeof UsageTopic>;
 /** `act` kinds the usage topic handles. `usage.refresh` takes no args; `usage.set_filter` takes `{filter}`. */
 export const USAGE_ACTS = ["usage.refresh", "usage.set_filter"] as const;
 
+// ---- inbox topic (S10) ----
+
+const Str = z.string();
+const NStr = z.string().nullable();
+
+/** `host` as the feed says it; any word the reader does not know is already `unknown`. */
+export const InboxAsker = z.object({
+  host: z.enum(["herdr-tui", "herdr-core", "unknown"]),
+  pane: NStr,
+  terminal: NStr,
+  tab_label: NStr,
+  cwd: NStr,
+});
+export type InboxAsker = z.infer<typeof InboxAsker>;
+
+export const InboxOption = z.object({ label: Str, description: NStr, preview: NStr });
+export const InboxDetail = z.object({ choices: z.array(Str), notes: z.record(Str, Str), text: NStr });
+export type InboxDetail = z.infer<typeof InboxDetail>;
+
+export const InboxQuestion = z.object({
+  id: z.number().int(),
+  header: NStr,
+  question: Str,
+  options: z.array(InboxOption),
+  multi_select: z.boolean(),
+  context: NStr,
+  asked_by: NStr,
+  draft: InboxDetail.nullable(),
+  /** Some text was cut by the writer and the bridge could not get the whole question. */
+  cut: z.boolean(),
+});
+export type InboxQuestion = z.infer<typeof InboxQuestion>;
+
+export const InboxMachine = z.object({ id: Str, label: NStr, offline: NStr });
+export const INBOX_SEVERITIES = ["urgent", "warning", "info"] as const;
+export const INBOX_ALERT_KINDS = ["agent", "blocked"] as const;
+
+/**
+ * Fields every row has. Tokens never appear in this topic: the bridge holds them (PLAN section 2). `actions`
+ * names the verbs the row takes now; it is empty for a row the phone can only read.
+ */
+const RowBase = {
+  key: z.string().min(1),
+  actions: z.array(Str),
+  /** First seen after the bridge's first good feed, within the last minute. */
+  new: z.boolean(),
+};
+
+export const InboxGroupRow = z.object({
+  ...RowBase,
+  kind: z.literal("group"),
+  group: z.number().int(),
+  title: NStr,
+  created_at: Str,
+  asker: InboxAsker,
+  questions: z.array(InboxQuestion).min(1),
+});
+export const InboxFailedRow = z.object({
+  ...RowBase,
+  kind: z.literal("failed"),
+  question_id: z.number().int(),
+  group: z.number().int(),
+  header: NStr,
+  question: Str,
+  asked_by: NStr,
+  answer: NStr,
+  answered_at: Str,
+  retries: z.number().int(),
+  cut: z.boolean(),
+  asker: InboxAsker,
+  delivery: z.object({
+    state: Str,
+    /** False for a state word this version does not know: the row shows `line` and offers nothing. */
+    known: z.boolean(),
+    /** The inbox's own wording for where delivery stands (from the plugin's words.js). */
+    line: Str,
+    /** True for a real problem; `pending` that retries by itself is delivery at work. */
+    warn: z.boolean(),
+    attempts: z.number().int(),
+    pending_since: NStr,
+    auto_retry: z.boolean(),
+  }),
+  /** "Send now" only on a herdr-tui row that waits for a busy agent, else "Retry delivery". */
+  retry_label: z.enum(["Send now", "Retry delivery"]),
+});
+export const InboxAlertRow = z.object({
+  ...RowBase,
+  kind: z.literal("alert"),
+  id: z.number().int(),
+  alert_kind: z.enum(INBOX_ALERT_KINDS),
+  severity: z.enum(INBOX_SEVERITIES),
+  title: Str,
+  message: NStr,
+  asked_by: NStr,
+  created_at: Str,
+  asker: InboxAsker,
+});
+export const InboxRemoteGroupRow = z.object({
+  ...RowBase,
+  kind: z.literal("remote_group"),
+  machine: InboxMachine,
+  title: NStr,
+  created_at: NStr,
+  tab_label: NStr,
+  questions: z.array(InboxQuestion).min(1),
+});
+export const InboxRemoteOutboxRow = z.object({
+  ...RowBase,
+  kind: z.literal("remote_outbox"),
+  machine: InboxMachine,
+  action: Str,
+  remote_id: z.number().int(),
+  state: Str,
+  result: NStr,
+  sending: z.boolean(),
+  expired: z.boolean(),
+  expires_at: NStr,
+});
+export const InboxRemoteProblemRow = z.object({
+  ...RowBase,
+  kind: z.literal("remote_problem"),
+  machine: InboxMachine,
+  remote_id: z.number().int(),
+  why: Str,
+  question: Str,
+  answer: NStr,
+  cut: z.boolean(),
+});
+export const InboxRemoteAlertRow = z.object({
+  ...RowBase,
+  kind: z.literal("remote_alert"),
+  machine: InboxMachine,
+  id: z.number().int(),
+  alert_kind: z.enum(INBOX_ALERT_KINDS),
+  severity: z.enum(INBOX_SEVERITIES),
+  title: Str,
+  message: NStr,
+  tab_label: NStr,
+  asked_by: NStr,
+  created_at: NStr,
+});
+
+export const INBOX_KINDS = ["group", "failed", "alert", "remote_group", "remote_outbox", "remote_problem", "remote_alert"] as const;
+
+/** A kind this version does not know: its key is shown and nothing is offered on it. */
+export const InboxUnknownRow = z
+  .object({ ...RowBase, kind: Str })
+  .refine((r) => !(INBOX_KINDS as readonly string[]).includes(r.kind), { message: "known kind", path: ["kind"] });
+
+export const InboxRow = z.union([
+  z.discriminatedUnion("kind", [
+    InboxGroupRow,
+    InboxFailedRow,
+    InboxAlertRow,
+    InboxRemoteGroupRow,
+    InboxRemoteOutboxRow,
+    InboxRemoteProblemRow,
+    InboxRemoteAlertRow,
+  ]),
+  InboxUnknownRow,
+]);
+export type InboxRow = z.infer<typeof InboxRow>;
+
+export const InboxTopic = z.object({
+  /** The `herdr-inbox app --help` probe: only `ready` shows rows. */
+  plugin: z.enum(["ready", "missing", "too_old", "broken"]),
+  /** `ok`: a good feed is held (perhaps old). `unavailable`: none is, and the phone says so. It is never an empty inbox. */
+  state: z.enum(["ok", "unavailable"]),
+  /** The newest read failed, or the feed is older than 15 s (or unstamped, or from the future). */
+  stale: z.boolean(),
+  /** Why the newest read failed, in the reader's words; null when it was good. */
+  problem: z.enum(["missing", "unreadable", "unsupported", "not-ok"]).nullable(),
+  /** The held feed's `generated_at` (POSIX seconds): its age is the phone's `now` minus this. */
+  generated_at: z.number().nullable(),
+  /** The feed's own `errors` lines. */
+  errors: z.array(Str),
+  /**
+   * Required by the feed rules: whenever errors exist or anything was left out, the phone says so with these
+   * counts ("2 questions"), and never shows an empty inbox while something is left out.
+   */
+  incomplete: z
+    .object({
+      counts: z.array(Str),
+      errors: z.array(Str),
+      /** Left-out questions the bridge could not open with `app show` (past the ids, or not fetched yet). */
+      unlisted: z.number().int().nonnegative(),
+    })
+    .nullable(),
+  /** True only when the feed is ok, has no rows, and nothing was left out. */
+  empty: z.boolean(),
+  /** Open question groups on this machine, and alerts. */
+  waiting: z.number().int().nonnegative(),
+  alerts: z.number().int().nonnegative(),
+  entries: z.array(InboxRow),
+});
+export type InboxTopic = z.infer<typeof InboxTopic>;
 /**
  * `chat:<t>` topic: the text of terminal `<t>` (an `hc read`), ANSI already turned into spans.
  * Spans carry text only: the PWA renders them as text nodes, never as HTML. Colours are a palette index
@@ -294,6 +490,8 @@ const TOPIC_PAYLOADS: Partial<Record<string, z.ZodTypeAny>> = {
   plugins: PluginsTopic,
   panorama: PanoramaTopic,
   usage: UsageTopic,
+
+  inbox: InboxTopic,
 };
 
 export const Snap = z

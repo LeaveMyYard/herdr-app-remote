@@ -3,6 +3,7 @@ import "./styles/tokens.generated.css";
 import "./styles/app.css";
 import "./styles/panorama.css";
 import "./styles/usage.css";
+import "./styles/inbox.css";
 import "./styles/chat.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

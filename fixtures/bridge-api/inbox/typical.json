@@ -1,0 +1,124 @@
+{
+  "plugin": "ready",
+  "state": "ok",
+  "stale": false,
+  "problem": null,
+  "generated_at": 1800000000.5,
+  "errors": [],
+  "incomplete": null,
+  "empty": false,
+  "waiting": 2,
+  "alerts": 1,
+  "entries": [
+    {
+      "key": "alert:456",
+      "actions": [
+        "ack"
+      ],
+      "new": false,
+      "kind": "alert",
+      "id": 456,
+      "alert_kind": "agent",
+      "severity": "warning",
+      "title": "Alert Title 456",
+      "message": null,
+      "asked_by": "agent-3",
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "asker": {
+        "host": "herdr-core",
+        "pane": null,
+        "terminal": "t1",
+        "tab_label": null,
+        "cwd": null
+      }
+    },
+    {
+      "key": "group:123",
+      "actions": [
+        "answer",
+        "draft",
+        "dismiss"
+      ],
+      "new": true,
+      "kind": "group",
+      "group": 123,
+      "title": "Question Title 123",
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "asker": {
+        "host": "herdr-core",
+        "pane": null,
+        "terminal": "t1",
+        "tab_label": null,
+        "cwd": null
+      },
+      "questions": [
+        {
+          "id": 123,
+          "header": "Choice",
+          "question": "Question Title 123",
+          "options": [
+            {
+              "label": "Option A",
+              "description": "The first",
+              "preview": null
+            },
+            {
+              "label": "Option B",
+              "description": null,
+              "preview": null
+            }
+          ],
+          "multi_select": false,
+          "context": null,
+          "asked_by": "agent-1",
+          "draft": null,
+          "cut": false
+        }
+      ]
+    },
+    {
+      "key": "group:127",
+      "actions": [
+        "answer",
+        "draft",
+        "dismiss"
+      ],
+      "new": false,
+      "kind": "group",
+      "group": 127,
+      "title": "Question Title 127",
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "asker": {
+        "host": "herdr-core",
+        "pane": null,
+        "terminal": "t1",
+        "tab_label": null,
+        "cwd": null
+      },
+      "questions": [
+        {
+          "id": 127,
+          "header": "Choice",
+          "question": "Question Title 127",
+          "options": [
+            {
+              "label": "Option A",
+              "description": "The first",
+              "preview": null
+            },
+            {
+              "label": "Option B",
+              "description": null,
+              "preview": null
+            }
+          ],
+          "multi_select": false,
+          "context": null,
+          "asked_by": "agent-1",
+          "draft": null,
+          "cut": false
+        }
+      ]
+    }
+  ]
+}

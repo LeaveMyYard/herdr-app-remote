@@ -1,0 +1,13 @@
+{
+  "plugin": "ready",
+  "state": "ok",
+  "stale": false,
+  "problem": null,
+  "generated_at": 1800000000.5,
+  "errors": [],
+  "incomplete": null,
+  "empty": true,
+  "waiting": 0,
+  "alerts": 0,
+  "entries": []
+}

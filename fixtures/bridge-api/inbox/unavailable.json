@@ -1,0 +1,13 @@
+{
+  "plugin": "ready",
+  "state": "unavailable",
+  "stale": true,
+  "problem": "missing",
+  "generated_at": null,
+  "errors": [],
+  "incomplete": null,
+  "empty": false,
+  "waiting": 0,
+  "alerts": 0,
+  "entries": []
+}

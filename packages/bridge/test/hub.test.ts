@@ -126,11 +126,11 @@ describe("hub snap/patch", () => {
     const hub = newHub();
     hub.publish("host", fixture("typical"));
     const { client, send } = await join(hub);
-    await send({ type: "sub", topics: ["host", "inbox"] });
+    await send({ type: "sub", topics: ["host", "setup"] });
     hub.publish("host", fixture("idle-and-done"));
-    hub.publish("inbox", { q: 1 });
-    hub.publish("inbox", { q: 2 });
-    hub.setStale("inbox", "source_unavailable");
+    hub.publish("setup", { q: 1 });
+    hub.publish("setup", { q: 2 });
+    hub.setStale("setup", "source_unavailable");
     await send({ type: "ping" });
     await send({ type: "act", id: "a1", kind: "x", args: {} });
     for (const m of client.got) expect(bridgeApi.ServerMessage.safeParse(m).success, JSON.stringify(m)).toBe(true);

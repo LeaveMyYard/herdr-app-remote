@@ -10,11 +10,14 @@ import { nodeUid, selectAgents, selectBasic, selectSpaces, swarmScope, type Swar
 import { AgentsBasic } from "./screens/AgentsBasic";
 import { AgentsRich } from "./screens/AgentsRich";
 import { Chat, ChatPicker } from "./screens/Chat";
+import { Inbox } from "./screens/Inbox";
 import { Peek, type TranscriptPage } from "./screens/Peek";
 import { Soon } from "./screens/Soon";
 import { Swarm } from "./screens/Swarm";
 import { SwarmUnavailable } from "./screens/SwarmUnavailable";
 import { UsageTab } from "./screens/UsageTab";
+import { DEMO_NOW, demoHost, inboxScenario } from "./inbox-fixtures";
+import { inboxBadge } from "./inbox/model";
 import { demoUsageNow, usageScenario } from "./usage-fixtures";
 
 /** `#/usage/<scenario>`: the demo data the Usage tab shows until the bridge client lands. */
@@ -86,7 +89,7 @@ function useNowSeconds(fixed?: number): number {
   return fixed ?? now;
 }
 
-export function App({ connection, tabBadges = badges, data }: AppProps) {
+export function App({ connection, tabBadges, data }: AppProps) {
   const [tab, setTab] = useState<TabId>(() => tabFromHash(window.location.hash));
   const [hash, setHash] = useState(() => window.location.hash);
   const [swarmUi, setSwarmUi] = useState<SwarmUi | null>(data?.swarmUi ?? null);
@@ -114,6 +117,14 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const scenario = usageScenario(scenarioName);
+  const inbox = inboxScenario(scenarioName);
+  const inboxBadgeNow = inboxBadge(inbox.topic);
+  const tabBadgesNow: TabBadges = { ...(tabBadges ?? badges) };
+  if (!tabBadges) {
+    // The inbox badge comes from the topic, not from the fixture.
+    delete tabBadgesNow.inbox;
+    if (inboxBadgeNow) tabBadgesNow.inbox = inboxBadgeNow;
+  }
   const [usageFilter, setUsageFilter] = useState<Record<string, bridgeApi.UsageTopic["filter"]>>({});
   const usageTopic = scenario.topic && { ...scenario.topic, filter: usageFilter[scenario.name] ?? scenario.topic.filter };
   const select = (t: TabId) => {
@@ -182,6 +193,8 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
     screen = <Swarm scope={scope} ui={ui} onUi={setSwarmUi} now={now} transcript={data.transcript !== undefined} notice={notice} />;
   } else if (tab === "swarm") {
     screen = <SwarmUnavailable host={host} error={topic?.error ?? null} plugins={plugins} />;
+  } else if (tab === "inbox") {
+    screen = <Inbox topic={inbox.topic} host={demoHost} now={DEMO_NOW} />;
   } else if (tab === "usage") {
     screen = (
       <UsageTab
@@ -203,7 +216,7 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
     <div className="hd ph">
       <Banner connection={conn} />
       {screen}
-      <TabBar active={tab} badges={tabBadges} onSelect={select} />
+      <TabBar active={tab} badges={tabBadgesNow} onSelect={select} />
     </div>
   );
 }
