@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 
 /**
- * \`fixture\` selects the fake data behind the screen (main.tsx); \`nav: false\` is a full-screen sheet with no tab bar.
- * \`skip\` is a region of the design render that this slice leaves out on purpose (painted out of both images).
+ * `fixture` selects the fake data behind the screen (main.tsx); `nav: false` is a full-screen sheet with no tab bar.
+ * `skip` is a region of the design render that this slice leaves out on purpose (painted out of both images).
  */
 const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[] }[] = [
   { ref: "PhoneAgentsBasic", url: "/#/agents" },
