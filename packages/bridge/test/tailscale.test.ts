@@ -443,6 +443,17 @@ describe("Stop serving", () => {
     expect(r.setup.state.notice).toBeNull();
   });
 
+  it("a Stop that could not read the config leaves no stale notice once a clean read sees the handler again", async () => {
+    const r = rig();
+    expect((await r.setup.start()).ok).toBe(true);
+    r.conf({ serveStatus: "fail" });
+    expect(await r.setup.stop()).toMatchObject({ ok: false, code: "unknown" });
+    r.conf({});
+    await r.setup.check();
+    expect(r.setup.state.serving).toBe("ours");
+    expect(r.setup.state.notice).toBeNull();
+  });
+
   it("no notice before serving: Start's problems stay on step 4", async () => {
     const r = rig({ conf: { set: "operator" } });
     await r.setup.start();
