@@ -34,6 +34,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @herdr-remote/pwa exec playwright install --with-deps chromium webkit
+      - run: pnpm --filter @herdr-remote/protocol build
       - run: pnpm --filter @herdr-remote/pwa visual
       - uses: actions/upload-artifact@v4
         if: failure()
