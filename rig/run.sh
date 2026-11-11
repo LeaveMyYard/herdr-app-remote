@@ -47,12 +47,8 @@ cp "$here/sidecar.mjs" "$here/inner.sh" "$here/lib.sh" "$rig/bin/"
 # The real link mod and the harness, for the scenarios that use them (rig-only copy of the mod).
 repo=$(cd "$here/.." && pwd -P)
 mkdir -p "$rig/home/.config/herdr-app/mods/herdr-app-remote"
-<<<<<<< HEAD
 cp "$repo"/mod/herdr-app-remote/*.js "$repo"/mod/herdr-app-remote/*.svg "$repo"/mod/herdr-app-remote/mod.json "$rig/home/.config/herdr-app/mods/herdr-app-remote/"
-cp "$here/link-harness.mjs" "$here/inbox-harness.mjs" "$here/panel-harness.mjs" "$rig/bin/"
-=======
-cp "$repo"/mod/herdr-app-remote/*.js "$repo"/mod/herdr-app-remote/mod.json "$rig/home/.config/herdr-app/mods/herdr-app-remote/"
-cp "$here/link-harness.mjs" "$here/pairing-harness.mjs" "$here/serve-standin.mjs" "$here/phone.mjs" "$rig/bin/"
+cp "$here/link-harness.mjs" "$here/inbox-harness.mjs" "$here/panel-harness.mjs" "$here/pairing-harness.mjs" "$here/serve-standin.mjs" "$here/phone.mjs" "$rig/bin/"
 # `tailscale` inside the rig is always the fake CLI (it replays recorded outputs and keeps its serve config in
 # $rig/ts); the real one is never reachable: tailscaled's socket dir is hidden below and the fake comes first.
 mkdir -p "$rig/fakebin" "$rig/ts" "$rig/bin/tailscale-fixtures"
@@ -69,7 +65,6 @@ ts_hide=""
 for d in /run/tailscale /var/run/tailscale; do
   [ -d "$d" ] && [ ! -L "$d" ] && ts_hide="$ts_hide --tmpfs $d"
 done
->>>>>>> 1b35635 (feat(tailscale): S14 setup checks and serve control)
 cp "$here/scenarios/$scenario.sh" "$rig/scenarios/"
 echo "rig: $rig"
 rc=0
