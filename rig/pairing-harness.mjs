@@ -30,16 +30,19 @@ writeFileSync(join(appHome, 'data/herdr-app-remote/install.json'), JSON.stringif
 }), { mode: 0o600 });
 await B.writeRuntime(B.runtimePath(appHome), { v: 1, port, token, pid: process.pid, bundle_sha256: FAKE_SHA });
 
+// The built PWA, for the per-device manifest of the Home Screen transfer (S5b). `pnpm -r build` makes it.
+const staticDir = join(repo, 'packages/pwa/dist');
 const app = await B.startApp({
   appHome,
   link,
+  ...(existsSync(join(staticDir, 'manifest.webmanifest')) ? { staticDir } : {}),
   port: B.DEFAULT_API_PORT,
   tailscale: 'tailscale',
   funnelCheckMs: 600_000, // the scenario re-reads Funnel itself (op "funnel")
   onPending: (d) => note({ pending: d.name }),
   log: (e) => { if (e.event !== 'funnel') note({ app: e }); },
 });
-note({ listening: app.port, setup: app.setup !== null });
+note({ listening: app.port, setup: app.setup !== null, static: existsSync(join(staticDir, 'manifest.webmanifest')) });
 
 const pick = (s) => ({ step: s.step, serving: s.serving, url: s.url, login: s.login, can_start: s.can_start, can_stop: s.can_stop,
   problem: s.steps.find((x) => x.problem)?.problem ?? null });

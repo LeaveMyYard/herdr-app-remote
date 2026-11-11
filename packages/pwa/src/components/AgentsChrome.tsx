@@ -1,13 +1,17 @@
 import appIcon from "../assets/remote.svg";
 import type { Space } from "../model";
+import { BellButton, useHomePromptBell } from "../pair/HomePrompt";
 import { Icon } from "./Icon";
 import { Tile } from "./StateMarks";
 
 export function AppHeader() {
+  // In Safari only: the bell opens the Home Screen prompt again (S5b).
+  const bell = useHomePromptBell();
   return (
     <header className="row nf app-header">
       <img src={appIcon} alt="" className="app-logo" />
       <span className="f1 app-title">Herdr</span>
+      {bell ? <BellButton onClick={bell} /> : null}
       <button type="button" aria-label="Search" className="row icon-btn">
         <Icon name="search" size={19} />
       </button>

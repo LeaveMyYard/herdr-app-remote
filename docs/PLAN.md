@@ -74,10 +74,11 @@ Sources:
 
 **Pairing**
 1. The desktop panel shows a QR for `https://<serve>/pair#c=<code>`. The code is 128-bit, valid for 5 min and single use.
-2. The phone, inside the installed Home Screen app, posts the code.
+2. The phone opens it in Safari and posts the code (operator flow change, 2026-11-11: pairing happens in Safari).
 3. The device becomes pending, and the desktop panel and a toast ask "Approve a new phone?" (the toast never carries a device name).
 4. On approval, the phone gets a `__Host-` cookie (`HttpOnly; Secure; SameSite=Strict`) holding a random 256-bit token. Only its sha256 is stored, in `devices.json` (0600).
 5. Devices can be revoked or renamed. A revoked device is dropped live.
+6. Safari then offers to add the app to the Home Screen (dismissible, again from a bell). iOS keeps the Home Screen app's storage apart from Safari's, so the bridge mints a one-time transfer code (128-bit, 10 min, single use, bound to the approved device) over Safari's socket and puts it only in that device's manifest `start_url` (`/pair#t=<code>`). On first launch the Home Screen app spends it for its own token of the same device, with no second approval (S5b; `docs/protocol/bridge-api-v1.md`, "Home Screen transfer").
 
 **Capabilities per device** (checked on the bridge for every action)
 

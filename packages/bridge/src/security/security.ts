@@ -74,6 +74,17 @@ export const PENDING_TTL_MS = 10 * 60 * 1000;
 export const MAX_PENDING = 3;
 /** Failed code redemptions allowed per minute before `/api/v1/pair` answers 429. */
 export const PAIR_FAIL_LIMIT = 10;
+/**
+ * Home Screen transfer (S5b): how long a transfer code works. It covers "Share, Add to Home Screen, open it" with
+ * room to spare, and no more.
+ */
+export const TRANSFER_TTL_MS = 10 * 60 * 1000;
+/** Live transfer codes one device may hold; minting another drops the oldest. */
+export const TRANSFER_PER_DEVICE = 3;
+/** Failed transfer redemptions allowed per minute before `/api/v1/pair/transfer` answers 429. */
+export const TRANSFER_FAIL_LIMIT = 10;
+export const PAIR_PATH = "/api/v1/pair";
+export const TRANSFER_PATH = "/api/v1/pair/transfer";
 const BODY_LIMIT = 1024;
 
 /** WebSocket upgrades one approved device may make per minute; past it the upgrade answers 429 (a reconnect loop). */
@@ -84,6 +95,8 @@ export const ACT_LIMIT: Limit = { max: 30, windowMs: 10_000 };
 export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([["terminal.send", { max: 6, windowMs: 10_000 }]]);
 /** Kinds that must not run while the Activity log can't be written: their whole safeguard is the audit line. */
 const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send"]);
+/** Kinds the security layer answers itself, never handed to the inner handler. */
+const LOCAL_KINDS: ReadonlySet<string> = new Set(["pair.transfer"]);
 /** setTimeout's ceiling (about 24.8 days); a later expiry is re-armed when this fires. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
@@ -96,6 +109,13 @@ const KICK_GRACE_MS = 1000;
 
 const CODE_RE = /^[A-Za-z0-9_-]{22}$/;
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+/** A Home Screen transfer code (S5b). The plaintext stays in memory only, to be put in this device's manifest. */
+interface Transfer {
+  hash: Buffer;
+  code: string;
+  expires: number;
+}
 
 const sha256buf = (s: string) => createHash("sha256").update(s).digest();
 const sha256 = (s: string) => sha256buf(s).toString("hex");
@@ -129,6 +149,9 @@ export class Security {
   private serve: ServeIdentity | null;
   private code: { hash: Buffer; expires: number } | null = null;
   private pairFailures: number[] = [];
+  /** Live Home Screen transfer codes by device id, oldest first. Memory only: a restart voids them. */
+  private readonly transfers = new Map<string, Transfer[]>();
+  private transferFailures: number[] = [];
   private readonly live = new Map<string, Set<HubClient>>();
   /**
    * Clients the bridge has dropped. A graceful close leaves the socket readable until the
@@ -179,8 +202,9 @@ export class Security {
     const same = next !== null && this.serve !== null && next.host === this.serve.host && next.login === this.serve.login;
     this.serve = next;
     if (same) return;
-    // A pairing code is tied to the URL it was shown with.
+    // A pairing code is tied to the URL it was shown with; transfer codes to the identity that minted them.
     this.code = null;
+    this.transfers.clear();
     this.closeAll(CLOSE_REVOKED, "serve changed");
     this.cut(null);
   }
@@ -214,6 +238,7 @@ export class Security {
     // Drop first: if persisting fails, the sockets are already gone and the error
     // reaches the caller (the in-memory flag is set either way).
     this.code = null;
+    this.transfers.clear();
     this.closeAll(CLOSE_PAUSED, "paused");
     this.cut(null);
     this.store.paused = true;
@@ -271,8 +296,8 @@ export class Security {
       // send. Browsers can't set headers on a WS upgrade, so there it is our subprotocol.
       if (singleHeader(req, "origin") !== `https://${serve.host}`) return FORBIDDEN;
       if (kind === "ws" ? !offersProtocol(req) : singleHeader(req, "x-remote-api") !== "1") return FORBIDDEN;
-      // Only pairing is reachable without an approved device.
-      if (kind === "http" && path === "/api/v1/pair") return true;
+      // Only pairing and the Home Screen transfer are reachable without an approved device.
+      if (kind === "http" && (path === PAIR_PATH || path === TRANSFER_PATH)) return true;
       const d = this.deviceFor(req);
       if (!d || d.state !== "approved") return deny(401, "unpaired");
       if (kind === "ws") {
@@ -324,12 +349,17 @@ export class Security {
 
   // ---- HTTP routes ----
 
-  /** The `routes` for `createBridgeServer`: `POST /api/v1/pair` and `GET /api/v1/me`. */
+  /** The `routes` for `createBridgeServer`: `POST /api/v1/pair`, `POST /api/v1/pair/transfer` and `GET /api/v1/me`. */
   readonly routes = async (req: IncomingMessage, res: ServerResponse, path: string): Promise<boolean> => {
     try {
-      if (path === "/api/v1/pair") {
+      if (path === PAIR_PATH) {
         if (req.method !== "POST") throw new HttpError(405, "method_not_allowed");
         await this.pair(req, res);
+        return true;
+      }
+      if (path === TRANSFER_PATH) {
+        if (req.method !== "POST") throw new HttpError(405, "method_not_allowed");
+        await this.redeemTransfer(req, res);
         return true;
       }
       if (path === "/api/v1/me") {
@@ -422,6 +452,90 @@ export class Security {
     return ok;
   }
 
+  // ---- Home Screen transfer (S5b) ----
+  //
+  // iOS gives a Home Screen web app its own cookie jar, apart from Safari's, so the device paired in Safari is not
+  // paired in the Home Screen app. The transfer moves that approved device into the app's storage without a second
+  // approval and without putting the cookie token in any URL:
+  //   1. Safari (approved, over its own socket) sends `act pair.transfer`: the bridge mints a 128-bit, single-use
+  //      code bound to that device, valid for TRANSFER_TTL_MS, and keeps its plaintext in memory only.
+  //   2. That device's own manifest (`GET /manifest.webmanifest` with its cookie) carries the code in `start_url`
+  //      (`./pair#t=<code>`). A request without that cookie gets the plain manifest.
+  //   3. The Home Screen app opens `/pair#t=<code>` and posts it to `POST /api/v1/pair/transfer`: the code is spent
+  //      (with every other code of that device), and the app gets its own token for the same device.
+
+  /** Unexpired transfer codes of a device, oldest first; expired ones are forgotten. */
+  private liveTransfers(id: string): Transfer[] {
+    const now = this.now();
+    const list = (this.transfers.get(id) ?? []).filter((t) => now < t.expires);
+    if (list.length) this.transfers.set(id, list);
+    else this.transfers.delete(id);
+    return list;
+  }
+
+  /** `act pair.transfer`: a fresh transfer code for the acting (approved, `view`) device. The code itself is not returned. */
+  private mintTransfer(d: Device): ActResult {
+    const code = randomBytes(16).toString("base64url");
+    const t: Transfer = { hash: sha256buf(code), code, expires: this.now() + TRANSFER_TTL_MS };
+    this.transfers.set(d.id, [...this.liveTransfers(d.id), t].slice(-TRANSFER_PER_DEVICE));
+    return { ok: true };
+  }
+
+  /**
+   * The manifest `start_url` for the request's device: `./pair#t=<code>` with its newest live transfer code, or null
+   * (no cookie, a device that may not view, or no live code). Read-only: GETs have no side effects.
+   */
+  manifestStartUrl(req: IncomingMessage): string | null {
+    const d = this.deviceFor(req);
+    if (!this.mayView(d)) return null;
+    const newest = this.liveTransfers(d.id).at(-1);
+    return newest ? `./pair#t=${newest.code}` : null;
+  }
+
+  /** Spends the transfer code matching `code` (and every other code of its device). Returns that device id. */
+  private takeTransfer(code: string): string | null {
+    if (!CODE_RE.test(code)) return null;
+    const hash = sha256buf(code);
+    for (const [id, list] of this.transfers) {
+      const match = list.find((t) => timingSafeEqual(hash, t.hash));
+      if (!match) continue;
+      // Single use, for the whole device: whatever happens next, none of its codes works again.
+      this.transfers.delete(id);
+      return this.now() < match.expires ? id : null;
+    }
+    return null;
+  }
+
+  private async redeemTransfer(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const now = this.now();
+    this.transferFailures = this.transferFailures.filter((t) => now - t < 60_000);
+    if (this.transferFailures.length >= TRANSFER_FAIL_LIMIT) throw new HttpError(429, "rate_limited");
+    const body = await readJson(req);
+    const id = this.takeTransfer(typeof body.code === "string" ? body.code : "");
+    const d = id !== null ? this.store.get(id) : undefined;
+    // A request that already carries another device's cookie must not end up as this device.
+    const holder = this.deviceFor(req);
+    if (!this.mayView(d) || (holder !== undefined && holder.id !== d.id)) {
+      this.transferFailures.push(now);
+      this.audit({ event: "pair.transfer_fail", text: "Home Screen setup refused: invalid or used code", ok: false });
+      throw new HttpError(403, "bad_code");
+    }
+    // This browser already is the device (storage shared with Safari): the code is spent, nothing else changes.
+    if (holder !== undefined) {
+      json(res, 200, { device: this.view(d) });
+      return;
+    }
+    const token = randomBytes(32).toString("base64url");
+    // One Home Screen token per device: a new one replaces the last (a re-added app), Safari's stays.
+    this.store.update(d.id, (x) => {
+      x.home_token_sha256 = sha256(token);
+    });
+    res.setHeader("Set-Cookie", `${DEVICE_COOKIE}=${token}; Path=/; Max-Age=${COOKIE_MAX_AGE_S}; HttpOnly; Secure; SameSite=Strict`);
+    json(res, 200, { device: this.view(d) });
+    this.bestEffort(() => this.audit({ event: "pair.transfer", device: d.name, text: `${d.name} set up on the Home Screen` }));
+    this.changed();
+  }
+
   // ---- devices (desktop-only operations) ----
 
   devices(): DeviceView[] {
@@ -468,6 +582,7 @@ export class Security {
     // The store removes the device from memory before it writes, so it is denied either way.
     this.drop(id, CLOSE_REVOKED, "revoked");
     this.cut(id);
+    this.transfers.delete(id);
     this.store.remove(id);
     const text = d.state === "pending" ? `${d.name}: pairing refused` : `${d.name} revoked`;
     this.audit({ event: d.state === "pending" ? "pair.reject" : "device.revoke", device: d.name, text });
@@ -496,7 +611,10 @@ export class Security {
     if (until !== null && cap !== "terminal.input") throw new Error("only terminal.input can expire");
     if (until !== null && (!Number.isSafeInteger(until) || until <= this.now())) throw new Error("until must be a future epoch ms");
     // Drop first, as in revoke.
-    if (cap === "view" && !on) this.drop(id, CLOSE_NO_VIEW, "view off");
+    if (cap === "view" && !on) {
+      this.drop(id, CLOSE_NO_VIEW, "view off");
+      this.transfers.delete(id);
+    }
     if (!on && (cap === "view" || cap === "terminal.input")) this.cut(id);
     this.store.update(id, (x) => {
       x.caps[cap] = on;
@@ -604,7 +722,8 @@ export class Security {
       return { ok: false, code: "rate_limited" };
     }
     const cap = ACTION_CAPS.get(kind);
-    if (cap === undefined || !this.inner) {
+    const local = LOCAL_KINDS.has(kind);
+    if (cap === undefined || (!this.inner && !local)) {
       this.bestEffort(() => this.audit({ event: "act", device: d.name, text: `${d.name} ${what}: refused`, ok: false, code: "unsupported_action" }));
       return { ok: false, code: "unsupported_action" };
     }
@@ -624,7 +743,7 @@ export class Security {
     }
     let res: ActResult;
     try {
-      res = await this.inner(client, kind, args);
+      res = local ? this.mintTransfer(d) : await this.inner!(client, kind, args);
     } catch {
       res = { ok: false, code: "internal_error", unknown_effect: true };
     }

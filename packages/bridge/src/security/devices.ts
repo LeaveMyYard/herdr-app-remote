@@ -26,6 +26,11 @@ const DeviceSchema = z
     login: z.string().min(1),
     /** sha256 (hex) of the device token. The token itself is never stored. */
     token_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    /**
+     * sha256 (hex) of the second token, held by the Home Screen app this device was moved into (S5b). iOS keeps the
+     * Home Screen app's cookies apart from Safari's, so the same device has one token per store. Absent or null: none.
+     */
+    home_token_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
     state: z.enum(["pending", "approved"]),
     caps: CapsSchema,
     created_at: z.number().int(),
@@ -95,8 +100,9 @@ export class DeviceStore {
     return this.data.devices.find((d) => d.id === id);
   }
 
+  /** The device holding this token: its Safari (pairing) token or its Home Screen token. */
   byTokenHash(hash: string): Device | undefined {
-    return this.data.devices.find((d) => d.token_sha256 === hash);
+    return this.data.devices.find((d) => d.token_sha256 === hash || (d.home_token_sha256 ?? null) === hash);
   }
 
   add(d: Device): void {

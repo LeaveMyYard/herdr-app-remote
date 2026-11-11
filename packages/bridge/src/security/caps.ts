@@ -52,4 +52,6 @@ export const ACTION_CAPS: ReadonlyMap<string, Capability> = new Map<string, Capa
   ["terminal.send", "terminal.input"],
   ["push.subscribe", "push"],
   ["push.unsubscribe", "push"],
+  // S5b: a one-time code that moves this (approved) device into its Home Screen app. Answered by Security itself.
+  ["pair.transfer", "view"],
 ]);

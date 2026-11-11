@@ -1,5 +1,5 @@
 # S14 (and the rig run S5 owed): Tailscale setup and serve control against the fake `tailscale` CLI, then a
-# phone pairing through a stand-in for serve that injects Tailscale-User-Login.
+# phone pairing through a stand-in for serve that injects Tailscale-User-Login, and (S5b) the Home Screen transfer.
 #   - the bridge refuses everything but /healthz until "Start serving" supplies the serve identity;
 #   - Start serving runs exactly `tailscale serve --bg --https=8443 http://127.0.0.1:47391`;
 #   - Host spoof, a missing identity and a wrong login are refused; pairing, approval, then the WebSocket
@@ -82,6 +82,26 @@ scenario_main() {
   wait_for 15 "host snapshot from the real link mod" have_line "$RIG/ws1.log" '"spaces":["Project Alpha"'
   wait_for 10 "setup topic snapshot" have_line "$RIG/ws1.log" '"topic":"setup","step":6'
 
+  # S5b: Home Screen transfer, through the stand-in. Safari mints over its socket; only its manifest carries the
+  # code; the Home Screen app (another cookie jar, as on iOS) spends it once for its own token of the same device.
+  r=$(phone manifest); say "$r"
+  case "$r" in *'"manifest":200,"start_url":"./","code":false'*'"cache":"no-store"'*'"vary":"Cookie","cors":null'*) pass "transfer: manifest before a mint is the plain one (no-store, Vary: Cookie, no CORS)";; *) fail "manifest before mint: $r";; esac
+  r=$(phone mint); case "$r" in *'"mint":"res","ok":true'*) pass "transfer: Safari mints a code over its own socket";; *) fail "mint: $r";; esac
+  r=$(phone manifest); case "$r" in *'"start_url":"./pair#t=<code>","code":true'*) pass "transfer: Safari's manifest start_url is ./pair#t=<code>";; *) fail "manifest after mint: $r";; esac
+  r=$(JAR=stranger phone manifest); case "$r" in *'"start_url":"./","code":false'*) pass "transfer: no cookie, no code in the manifest";; *) fail "stranger manifest: $r";; esac
+  r=$(JAR=home phone transfer https://evil.example); case "$r" in *'"transfer":403'*'"cookie":null'*) pass "transfer: a foreign Origin is refused";; *) fail "cross-origin transfer: $r";; esac
+  r=$(JAR=home phone transfer); say "$r"
+  case "$r" in *'"transfer":200,"state":"approved"'*'HttpOnly'*'Secure'*'SameSite=Strict'*) pass "transfer: the Home Screen app is set up, approved, __Host- cookie";; *) fail "transfer: $r";; esac
+  safari_id=$(phone me | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  r=$(JAR=home phone me); case "$r" in *'"me":200,"state":"approved","id":"'"$safari_id"'"'*) pass "transfer: the Home Screen token is the same device ($safari_id), no second approval";; *) fail "home me: $r (safari $safari_id)";; esac
+  r=$(phone me); case "$r" in *'"me":200,"state":"approved"'*) pass "transfer: Safari's token still works";; *) fail "safari me after transfer: $r";; esac
+  r=$(JAR=home2 phone transfer); case "$r" in *'"transfer":403'*'"cookie":null'*) pass "transfer: replayed code refused";; *) fail "transfer replay: $r";; esac
+  r=$(phone manifest); case "$r" in *'"start_url":"./","code":false'*) pass "transfer: the spent code left the manifest";; *) fail "manifest after spend: $r";; esac
+  JAR=home phone ws 25 >"$RIG/ws-home.log" 2>&1 &
+  WS_HOME_PID=$!
+  wait_for 10 "transfer: the Home Screen app's WebSocket gets the host snapshot" have_line "$RIG/ws-home.log" '"spaces":["Project Alpha"'
+  if grep -qE 'pair#t=[A-Za-z0-9_-]{22}' "$RIG/harness.log" "$RIG/harness.out" "$RIG/standin.log" 2>/dev/null; then fail "a transfer code reached the rig logs"; else pass "transfer: no code in the harness or stand-in logs"; fi
+
   # Funnel on our port: refused everywhere, live socket dropped with 4004.
   node -e 'const f=process.argv[1],d=JSON.parse(require("fs").readFileSync(f,"utf8"));d.AllowFunnel={"desk-1.example-tailnet.ts.net:8443":true};require("fs").writeFileSync(f,JSON.stringify(d))' "$TS/serve.json"
   op funnel
@@ -133,6 +153,6 @@ scenario_main() {
   if grep -qi 'funnel' "$TS/calls.log"; then fail "a funnel command was run"; else pass "no funnel command ever ran"; fi
 
   say "tailscale calls:"; ts_calls >>"$RIG/rig.log"
-  kill "$HARNESS_PID" "$STANDIN_PID" "$WS_PID" 2>/dev/null
+  kill "$HARNESS_PID" "$STANDIN_PID" "$WS_PID" "${WS_HOME_PID:-}" 2>/dev/null
   return 0
 }

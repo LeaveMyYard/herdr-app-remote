@@ -24,6 +24,7 @@ import { terminalSendActor } from "../terminal/send.js";
 import { UsageTopicDriver } from "../usage.js";
 import type { Json } from "../patch.js";
 import { navigateActor, routeActs, type Actor } from "./act.js";
+import { manifestRoute } from "./manifest.js";
 import { checkFunnel, SERVE_PORT, type FunnelVerdict } from "./funnel.js";
 import { Setup } from "../tailscale/setup.js";
 import { bridgeApi } from "@herdr-remote/protocol";
@@ -200,12 +201,15 @@ export async function startApp(o: AppOptions): Promise<App> {
     if (funnel.state === "unknown") return { allow: false, status: 503, reason: "funnel_unknown" };
     return security.guard(req, kind);
   };
+  // S5b: the manifest names this device's Home Screen transfer code, when it has one.
+  const manifest = manifestRoute(o.staticDir, (req) => security.manifestStartUrl(req));
   const server = createBridgeServer({
     hub,
     ...(o.staticDir ? { staticDir: o.staticDir } : {}),
     port: o.port ?? DEFAULT_API_PORT,
     guard,
-    routes: async (req, res, path) => (await security.routes(req, res, path)) || pushService.routes(req, res, path),
+    routes: async (req, res, path) =>
+      (await security.routes(req, res, path)) || (await manifest(req, res, path)) || pushService.routes(req, res, path),
     onConnect: security.onConnect,
     hostName: () => hostName(security.serveIdentity),
   });

@@ -26,7 +26,7 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 | `Origin` is exactly `https://<serve name>` | the WS upgrade and every non-GET request | `403 forbidden` |
 | `X-Remote-Api: 1` is present | every non-GET request | `403 forbidden` |
 | the client offers the subprotocol `herdr-remote.v1` (`Sec-WebSocket-Protocol`); the bridge echoes it | the WS upgrade | `403 forbidden` |
-| the `__Host-hr-device` cookie names an approved device of the current owner login | the WS upgrade and every non-GET request except `POST /api/v1/pair` | `401 unpaired` |
+| the `__Host-hr-device` cookie names an approved device of the current owner login | the WS upgrade and every non-GET request except `POST /api/v1/pair` and `POST /api/v1/pair/transfer` | `401 unpaired` |
 | the device has `view` | the WS upgrade | `403 forbidden` |
 
 - `Tailscale-User-Login` is a precondition, never the credential: any local process can forge it. The cookie is the credential.
@@ -39,13 +39,14 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 ### Pairing
 
 1. The desktop shows a QR code for `https://<serve>/pair#c=<code>`. The code is 128-bit (22 base64url characters), valid for 5 minutes and single use. Showing a new code invalidates the previous one.
-2. The installed Home Screen app posts `POST /api/v1/pair` with JSON `{code, name?}` (`name` is ignored: the bridge names the device) (`Content-Type: application/json`, at most 1 KiB).
+2. The phone opens the URL in Safari (the iPhone Camera opens QR links there), and the pairing screen (`/pair`, S5b) posts `POST /api/v1/pair` with JSON `{code, name?}` (`Content-Type: application/json`, at most 1 KiB). `name` is ignored: the bridge names the device, and the PWA sends none.
    - `202 {device}`: the device is now `pending`. The response sets the device cookie: `__Host-hr-device=<256-bit token>; Path=/; Max-Age=34560000; HttpOnly; Secure; SameSite=Strict`. The cookie grants nothing until the desktop approves the device.
    - `403 {error: "bad_code"}`: the code is unknown, expired or already used. Every failure looks the same.
    - `429 {error: "rate_limited"}` after 10 failed codes within a minute; `429 {error: "too_many_pending"}` while 3 requests are already pending (the code isn't consumed). The rate limit is global, not per client. Requests sent at the same moment can exceed it slightly, which doesn't matter against a 128-bit code. A local process that forges the headers can use it to block pairing, but that process could already do worse.
    - `415 json_required`, `413 too_large`, `400 bad_json` for malformed bodies.
 3. The desktop panel and a toast ask "Approve a new phone?"; the toast has no device text. A `name` in the pair request is ignored: the bridge names every pending device itself ("Phone 1", "Phone 2", ...), and the desktop may rename it after approval. A request not approved within 10 minutes is dropped.
 4. The app polls `GET /api/v1/me` until `device.state` is `approved`, then opens the WebSocket.
+5. In Safari, the app then offers (once, dismissible, again from the bell) to add Herdr to the Home Screen, where Web Push works. That app sets itself up with a one-time transfer code: see [Home Screen transfer](#home-screen-transfer-s5b).
 
 PLAN §2 says the phone gets its cookie "on approval". Setting it at pairing time instead is deliberate: the cookie is worthless until approval, and the bridge never has to hold a plaintext token while it waits for the desktop.
 
@@ -53,13 +54,39 @@ PLAN §2 says the phone gets its cookie "on approval". Setting it at pairing tim
 
 Only the token's sha256 is stored, in `devices.json` (mode 0600, in a 0700 directory). Devices are revoked and renamed on the desktop only. A revoked device's sockets are closed at once, before the change is written to disk, so a failed write can't leave a revoked device streaming. A change of serve name or owner login closes every live socket.
 
+### Home Screen transfer (S5b)
+
+iOS gives a Home Screen web app its own storage, cookies included, apart from Safari's. The device paired in Safari is therefore not paired in the Home Screen app made from it. The transfer moves the already approved device into the app's storage. It never skips approval, and the cookie token never appears in a URL.
+
+1. **Mint.** Safari, as an approved device with `view`, sends `act pair.transfer` (no args) over its own WebSocket. The WebSocket guards apply: exact `Origin`, the subprotocol and the cookie. The bridge makes a 128-bit code (22 base64url characters) bound to that device id, valid for 10 minutes (`TRANSFER_TTL_MS`), and answers `res {ok: true}`. The code is not in the answer. Activity: "Phone 1 asked for a Home Screen setup code". A device holds at most 3 live codes (`TRANSFER_PER_DEVICE`); minting another drops the oldest, so re-opening the prompt doesn't break an add already in progress.
+2. **Manifest.** `GET /manifest.webmanifest` (the usual GET guards: Host and identity) is served per device. With a cookie of a device that may view and holds a live code, `start_url` is `./pair#t=<newest code>`. Otherwise, it is the built manifest unchanged (`./`). `id` stays `./`, so the app's identity doesn't depend on the code. The response has `Cache-Control: no-store` and `Vary: Cookie`, and no CORS headers. The PWA links the manifest with `crossorigin="use-credentials"` (browsers fetch manifests without cookies by default). After a successful mint it replaces the link with `?v=<time>` so the browser reads it again. The service worker never caches the manifest.
+3. **Redeem.** The Home Screen app opens `start_url`. The pairing screen first asks `GET /api/v1/me`. If it is already approved (every later cold launch, since iOS keeps the spent `start_url`), it opens the app and posts nothing. Otherwise it posts `POST /api/v1/pair/transfer` with JSON `{code}`, under the same guards and body rules as `/api/v1/pair`:
+   - `200 {device}`: the response sets a new `__Host-hr-device` cookie (same flags). Its token is the device's **Home Screen token**. Only its sha256 is stored (`home_token_sha256` in `devices.json`, beside `token_sha256`). It is the same device: same id, name, capabilities, Activity and revocation. Safari's token keeps working. A later transfer replaces the Home Screen token (a re-added app), never Safari's. A socket the old Home Screen app still holds stays open until it reconnects (same device, same owner). A request that already carries this device's own cookie (a browser sharing Safari's storage) gets `200 {device}` with no new cookie: the code is spent and nothing else changes. Activity: "Phone 1 set up on the Home Screen".
+   - `403 {error: "bad_code"}`: the code is unknown, expired or spent; or its device is gone, pending, not current, or without `view`; or the request carries the cookie of a *different* device. Every failure looks the same.
+   - `429 {error: "rate_limited"}` after 10 failed transfer codes within a minute (`TRANSFER_FAIL_LIMIT`, global, counted apart from pairing). The 429 does not spend a code.
+   - Any presented code that matches is spent, whatever happens next, together with every other code of its device. A code is never accepted twice.
+
+The fragment (`#t=`) is not sent in any request: only the JSON body carries the code. The pairing screen also takes it out of the address bar and history at once.
+
+**Security notes (threat model).**
+- *Who can mint:* only an approved device, over its authenticated socket. A pending device has no socket, so the transfer can't stand in for approval. A device without `view` can't hold a socket either.
+- *Who can read a code:* only a request with that device's cookie (HttpOnly, `SameSite=Strict`) gets it in the manifest, and only through the serve name with the owner's login. A cross-site page can't make the browser send the cookie, and it can't read the response (no CORS). Script running on our origin could read it, but it could already act as the device.
+- *Replay:* single use; spending one code voids the device's others.
+- *Expiry:* 10 minutes, checked at redemption. Codes live in memory only, so a bridge restart voids every one.
+- *Device binding:* a code redeems only as the device that minted it. A request carrying another device's cookie is refused (and the code is spent).
+- *Revocation:* revoking the device, turning its `view` off, pausing, or a change of serve name or owner login drops its codes. Revoking removes both tokens at once. Redemption checks the device again in any case.
+- *Brute force:* 128-bit codes and a global limit of 10 failures per minute. Like the pairing limit, a local process forging the headers can use it to block transfers, but that process could already do worse.
+- *Where the code ends up:* in the browser's manifest and the Home Screen app's saved start URL. A spent code that stays there is worthless. An unspent one dies after 10 minutes. The cookie token is never in a URL.
+- *Storage separation (iOS):* Safari and each Home Screen web app keep separate cookie jars and storage. On browsers that share storage (desktop Chromium, Android), the installed app already holds Safari's cookie: `/api/v1/me` answers 200, and the code is never posted.
+- *Not verified here:* that iOS Safari fetches the credentialed manifest again after the link changes, and keeps `start_url` with its fragment when adding to the Home Screen. CI can't show this (it has no iPhone). It must be checked once on a real iPhone. If iOS used a manifest read before the mint, the app would open at `/` unpaired, and pairing again from Safari would still work.
+
 ### Capabilities
 
 Checked by the bridge for every `act`:
 
 | capability | default after approval | `act` kinds |
 |---|---|---|
-| `view` | on | needed for the WebSocket itself (all read topics), plus `usage.refresh` and `usage.set_filter`, which only re-run the collect the subscription polls |
+| `view` | on | needed for the WebSocket itself (all read topics), plus `usage.refresh` and `usage.set_filter`, which only re-run the collect the subscription polls, and `pair.transfer` (a Home Screen transfer code for this device, S5b) |
 | `inbox.answer` | on | `inbox.draft`, `inbox.answer`, `inbox.dismiss`, `inbox.ack`, `inbox.retry`, `inbox.stop_showing` |
 | `navigate` | off | `agent.focus`, `tab.select`, `space.select`, `pane.focus` |
 | `terminal.input` | off; turned on from the desktop only, can expire | `terminal.send` |
