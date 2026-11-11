@@ -2,23 +2,36 @@ import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 
-const BOARDS = [
+interface Board {
+  ref: string;
+  hash: string;
+  /** Regions of the design render that this slice leaves out on purpose (painted out of both images). */
+  skip?: Rect[];
+}
+
+const BOARDS: readonly Board[] = [
   { ref: "PhoneAgentsBasic", hash: "#/agents" },
   { ref: "PhoneUsage", hash: "#/usage" },
   { ref: "PhoneMissing", hash: "#/usage/missing" },
-] as const;
+  // PhoneInbox: the board's fourth row ("delivered" placeholder) and the footer with its "Seen" button are not
+  // in the read-only slice (answering, acknowledging and closed-row placeholders belong to S11).
+  { ref: "PhoneInbox", hash: "#/inbox", skip: [{ x: 0, y: 372, width: 390, height: 124 }] },
+];
 
 for (const board of BOARDS) {
   test(`${board.ref} matches the design render`, async ({ page }, info) => {
     await page.goto(`/${board.hash}`);
     await page.evaluate(() => document.fonts.ready);
     await page.waitForSelector(".tabbar");
-    const masks: Rect[] = await page.$$eval("[data-vis-mask]", (els) =>
-      els.map((e) => {
-        const r = e.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height };
-      }),
-    );
+    const masks: Rect[] = [
+      ...(await page.$$eval("[data-vis-mask]", (els) =>
+        els.map((e) => {
+          const r = e.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        }),
+      )),
+      ...(board.skip ?? []),
+    ];
     const shot = await page.screenshot({ type: "png", animations: "disabled", caret: "hide" });
     const diffOut = info.outputPath(`${board.ref}.diff.png`);
     const result = compare(shot, board.ref, masks, diffOut);

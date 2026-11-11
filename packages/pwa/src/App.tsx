@@ -3,13 +3,16 @@ import type { bridgeApi } from "@herdr-remote/protocol";
 import { Banner } from "./components/Banner";
 import { TabBar } from "./components/TabBar";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
+import { DEMO_NOW, demoHost, inboxInstallCommand, inboxScenario } from "./inbox-fixtures";
+import { inboxBadge } from "./inbox/model";
 import { TABS, type Connection, type TabBadges, type TabId } from "./model";
 import { AgentsBasic } from "./screens/AgentsBasic";
+import { InboxTab } from "./screens/InboxTab";
 import { Soon } from "./screens/Soon";
 import { UsageTab } from "./screens/UsageTab";
 import { demoUsageNow, usageScenario } from "./usage-fixtures";
 
-/** `#/usage/<scenario>`: the demo data the Usage tab shows until the bridge client lands. */
+/** `#/usage/<scenario>` and `#/inbox/<scenario>`: the demo data those tabs show until the bridge client lands. */
 function scenarioFromHash(hash: string): string | undefined {
   return hash.replace(/^#\/?/, "").split("/")[1];
 }
@@ -40,7 +43,7 @@ export interface AppProps {
   tabBadges?: TabBadges;
 }
 
-export function App({ connection, tabBadges = badges }: AppProps) {
+export function App({ connection, tabBadges }: AppProps) {
   const [tab, setTab] = useState<TabId>(() => tabFromHash(window.location.hash));
   useEffect(() => {
     const onHash = () => setTab(tabFromHash(window.location.hash));
@@ -57,6 +60,14 @@ export function App({ connection, tabBadges = badges }: AppProps) {
   const scenario = usageScenario(scenarioName);
   const [usageFilter, setUsageFilter] = useState<Record<string, bridgeApi.UsageTopic["filter"]>>({});
   const usageTopic = scenario.topic && { ...scenario.topic, filter: usageFilter[scenario.name] ?? scenario.topic.filter };
+  const inbox = inboxScenario(scenarioName);
+  const inboxBadgeNow = inboxBadge(inbox.topic);
+  const tabBadgesNow: TabBadges = { ...(tabBadges ?? badges) };
+  if (!tabBadges) {
+    // The inbox badge comes from the topic, not from the fixture.
+    delete tabBadgesNow.inbox;
+    if (inboxBadgeNow) tabBadgesNow.inbox = inboxBadgeNow;
+  }
   const select = (t: TabId) => {
     window.location.hash = `/${t}`;
     setTab(t);
@@ -78,10 +89,12 @@ export function App({ connection, tabBadges = badges }: AppProps) {
           onFilter={(f) => setUsageFilter((m) => ({ ...m, [scenario.name]: f }))}
           onRefresh={() => undefined}
         />
+      ) : tab === "inbox" ? (
+        <InboxTab host={host} topic={inbox.topic} hostState={demoHost} plugins={plugins} installCommand={inboxInstallCommand} now={DEMO_NOW} />
       ) : (
         <Soon title={TABS.find((t) => t.id === tab)?.label ?? ""} />
       )}
-      <TabBar active={tab} badges={tabBadges} onSelect={select} />
+      <TabBar active={tab} badges={tabBadgesNow} onSelect={select} />
     </div>
   );
 }

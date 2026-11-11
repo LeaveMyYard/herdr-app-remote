@@ -1,0 +1,9 @@
+{
+  "type": "snap",
+  "topic": "inbox",
+  "epoch": "epoch-1",
+  "seq": 1,
+  "data": {
+    "plugin": "ready"
+  }
+}

@@ -27,3 +27,5 @@ export const INBOX_RECEIPT = "data/herdr-inbox/install.json";
 export const INBOX_FEED_JS = "mods/herdr-inbox/feed.js";
 export const INBOX_COMMANDS_JS = "mods/herdr-inbox/commands.js";
 export const INBOX_FEED = "data/herdr-inbox/feed.json";
+/** The inbox's pure wording (delivery lines, severities); import-free, so it loads hash-pinned like the other two. */
+export const INBOX_WORDS_JS = "mods/herdr-inbox/words.js";

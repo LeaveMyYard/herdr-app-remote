@@ -161,7 +161,7 @@ Mapping to states (`packages/bridge/src/plugins/`):
 
 Probes run every 30 s with a 10 s timeout each (SIGTERM, then SIGKILL after 0.5 s; the probe is reported `broken` at once); `host` is re-derived every second. A probe that throws reports `broken`. `detail` is a short fixed sentence; it never carries CLI output or a path.
 
-Plugin JS the bridge loads (panorama `contract.js`, inbox `feed.js` and `commands.js`) is read once, compared with the plugin's own `install.json` hash, and imported from those same bytes. A file with any import (found by a lexer) is refused, so inbox `model/*` (which imports its siblings) is not loadable this way: a later slice has to vendor it with a drift check or load a pinned graph.
+Plugin JS the bridge loads (panorama `contract.js`, inbox `feed.js` and `commands.js`) is read once, compared with the plugin's own `install.json` hash, and imported from those same bytes. A file with any import (found by a lexer) is refused, so inbox `model/*` (which imports its siblings) is not loadable this way. The bridge does not need it: `model/*` is the popup's state machine over the database snapshot, and everything the phone reads is in the feed. See the inbox topic below.
 
 ### Action results
 
@@ -172,3 +172,20 @@ A non-zero exit outside the contract, or bad stdout, is reported as `res {ok: fa
 1. The link closes and the `host` topic goes `stale` with reason `reconnecting`. The last state stays on screen.
 2. A new `hello` sends a fresh `snap`.
 3. If no `hello` arrives within 5 s and the shown layout has no link block, the reason becomes `layout_without_remote` and the phone shows "Switch to a layout with Remote".
+
+## Inbox topic (`inbox`)
+
+`packages/bridge/src/inbox/`, schema `bridgeApi.InboxTopic`, fixtures `fixtures/bridge-api/inbox/`. It reads herdr-inbox's feed (herdr-inbox `docs/protocol/app-feed-v1.md`) and follows every reader rule in it.
+
+- **Plugin code.** `feed.js`, `commands.js` and `words.js` are import-free, so they load hash-pinned like panorama's `contract.js`. `parseFeed`, `isStale`, `incompleteness`, `leftOut`, `showArgs`, `readResult` and the delivery and severity wording are the plugin's own. `model/*` is not loaded or vendored: the popup model works on the database snapshot and the phone needs nothing from it. Read-only, there is also nothing to drift.
+- **Launcher.** Every command is `sh <root>/scripts/launch cli ...`, with the root from the install record (it must still hold `herdr-plugin.toml` and `scripts/launch`). Roots found through `herdr plugin list` or Claude Code's `installed_plugins.json` are not consulted yet: a moved, non-checkout install reads as `missing`.
+- **Availability.** `herdr-inbox app --help` must print `herdr-inbox app v1` (`plugin: ready`). Any other state publishes `state: unavailable` and no rows.
+- **Writer.** While the feed is stale (older than 15 s, unstamped, from the future, or the newest read failed) and the probe passed, the bridge runs `app-feed --ensure --app-home <home>` at most once per 5 s. Exit 1 is not an error: the feed's age is what the phone shows.
+- **Last good feed.** A missing, unreadable, unsupported or `ok: false` feed keeps the last good one, `stale: true` with the reason in `problem`. With none held, `state: unavailable`: never an empty inbox. `empty` is true only for an ok feed with no rows and nothing left out.
+- **Incomplete feeds.** `incomplete` carries the counts and the feed's `errors` whenever either exists. Left-out questions (`omitted.question_ids`, at most 20 at a time, 4 per pass) and cut groups are opened with `app show` and published as rows; ones not opened yet are counted in `incomplete.unlisted`. A failed `show` is retried no sooner than 30 s later.
+- **Tokens.** Never in the topic. The bridge keeps each row's token (`InboxTopicDriver.tokenFor(key)`) for the answer slice (S11).
+- **New.** The toast marks of the feed protocol: the first good feed announces nothing; after that a row above the marks is `new` for 60 s.
+- **Unknown words.** An unknown row kind is published as `{key, kind, actions: [], new}`; an unknown delivery state as `known: false` with no actions; unknown severity, alert kind and asker host read as `warning`, `agent` and `unknown`. Remote rows are read-only (`actions: []`).
+
+The driver is not started by `createBridgeServer` yet (nor is `PluginsTopicDriver`); whichever slice wires startup constructs it with `{hub, appHome, run}` and calls `start()`.
+
