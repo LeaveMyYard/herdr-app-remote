@@ -202,15 +202,16 @@ describe("usage topic failures", () => {
     expect(topic(hub)).toEqual({ filter: "open-panes", report: null, updatedAtMs: null, error: code });
   });
 
-  it("keeps the last good report while a later collect fails, and clears the error on recovery", async () => {
+  it.each(cases)("keeps the last good report when a later collect fails: %s", async (_n, result, code) => {
     let fail = false;
-    const { runner } = stub(() => (fail ? { code: 1, stdout: "", stderr: "x" } : okRun()));
+    const { runner } = stub(() => (fail ? result : okRun()));
     const { hub } = setup(runner);
     await driver?.refresh();
     const good = topic(hub);
+    expect(good.report).not.toBeNull();
     fail = true;
     await driver?.refresh();
-    expect(topic(hub)).toEqual({ ...good, error: "failed" });
+    expect(topic(hub)).toEqual({ ...good, error: code });
     fail = false;
     await driver?.refresh();
     expect(topic(hub).error).toBeUndefined();
