@@ -10,6 +10,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -25,6 +26,14 @@ jobs:
 
   visual:
     runs-on: ubuntu-latest
+    # Playwright's own image ships the browsers and their system packages, so
+    # this job needs no apt. On 2026-11-11 an Ubuntu mirror outage kept
+    # `playwright install --with-deps` waiting for 1h40m. Keep the tag equal
+    # to @playwright/test in packages/pwa/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --user 1001
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -33,7 +42,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @herdr-remote/pwa exec playwright install --with-deps chromium webkit
       - run: pnpm --filter @herdr-remote/protocol build
       - run: pnpm --filter @herdr-remote/pwa visual
       - uses: actions/upload-artifact@v4
