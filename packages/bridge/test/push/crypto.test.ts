@@ -72,6 +72,18 @@ describe("VAPID", () => {
     expect(() => loadVapid(dir)).toThrow(/invalid/);
   });
 
+  it("a key file that is not JSON is refused without quoting it (no key bytes in logs)", () => {
+    writeFileSync(join(dir, VAPID_FILE), "SECRETkeybytes", { mode: 0o600 });
+    let msg = "";
+    try {
+      loadVapid(dir);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toMatch(/invalid: not JSON/);
+    expect(msg).not.toContain("SECRET");
+  });
+
   it("signs an ES256 JWT for the endpoint's origin, valid under 24 h, with a neutral subject", () => {
     const v = loadVapid(dir);
     const now = 1_800_000_000_000;
@@ -95,6 +107,7 @@ describe("push endpoints", () => {
     "http://web.push.apple.com/abc",
     "https://web.push.apple.com:8443/abc",
     "https://user:pw@web.push.apple.com/abc",
+    "https://web.push.apple.com/abc#frag",
     "https://web.push.apple.com.example.com/abc",
     "https://evilpush.apple.com/abc",
     "https://push.apple.com/abc",

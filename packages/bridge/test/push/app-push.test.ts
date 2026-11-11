@@ -106,7 +106,7 @@ it("subscribes over the socket, reports it, delivers, and drops it when the devi
   app.hub.publish("panorama", rich("blk"));
   await app.push.tick();
   expect(fake.received).toHaveLength(1);
-  expect(JSON.parse(ua.decrypt(fake.received[0]!.body))).toMatchObject({ title: "Agent 1 is blocked" });
+  expect(JSON.parse(ua.decrypt(fake.received[0]!.body))).toMatchObject({ title: "An agent is blocked" });
 
   app.security.revoke(id);
   expect(app.push.subscribed(id)).toBe(false);

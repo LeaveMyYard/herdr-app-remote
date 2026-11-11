@@ -83,9 +83,15 @@ export class PushService {
   }
 
   start(): void {
+    if (this.store.damaged) {
+      this.o.gate.note({ event: "push.reset", text: "Push subscriptions were unreadable and were set aside; phones must turn notifications on again", ok: false, code: "damaged" });
+    }
+    // Devices revoked or with `push` turned off while the bridge was down.
+    this.sync();
     // The first look seeds every source: what is there now is never announced.
     this.triggers.observe(this.o.topics(), this.now());
-    this.timer = setInterval(() => void this.tick(), this.o.tickMs ?? 1_000);
+    // A tick never throws on its own; this is the backstop, so nothing becomes an unhandled rejection.
+    this.timer = setInterval(() => void this.tick().catch(() => undefined), this.o.tickMs ?? 1_000);
     this.timer.unref();
   }
 
@@ -113,6 +119,7 @@ export class PushService {
     let gone: { device: string }[] = [];
     try {
       gone = this.store.retain((d) => this.o.gate.device(d)?.push === true);
+      for (const d of [...this.sent.keys()]) if (!this.store.get(d)) this.sent.delete(d);
     } catch {
       // A failed write leaves the subscription on disk; every send is gated on `mayPush` anyway.
       return;
@@ -203,7 +210,11 @@ export class PushService {
     const now = this.now();
     // Checked again at send time: a subscription stored under another check must still pass this one.
     if (!this.allow(endpoint)) {
-      this.store.remove(device, endpoint);
+      try {
+        this.store.remove(device, endpoint);
+      } catch {
+        // Stays on disk, and is refused again at the next send.
+      }
       this.o.gate.note({ event: "push.drop", ...this.dev(device), text: `${name}: push subscription removed`, ok: false, code: "bad_endpoint" });
       return;
     }

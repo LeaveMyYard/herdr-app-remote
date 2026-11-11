@@ -151,4 +151,14 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: PUSH_WORDS.turnOn })).toBeInTheDocument();
     window.location.hash = "";
   });
+
+  it("the route a question push opens shows the question itself (bridge url: #/inbox/q/<key>/<question id>)", async () => {
+    const { App } = await import("../src/App");
+    const { inboxScenario } = await import("../src/inbox-fixtures");
+    window.location.hash = "#/inbox/q/group%3A127/127";
+    render(<App live={{ hostName: "desk-1", plugins: undefined, inbox: inboxScenario("typical").topic, usage: undefined, onUsageFilter: () => undefined, onUsageRefresh: async () => undefined }} />);
+    expect((await screen.findAllByText(/Question Title 127/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/closed in this group/)).toBeNull();
+    window.location.hash = "";
+  });
 });

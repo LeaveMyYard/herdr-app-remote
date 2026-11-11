@@ -1,7 +1,7 @@
 // The push service end to end on loopback: a paired device subscribes over the real WebSocket (the security layer's
 // capability check and audit included), triggers fire from topic values, and the bridge POSTs encrypted, VAPID-signed
 // pushes to a local fake push service. No real push endpoint is contacted.
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
@@ -37,6 +37,8 @@ let fake: FakePushService;
 let topics: { inbox: unknown; panorama: unknown; host: unknown };
 let serving: boolean;
 let clock: number;
+/** False: security changes are not passed on (stands for changes made while the bridge was down). */
+let syncOn: boolean;
 const socks: WebSocket[] = [];
 
 function baseInbox(): bridgeApi.InboxTopic {
@@ -57,18 +59,36 @@ function addQuestion(id: number): void {
   topics.inbox = { ...t, entries: [...t.entries, row] };
 }
 
+const gate = () => ({ mayPush: (id: string) => sec.mayPush(id), requestDevice: (r: Parameters<Security["requestDevice"]>[0]) => sec.requestDevice(r), device: (id: string) => sec.pushDevice(id), note: (e: Parameters<Security["note"]>[0]) => sec.note(e) });
+
+/** A second push service on the same data dir: the bridge restarted (production endpoint check unless given). */
+function restartPush(allowFake = false): void {
+  push.stop();
+  push = new PushService({
+    dataDir: join(dir, "data"),
+    gate: gate(),
+    topics: () => topics,
+    now: () => clock,
+    tickMs: 3_600_000,
+    ...(allowFake ? { allowEndpoint: (u: string) => u.startsWith(`http://127.0.0.1:${fake.port}/`) } : {}),
+  });
+  push.start();
+}
+
 async function start(o: { rateLimit?: number } = {}) {
   sec = new Security({
     dataDir: join(dir, "data"),
     serve: { host: SERVE, login: OWNER },
     now: () => clock,
     inner: routeActs([(c, kind, args) => push.act(c, kind, args)]),
-    onChange: () => push?.sync(),
+    onChange: () => {
+      if (syncOn) push?.sync();
+    },
   });
   hub = newHub({ onAct: sec.act });
   push = new PushService({
     dataDir: join(dir, "data"),
-    gate: { mayPush: (id) => sec.mayPush(id), requestDevice: (r) => sec.requestDevice(r), device: (id) => sec.pushDevice(id), note: (e) => sec.note(e) },
+    gate: gate(),
     topics: () => topics,
     serving: () => serving,
     now: () => clock,
@@ -91,6 +111,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "bridge-push-"));
   clock = 1_800_000_000_000;
   serving = true;
+  syncOn = true;
   topics = { inbox: baseInbox(), panorama: undefined, host: host() };
   fake = new FakePushService();
   await fake.start();
@@ -247,7 +268,7 @@ describe("push: delivery", () => {
     expect(got.vapidKey).toBe(push.publicKey);
     expect(got.claims).toMatchObject({ aud: `http://127.0.0.1:${fake.port}`, sub: "https://github.com/LeaveMyYard/herdr-app-remote" });
     const text = d.ua.decrypt(got.body);
-    expect(bridgeApi.PushPayload.parse(JSON.parse(text))).toEqual({ v: 1, kind: "question", title: "Agent 1: Question Title 130", body: "New question", tag: "q-130", url: "#/inbox/q/group%3A130" });
+    expect(bridgeApi.PushPayload.parse(JSON.parse(text))).toEqual({ v: 1, kind: "question", title: "Agent 1: Question Title 130", body: "New question", tag: "q-130", url: "#/inbox/q/group%3A130/130" });
     expect(text).not.toContain("SECRET");
     // The body is ciphertext: nothing readable for the push service.
     expect(got.body.toString("latin1")).not.toContain("Question Title");
@@ -370,18 +391,104 @@ describe("push: delivery", () => {
     const doc = JSON.parse(await readFile(file, "utf8")) as { subs: { endpoint: string }[] };
     expect(doc.subs[0]!.endpoint).toBe(fake.endpoint("/sub/1"));
     // Restart with the production check: the loopback endpoint is refused.
-    push.stop();
-    push = new PushService({
-      dataDir: join(dir, "data"),
-      gate: { mayPush: (id) => sec.mayPush(id), requestDevice: (r) => sec.requestDevice(r), device: (id) => sec.pushDevice(id), note: (e) => sec.note(e) },
-      topics: () => topics,
-      now: () => clock,
-      tickMs: 3_600_000,
-    });
-    push.start();
+    restartPush();
     addQuestion(140);
     await push.tick();
     expect(fake.received).toHaveLength(0);
     expect(push.subscribed(d.id)).toBe(false);
+  });
+
+  it("a failed write while dropping a refused endpoint never rejects the tick", async () => {
+    await start();
+    const d = await subscribed();
+    restartPush();
+    await chmod(join(dir, "data"), 0o500);
+    try {
+      addQuestion(141);
+      await expect(push.tick()).resolves.toBeUndefined();
+    } finally {
+      await chmod(join(dir, "data"), 0o700);
+    }
+    expect(fake.received).toHaveLength(0);
+    expect(push.subscribed(d.id)).toBe(true);
+  });
+});
+
+describe("push: storage and restart", () => {
+  it("a damaged push.json is set aside: the bridge starts, nothing is sent, and the Activity log says so", async () => {
+    await start();
+    const d = await device();
+    push.stop();
+    await writeFile(join(dir, "data", PUSH_FILE), "SECRET-endpoint-bytes{");
+    restartPush(true);
+    expect(push.subscribed(d.id)).toBe(false);
+    expect(await readFile(join(dir, "data", `${PUSH_FILE}.damaged`), "utf8")).toBe("SECRET-endpoint-bytes{");
+    expect((await stat(join(dir, "data", `${PUSH_FILE}.damaged`))).mode & 0o777).toBe(0o600);
+    const log = await activity();
+    expect(log.at(-1)).toMatchObject({ event: "push.reset", code: "damaged" });
+    expect(JSON.stringify(log)).not.toContain("SECRET");
+    expect(await readdir(join(dir, "data"))).not.toContain(PUSH_FILE);
+  });
+
+  it("tightens a key or subscription file found readable by others", async () => {
+    await start();
+    await chmod(join(dir, "data", VAPID_FILE), 0o644);
+    await writeFile(join(dir, "data", PUSH_FILE), JSON.stringify({ v: 1, subs: [] }), { mode: 0o644 });
+    await chmod(join(dir, "data", PUSH_FILE), 0o644);
+    restartPush(true);
+    expect((await stat(join(dir, "data", VAPID_FILE))).mode & 0o777).toBe(0o600);
+    expect((await stat(join(dir, "data", PUSH_FILE))).mode & 0o777).toBe(0o600);
+  });
+
+  it("at start, drops subscriptions of devices revoked or with push turned off while it was down", async () => {
+    await start();
+    const a = await device("Phone 1");
+    const b = await device("Phone 2");
+    await (await phone(a.cookie)).act("push.subscribe", subArgs(new FakeUa(), "/a"));
+    await (await phone(b.cookie)).act("push.subscribe", subArgs(new FakeUa(), "/b"));
+    syncOn = false;
+    sec.revoke(a.id);
+    sec.setCap(b.id, "push", false);
+    expect(push.subscribed(a.id)).toBe(true);
+    restartPush(true);
+    expect(push.subscribed(a.id)).toBe(false);
+    expect(push.subscribed(b.id)).toBe(false);
+  });
+
+  it("refuses non-canonical base64url keys", async () => {
+    await start();
+    const d = await device();
+    const p = await phone(d.cookie);
+    const ua = new FakeUa();
+    // 16 bytes take 22 characters; the last one's low 4 bits must be zero. Flip one of them.
+    const last = ua.keys.auth.at(-1)!;
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const flipped = alphabet[alphabet.indexOf(last) ^ 1]!;
+    const auth = ua.keys.auth.slice(0, -1) + flipped;
+    expect(Buffer.from(auth, "base64url").toString("base64url")).not.toBe(auth);
+    expect(await p.act("push.subscribe", { endpoint: fake.endpoint("/x"), keys: { ...ua.keys, auth } })).toMatchObject({ ok: false, code: "bad_keys" });
+  });
+
+  it("one subscription per endpoint: a phone paired again is not notified twice", async () => {
+    await start();
+    const a = await device("Phone 1");
+    const b = await device("Phone 1 again");
+    const ua = new FakeUa();
+    await (await phone(a.cookie)).act("push.subscribe", subArgs(ua, "/same"));
+    await (await phone(b.cookie)).act("push.subscribe", subArgs(ua, "/same"));
+    expect(push.subscribed(a.id)).toBe(false);
+    expect(push.subscribed(b.id)).toBe(true);
+    addQuestion(142);
+    await push.tick();
+    expect(fake.received).toHaveLength(1);
+  });
+
+  it("GET /api/v1/push refuses a device that is only pending", async () => {
+    await start();
+    const { code } = sec.issueCode();
+    const r = await http("POST", "/api/v1/pair", OK_POST, JSON.stringify({ code, name: "Phone 9" }));
+    const sc = r.headers["set-cookie"];
+    const cookie = (Array.isArray(sc) ? sc[0]! : sc!).split(";")[0]!;
+    expect((await http("GET", "/api/v1/push", { ...OK_GET, Cookie: cookie })).status).toBe(401);
   });
 });

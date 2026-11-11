@@ -62,22 +62,36 @@ export type PushSub = z.infer<typeof SubSchema>;
 
 const FileSchema = z.object({ v: z.literal(1), subs: z.array(SubSchema) }).strict();
 
-/** The subscriptions, one per device. A file that fails validation is an error (fail closed, as `devices.json`). */
+/**
+ * The subscriptions, one per device. A file that fails validation is set aside as `push.json.damaged` (still
+ * 0600) and the store starts empty: the safe failure of an optional feature is "no pushes" (phones turn
+ * notifications on again), not a bridge that won't start.
+ */
 export class PushStore {
   private readonly file: string;
-  private subs: PushSub[];
+  private subs: PushSub[] = [];
+  /** The file on disk could not be read and was set aside. */
+  readonly damaged: boolean = false;
 
   constructor(private readonly dir: string) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.file = join(dir, PUSH_FILE);
-    if (existsSync(this.file)) {
-      chmodSync(this.file, 0o600);
-      const parsed = FileSchema.safeParse(JSON.parse(readFileSync(this.file, "utf8")));
-      if (!parsed.success) throw new Error(`${this.file} is invalid: ${parsed.error.issues[0]?.message ?? "bad shape"}`);
-      this.subs = parsed.data.subs;
-    } else {
-      this.subs = [];
+    if (!existsSync(this.file)) return;
+    chmodSync(this.file, 0o600);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(this.file, "utf8"));
+    } catch {
+      raw = undefined;
     }
+    const parsed = FileSchema.safeParse(raw);
+    if (parsed.success) {
+      this.subs = parsed.data.subs;
+      return;
+    }
+    this.damaged = true;
+    // Kept for a person to look at, never read again; the next write starts a fresh file.
+    renameSync(this.file, `${this.file}.damaged`);
   }
 
   get path(): string {
@@ -95,16 +109,14 @@ export class PushStore {
   /** Replaces the device's subscription. */
   put(sub: PushSub): void {
     // One per device, and one per endpoint: a phone paired again must not get every notification twice.
-    this.subs = [...this.subs.filter((s) => s.device !== sub.device && s.endpoint !== sub.endpoint), sub];
-    this.save();
+    this.save([...this.subs.filter((s) => s.device !== sub.device && s.endpoint !== sub.endpoint), sub]);
   }
 
   /** Removes the device's subscription; only when it still has `endpoint`, if given (a stale 410 must not drop a newer one). */
   remove(device: string, endpoint?: string): boolean {
     const next = this.subs.filter((s) => !(s.device === device && (endpoint === undefined || s.endpoint === endpoint)));
     if (next.length === this.subs.length) return false;
-    this.subs = next;
-    this.save();
+    this.save(next);
     return true;
   }
 
@@ -112,12 +124,13 @@ export class PushStore {
   retain(keep: (device: string) => boolean): PushSub[] {
     const gone = this.subs.filter((s) => !keep(s.device));
     if (gone.length === 0) return [];
-    this.subs = this.subs.filter((s) => keep(s.device));
-    this.save();
+    this.save(this.subs.filter((s) => keep(s.device)));
     return gone;
   }
 
-  private save(): void {
-    writeAtomic(this.dir, this.file, { v: 1, subs: this.subs });
+  /** Writes first, then takes the new list: after a failed write, memory still matches the disk. */
+  private save(next: PushSub[]): void {
+    writeAtomic(this.dir, this.file, { v: 1, subs: next });
+    this.subs = next;
   }
 }

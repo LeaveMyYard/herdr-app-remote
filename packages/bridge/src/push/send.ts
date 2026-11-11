@@ -8,7 +8,8 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
 /** The push services of Safari/iOS, Chrome, Firefox and Edge. A host matches exactly or as a subdomain of a suffix. */
-export const PUSH_HOSTS: readonly string[] = ["web.push.apple.com", "fcm.googleapis.com", "updates.push.services.mozilla.com"];
+export const PUSH_HOSTS: readonly string[] = ["fcm.googleapis.com"];
+/** `web.push.apple.com` and `updates.push.services.mozilla.com` are covered here. */
 export const PUSH_HOST_SUFFIXES: readonly string[] = [".push.apple.com", ".push.services.mozilla.com", ".notify.windows.com"];
 export const MAX_ENDPOINT = 1024;
 

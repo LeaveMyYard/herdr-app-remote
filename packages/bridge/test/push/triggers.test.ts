@@ -48,7 +48,7 @@ describe("push triggers: inbox", () => {
     expect(tr.observe({ inbox: inbox(), panorama: undefined, host: host() }, 0)).toEqual([]);
     const t = withRow(inbox(), newGroup(130));
     const ev = tr.observe({ inbox: t, panorama: undefined, host: host() }, 1000);
-    expect(ev).toEqual([{ kind: "question", title: "Agent 1: Question Title 130", body: "New question", tag: "q-130", url: "#/inbox/q/group%3A130", audit: "group 130" }]);
+    expect(ev).toEqual([{ kind: "question", title: "Agent 1: Question Title 130", body: "New question", tag: "q-130", url: "#/inbox/q/group%3A130/130", audit: "group 130" }]);
     expect(JSON.stringify(ev)).not.toContain("SECRET");
     // Still `new` on the next readings: not announced again.
     expect(tr.observe({ inbox: t, panorama: undefined, host: host() }, 2000)).toEqual([]);
@@ -59,6 +59,19 @@ describe("push triggers: inbox", () => {
     // bridge restart every open row reads `new: false`.
     const tr = new PushTriggers();
     for (let i = 0; i < 3; i++) expect(tr.observe({ inbox: withRow(inbox(), { ...newGroup(130), new: false }), panorama: undefined, host: host() }, i)).toEqual([]);
+  });
+
+  it("opens the group's first question without a draft", () => {
+    const tr = new PushTriggers();
+    const g = newGroup(160) as { questions: Record<string, unknown>[] };
+    const q = g.questions[0]!;
+    g.questions = [
+      { ...q, id: 160, draft: { choices: ["Option A"], notes: {}, text: null } },
+      { ...q, id: 161 },
+    ];
+    const ev = tr.observe({ inbox: withRow(inbox(), bridgeApi.InboxRow.parse(g)), panorama: undefined, host: host() }, 0);
+    expect(ev[0]!.url).toBe("#/inbox/q/group%3A160/161");
+    expect(ev[0]!.body).toBe("2 new questions");
   });
 
   it("falls back to the tab label, then asked_by, then a neutral word; and to the header, never the question", () => {
@@ -108,10 +121,10 @@ describe("push triggers: blocked agents", () => {
 
   it("announces a root turning blocked, not one already blocked at the first reading", () => {
     const tr = new PushTriggers();
-    expect(tr.observe({ inbox: undefined, panorama: at("blk"), host: undefined }, 0)).toEqual([]);
-    expect(tr.observe({ inbox: undefined, panorama: at("blk"), host: undefined }, 1000)).toEqual([]);
-    expect(tr.observe({ inbox: undefined, panorama: at("run"), host: undefined }, 2000)).toEqual([]);
-    const ev = tr.observe({ inbox: undefined, panorama: at("blk"), host: undefined }, BLOCKED_COOLDOWN_MS + 3000);
+    expect(tr.observe({ inbox: undefined, panorama: at("blk"), host: host() }, 0)).toEqual([]);
+    expect(tr.observe({ inbox: undefined, panorama: at("blk"), host: host() }, 1000)).toEqual([]);
+    expect(tr.observe({ inbox: undefined, panorama: at("run"), host: host() }, 2000)).toEqual([]);
+    const ev = tr.observe({ inbox: undefined, panorama: at("blk"), host: host() }, BLOCKED_COOLDOWN_MS + 3000);
     expect(ev).toHaveLength(1);
     expect(ev[0]).toMatchObject({ kind: "blocked", title: "Agent 1 is blocked", url: "#/agents", audit: "an agent" });
     expect(ev[0]!.tag).toMatch(/^b-[0-9a-f]{12}$/);
@@ -134,6 +147,27 @@ describe("push triggers: blocked agents", () => {
     expect(tr.observe({ inbox: undefined, panorama: at("blk"), host: undefined }, 3)).toEqual([]);
   });
 
+  it("names a blocked root only through its host agent, never its own title (it can be an AI summary)", () => {
+    const tr = new PushTriggers();
+    const p0 = at("run");
+    p0.roots[0]!.title = "Secret Title 999";
+    p0.roots[0]!.agent_id = null;
+    tr.observe({ inbox: undefined, panorama: p0, host: host() }, 0);
+    const p1 = structuredClone(p0);
+    p1.roots[0]!.status = "blk";
+    const ev = tr.observe({ inbox: undefined, panorama: p1, host: host() }, 1);
+    expect(ev[0]!.title).toBe("An agent is blocked");
+    expect(JSON.stringify(ev)).not.toContain("Secret");
+    // Matched: the host agent's name, whatever the root's title says.
+    const tr2 = new PushTriggers();
+    const m0 = structuredClone(p0);
+    m0.roots[0]!.agent_id = "agent-2";
+    tr2.observe({ inbox: undefined, panorama: m0, host: host() }, 0);
+    const m1 = structuredClone(m0);
+    m1.roots[0]!.status = "blk";
+    expect(tr2.observe({ inbox: undefined, panorama: m1, host: host() }, 1)[0]!.title).toBe("Agent 2 is blocked");
+  });
+
   it("ignores shadowed roots", () => {
     const tr = new PushTriggers();
     tr.observe({ inbox: undefined, panorama: at("run"), host: undefined }, 0);
@@ -149,7 +183,7 @@ describe("summarize", () => {
     tr.observe({ inbox: inbox(), panorama: undefined, host: host() }, 0);
     const evs = tr.observe({ inbox: withRow(withRow(inbox(), newGroup(140)), newGroup(141)), panorama: undefined, host: host() }, 1);
     const one = summarize(evs.slice(0, 1));
-    expect(bridgeApi.PushPayload.parse(one.payload)).toEqual({ v: 1, kind: "question", title: "Agent 1: Question Title 140", body: "New question", tag: "q-140", url: "#/inbox/q/group%3A140" });
+    expect(bridgeApi.PushPayload.parse(one.payload)).toEqual({ v: 1, kind: "question", title: "Agent 1: Question Title 140", body: "New question", tag: "q-140", url: "#/inbox/q/group%3A140/140" });
     const both = summarize(evs);
     expect(bridgeApi.PushPayload.parse(both.payload)).toMatchObject({ title: "Agent 1: Question Title 140", body: "and 1 more", tag: "batch", url: "#/inbox" });
     expect(both.audit).toBe("2 updates");

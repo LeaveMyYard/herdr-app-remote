@@ -55,11 +55,20 @@ export function loadVapid(dir: string, now: () => number = Date.now): Vapid {
     writeAtomic(dir, file, data, { exclusive: true });
   }
   chmodSync(file, 0o600);
-  const parsed = FileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
+  const parsed = FileSchema.safeParse(parseJson(readFileSync(file, "utf8"), file));
   if (!parsed.success) throw new Error(`${file} is invalid: ${parsed.error.issues[0]?.message ?? "bad shape"}`);
   const jwk = parsed.data.private_jwk;
   if (rawPublic(jwk).toString("base64url") !== parsed.data.public_key) throw new Error(`${file} is invalid: public key mismatch`);
   return { publicKey: parsed.data.public_key, privateKey: createPrivateKey({ key: jwk, format: "jwk" }) };
+}
+
+/** JSON.parse whose error never quotes the input (a damaged key file must not print key bytes). */
+export function parseJson(text: string, file: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${file} is invalid: not JSON`);
+  }
 }
 
 const b64json = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");

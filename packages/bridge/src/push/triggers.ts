@@ -49,17 +49,28 @@ function agentName(asker: bridgeApi.InboxAsker, askedBy: string | null, host: Ho
   return name || "An agent";
 }
 
+/**
+ * A blocked root is named only through the host join (its verified host agent's name). The root's own `title` can
+ * be the session's AI summary or the terminal title, which is free text beyond a question title (PLAN §7.3).
+ */
+function blockedName(agentId: string | null, host: HostState | undefined): string {
+  const name = agentId !== null ? host?.agents.find((a) => a.id === agentId)?.name : undefined;
+  return cleanLabel(name ?? "", NAME_MAX) || "An agent";
+}
+
 function groupEvent(row: Group, host: HostState | undefined): PushEvent {
   const id = KEY_ID.exec(row.key);
   // The group's title, else its first question's header: never the question text itself.
   const what = cleanLabel(row.title ?? row.questions[0]?.header ?? "", TITLE_MAX) || "a question";
   const n = row.questions.length;
+  // The question to open, as the Inbox list picks it: the first one without a draft (the route needs its id).
+  const first = row.questions.find((q) => q.draft === null) ?? row.questions[0];
   return {
     kind: "question",
     title: cleanLabel(`${agentName(row.asker, row.questions[0]?.asked_by ?? null, host)}: ${what}`, TITLE_MAX),
     body: n === 1 ? "New question" : `${n} new questions`,
     tag: `q-${id ? id[2] : short(row.key)}`,
-    url: `#/inbox/q/${encodeURIComponent(row.key)}`,
+    url: `#/inbox/q/${encodeURIComponent(row.key)}/${first?.id ?? ""}`,
     audit: id ? `group ${id[2]}` : "a question",
   };
 }
@@ -98,7 +109,7 @@ export class PushTriggers {
 
   observe(t: TopicValues, now: number): PushEvent[] {
     const host = parse(HostState, t.host);
-    return [...this.inbox(parse(bridgeApi.InboxTopic, t.inbox), host, now), ...this.panorama(parse(bridgeApi.PanoramaTopic, t.panorama), now)];
+    return [...this.inbox(parse(bridgeApi.InboxTopic, t.inbox), host, now), ...this.panorama(parse(bridgeApi.PanoramaTopic, t.panorama), host, now)];
   }
 
   private inbox(topic: bridgeApi.InboxTopic | undefined, host: HostState | undefined, now: number): PushEvent[] {
@@ -115,7 +126,7 @@ export class PushTriggers {
     return out;
   }
 
-  private panorama(topic: bridgeApi.PanoramaTopic | undefined, now: number): PushEvent[] {
+  private panorama(topic: bridgeApi.PanoramaTopic | undefined, host: HostState | undefined, now: number): PushEvent[] {
     // Only a fresh rich feed says what a root's status is now. Anything else ends the session: the next good feed
     // seeds again, so agents that were blocked during a gap (or before the bridge started) are not announced.
     if (!topic || topic.mode !== "rich" || topic.aged || topic.stale) {
@@ -123,11 +134,11 @@ export class PushTriggers {
       return [];
     }
     const current = new Map<string, bridgeApi.AgentCode>();
-    const titles = new Map<string, string>();
+    const agents = new Map<string, string | null>();
     for (const r of topic.roots) {
       if (r.shadowed) continue;
       current.set(r.key, r.status);
-      titles.set(r.key, r.title);
+      agents.set(r.key, r.agent_id);
     }
     const before = this.roots;
     this.roots = current;
@@ -140,7 +151,7 @@ export class PushTriggers {
       this.lastBlocked.set(key, now);
       out.push({
         kind: "blocked",
-        title: cleanLabel(`${cleanLabel(titles.get(key) ?? "", NAME_MAX) || "An agent"} is blocked`, TITLE_MAX),
+        title: cleanLabel(`${blockedName(agents.get(key) ?? null, host)} is blocked`, TITLE_MAX),
         body: "Needs you",
         tag: `b-${short(key)}`,
         url: "#/agents",

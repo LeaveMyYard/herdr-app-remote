@@ -72,6 +72,20 @@ describe("service worker push", () => {
     for (const call of sw.showNotification.mock.calls as unknown as [string, { data: { url: string } }][]) expect(call[1].data.url).toBe("#/inbox");
   });
 
+  it("keeps only a plain tag", async () => {
+    const sw = load();
+    await sw.push(json({ v: 1, kind: "alert", title: "Agent 1: Alert Title 456", body: "Alert", tag: "Bad Tag!", url: "#/inbox" }));
+    expect(sw.showNotification).toHaveBeenCalledWith("Agent 1: Alert Title 456", expect.objectContaining({ tag: "herdr" }));
+  });
+
+  it("a tap navigates only a window of this app's origin", async () => {
+    const foreign = { url: "https://example.com/", navigate: vi.fn(async () => null), focus: vi.fn(async () => undefined) };
+    const sw = load([foreign]);
+    await sw.click({ url: "#/inbox" });
+    expect(foreign.navigate).not.toHaveBeenCalled();
+    expect(sw.openWindow).toHaveBeenCalledWith(`${ORIGIN}/#/inbox`);
+  });
+
   it("a tap focuses the open app on the route, or opens it", async () => {
     const navigate = vi.fn(async () => null);
     const focus = vi.fn(async () => undefined);
