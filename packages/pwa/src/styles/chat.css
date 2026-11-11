@@ -1,0 +1,35 @@
+/* Chat (read-only), after design/PhoneChat. Values come from the board; 0, 6, 7 and 14 of the ANSI
+   palette are the board's neighbours (it only fixes the others), chosen to sit with the theme tokens. */
+.hd{
+  --ans-0:#4d535c;--ans-1:var(--t-ansi1);--ans-2:var(--t-ansi2);--ans-3:var(--t-ansi3);--ans-4:var(--t-ansi4);--ans-5:var(--t-ansi5);--ans-6:#7fc1c1;--ans-7:#c3c7cd;
+  --ans-8:var(--t-muted);--ans-9:var(--t-ansi1);--ans-10:var(--t-ansi2);--ans-11:var(--t-ansi3);--ans-12:var(--t-ansi4);--ans-13:var(--t-ansi5);--ans-14:#9fd8d8;--ans-15:var(--t-foreground);
+}
+.chat-head{padding:var(--sat) 16px 6px;gap:6px;border-bottom:1px solid var(--t-border)}
+.chat-back{width:44px;height:44px;margin-left:-10px;justify-content:center;color:var(--t-foreground)}
+.chat-title{gap:8px;font-size:12px}
+.chat-name{max-width:260px;font-weight:500;color:var(--t-foreground)}
+.chat-folder{color:var(--t-dim)}
+.hd .chat-fit{width:44px;height:44px;justify-content:center;border-radius:9px;background:var(--t-raised);font-size:12px}
+.hd .chat-fit[aria-pressed=false]{box-shadow:inset 0 0 0 1px var(--t-input)}
+.chat-main{min-height:0;position:relative}
+.chat-term{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;min-height:0;overflow:hidden auto;overscroll-behavior:contain;padding:12px;background:var(--t-background);font-size:11.5px;line-height:1.55;color:var(--t-foreground)}
+.chat-term[data-fit=true]{white-space:pre-wrap;overflow-wrap:anywhere}
+.chat-term[data-fit=false]{white-space:pre;overflow-x:auto}
+.chat-term:focus-visible{outline:1px solid var(--t-accent);outline-offset:-1px}
+.cl{min-height:17.825px}
+.chat-empty{color:var(--t-dim)}
+.chat-notice{padding:6px 12px;font-size:12px;color:var(--t-working);background:var(--t-background);border-bottom:1px solid var(--t-border)}
+.chat-banner{margin:8px 12px 0;min-height:44px;padding:0 12px 0 14px;gap:8px;border-radius:8px;background:var(--cf);border:1px solid var(--cb);font-size:13px}
+.chat-banner-edge{left:0;top:0;bottom:0;width:2px;border-radius:7px 0 0 7px;background:var(--hue)}
+.chat-banner-go{color:var(--hue)}
+.tile{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;border-radius:4px;background:var(--fill);border:1px solid var(--hb);color:var(--ink);font-size:10px;font-weight:700;line-height:1;gap:1px}
+.tile.t18{width:18px;height:18px;border-radius:5px}
+.tile.wide{width:auto;min-width:18px;padding:0 4px}
+.s-wait.tile{animation:hd-breathe 1.6s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.s-wait.tile{animation:none}}
+.rel{position:relative}
+.abs{position:absolute}
+/* The slot S16 fills with the key bar and composer: same height as the board's, masked in the visual check. */
+.chat-foot{height:139px;padding:14px 16px 0;justify-content:flex-start}
+.chat-ro{margin:0;font-size:12.5px;color:var(--t-dim)}
+.chat-pick{padding:8px}

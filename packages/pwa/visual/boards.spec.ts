@@ -6,13 +6,16 @@ const BOARDS = [
   { ref: "PhoneAgentsBasic", hash: "#/agents" },
   { ref: "PhoneUsage", hash: "#/usage" },
   { ref: "PhoneMissing", hash: "#/usage/missing" },
+  // A chat is full screen: no tab bar. Its footer slot (S16's key bar and composer) is masked.
+  { ref: "PhoneChat", hash: "#/chat/a-1", tabbar: false },
 ] as const;
 
 for (const board of BOARDS) {
   test(`${board.ref} matches the design render`, async ({ page }, info) => {
     await page.goto(`/${board.hash}`);
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForSelector(".tabbar");
+    const tabbar = !("tabbar" in board) || board.tabbar;
+    await page.waitForSelector(tabbar ? ".tabbar" : ".chat-head");
     const masks: Rect[] = await page.$$eval("[data-vis-mask]", (els) =>
       els.map((e) => {
         const r = e.getBoundingClientRect();
@@ -37,7 +40,7 @@ for (const board of BOARDS) {
       inter: document.fonts.check('14px "Inter"'),
     }));
     expect(layout.overflowX).toBeLessThanOrEqual(0);
-    expect(layout.tabBarBottom).toBe(layout.innerHeight);
+    if (tabbar) expect(layout.tabBarBottom).toBe(layout.innerHeight);
     expect(layout.inter).toBe(true);
   });
 }

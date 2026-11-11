@@ -10,3 +10,5 @@ export { run, type Runner, type RunResult } from "./plugins/exec.js";
 export * from "./plugins/constants.js";
 export { UsageTopicDriver, USAGE_TOPIC, USAGE_INTERVAL_MS, USAGE_TIMEOUT_MS, panesArg, normalizeReport, tilde, type UsageTopicOptions } from "./usage.js";
 export * from "./link/index.js";
+export { ChatTopicDriver, CHAT_PREFIX, CHAT_INTERVAL_MS, CHAT_LINES, MAX_ACTIVE_CHATS, terminalIds, type ChatTopicOptions } from "./chat/topic.js";
+export { parseAnsi, type ParsedAnsi, type ParseOptions } from "./chat/ansi.js";
