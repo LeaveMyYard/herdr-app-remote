@@ -26,7 +26,13 @@ jobs:
 
   visual:
     runs-on: ubuntu-latest
-    # A hung apt mirror once kept this job waiting for 1h40m. Fail fast instead.
+    # Playwright's own image ships the browsers and their system packages, so
+    # this job needs no apt. On 2026-11-11 an Ubuntu mirror outage kept
+    # `playwright install --with-deps` waiting for 1h40m. Keep the tag equal
+    # to @playwright/test in packages/pwa/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --user 1001
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -36,26 +42,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Playwright version
-        id: pw
-        run: echo "version=$(node -p "require('./packages/pwa/node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-      - name: Install browser system packages
-        timeout-minutes: 12
-        run: |
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/80-ci-retries >/dev/null
-          for i in 1 2 3; do
-            pnpm --filter @herdr-remote/pwa exec playwright install-deps chromium webkit && exit 0
-            echo "install-deps attempt $i failed; retrying"; sleep 15
-          done
-          exit 1
-      - name: Install browsers
-        timeout-minutes: 8
-        run: pnpm --filter @herdr-remote/pwa exec playwright install chromium webkit
       - run: pnpm --filter @herdr-remote/protocol build
       - run: pnpm --filter @herdr-remote/pwa visual
       - uses: actions/upload-artifact@v4
