@@ -4,7 +4,7 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 import { bridgeApi } from "@herdr-remote/protocol";
-import type { Hub, HubClient } from "./hub.js";
+import type { Hub, HubClient, Principal } from "./hub.js";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -38,12 +38,43 @@ export interface ServerOptions {
   staticDir?: string;
   port?: number;
   /**
-   * Request guard, the seam S5 fills in (Host, Origin, identity, cookie, pause).
-   * Called for every HTTP request and WS upgrade; return false after writing nothing
-   * and the server answers 403. `/healthz` is exempt from nothing here: S5 decides.
+   * Request guard (S5 fills it in: Host, Origin, identity, cookie, pause).
+   * Called for every HTTP request and WS upgrade, before anything else. `false` (or a
+   * denial) answers with the given status, 403 by default. For an upgrade, an allow may
+   * carry the `principal` the connection acts as. `/healthz` is exempt from nothing here:
+   * the guard decides.
    */
-  guard?: (req: IncomingMessage, kind: "http" | "ws") => boolean | Promise<boolean>;
+  guard?: (req: IncomingMessage, kind: "http" | "ws") => GuardVerdict | Promise<GuardVerdict>;
+  /**
+   * Extra HTTP routes (S5: pairing). Called after the guard allowed the request and
+   * before the built-in routes; returns true when it answered the request.
+   */
+  routes?: (req: IncomingMessage, res: ServerResponse, path: string) => boolean | Promise<boolean>;
+  /** Called for each accepted WS connection; the returned function runs when it closes. */
+  onConnect?: (client: HubClient) => (() => void) | void;
 }
+
+export type GuardVerdict =
+  | boolean
+  | { allow: true; principal?: Principal }
+  | { allow: false; status: number; reason: string };
+
+type Normalized = { allow: true; principal?: Principal } | { allow: false; status: number; reason: string };
+
+function normalize_(v: GuardVerdict): Normalized {
+  if (v === true) return { allow: true };
+  if (v === false) return { allow: false, status: 403, reason: "forbidden" };
+  return v;
+}
+
+const STATUS_TEXT: Record<number, string> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not Found",
+  429: "Too Many Requests",
+  503: "Service Unavailable",
+};
 
 export interface BridgeServer {
   readonly server: Server;
@@ -62,7 +93,8 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
   const server = createServer((req, res) => {
     void (async () => {
       try {
-        if (!(await guard(req, "http"))) return end(res, 403, "forbidden");
+        const v = normalize_(await guard(req, "http"));
+        if (!v.allow) return end(res, v.status, v.reason);
         await route(req, res);
       } catch {
         if (!res.headersSent) end(res, 500, "internal error");
@@ -72,8 +104,9 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
   });
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (req.method !== "GET" && req.method !== "HEAD") return end(res, 405, "method not allowed");
     const path = new URL(req.url ?? "/", "http://x").pathname;
+    if (opts.routes && (await opts.routes(req, res, path))) return;
+    if (req.method !== "GET" && req.method !== "HEAD") return end(res, 405, "method not allowed");
     if (path === "/healthz") return end(res, 200, "ok");
     if (path === "/api/v1/meta") {
       const body: bridgeApi.Meta = { api: bridgeApi.API_VERSION, bridge: hub.bridgeVersion };
@@ -103,23 +136,25 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
         return reject("400 Bad Request");
       }
       if (path !== "/api/v1/ws") return reject("404 Not Found");
-      let ok = false;
+      let v: Normalized;
       try {
-        ok = await guard(req, "ws");
+        v = normalize_(await guard(req, "ws"));
       } catch {
-        ok = false;
+        v = { allow: false, status: 403, reason: "forbidden" };
       }
-      if (!ok) return reject("403 Forbidden");
+      if (!v.allow) return reject(`${v.status} ${STATUS_TEXT[v.status] ?? "Forbidden"}`);
       if (socket.destroyed) return;
+      const principal = v.principal;
       wss.handleUpgrade(req, socket, head, (ws) => {
         socket.off("error", onSocketError);
-        attach(ws);
+        attach(ws, principal);
       });
     })().catch(() => socket.destroy());
   });
 
-  function attach(ws: WebSocket): void {
+  function attach(ws: WebSocket, principal: Principal | undefined): void {
     const client: HubClient = {
+      ...(principal ? { principal } : {}),
       send(msg) {
         if (ws.readyState !== ws.OPEN) return;
         if (ws.bufferedAmount > MAX_BUFFERED) {
@@ -140,7 +175,16 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
       const raw = data.toString("utf8");
       chain = chain.then(() => hub.handleRaw(conn, raw)).catch(() => ws.close(1011, "internal error"));
     });
-    ws.on("close", () => hub.disconnect(conn));
+    let onClosed: (() => void) | void = undefined;
+    try {
+      onClosed = opts.onConnect?.(client);
+    } catch {
+      ws.terminate();
+    }
+    ws.on("close", () => {
+      hub.disconnect(conn);
+      onClosed?.();
+    });
     ws.on("error", () => ws.terminate());
   }
 
