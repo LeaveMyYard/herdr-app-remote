@@ -240,7 +240,7 @@ Tiers: **SC** = safety-critical (full review-cycle plus a fresh final reviewer p
 | S16b | Special keys menu (`hc keys`) | S16 | S17 | SC |
 | S17 | Web Push | S5, S10, S13 | S16 | SC |
 | S18 | Docs + release | all | – | D |
-| Copy | Copy PR: apply the approved `design/COPY.md` rows not owned by S5b or S16b | S5b, S16b | – | N |
+| Copy | Copy PR: apply the approved `design/COPY.md` rows not owned by S5b or S16b | S4b, S14 (the Docs PR with `design/COPY.md`) | S5b, S16b | N |
 | U1 | (panorama repo, optional) feed-client `viewer`/keepalive role | – | any | SC there |
 
 Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 and S7 start right after S1.
@@ -354,6 +354,9 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - the connection banners use the strings in `design/COPY.md` (replacing the provisional ones in `Banner.tsx`).
 - Accepts: socket-level tests for the transfer code (replay, expiry, wrong device); verified once on a real iPhone, and the result recorded.
 
+**S14b Panel Setup wiring**
+- Goal: `setup.check`, `setup.start` and `setup.stop` on the panel channel, so the Remote panel gets its Start serving button; the Security change chains `setup.refreshPhone()`.
+
 **S15 Chat, read-only**
 - Goal: `hc ls`, `hc read`, and `hc events` if the rig proves it (otherwise 1 s polling); ANSI → spans; the inbox banner.
 
@@ -370,7 +373,7 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
 - Goal:
   - a separate phone menu opened from the key bar, sending Esc, Ctrl-C, arrows and the like through `hc keys`;
   - a separate capability, off by default, with its own desktop "Special keys" switch that mirrors the Typing row exactly (1 hour / 8 hours / No limit);
-  - the set comes from `keys.json`, a list of `{label, keys}` with sensible defaults, shown as "Your keys";
+  - the set comes from `data/herdr-app-remote/keys.json` (not herdr-app's own keybinding `keys.json`), a list of `{label, keys}` with sensible defaults, shown as "Your keys";
   - the typing-time line (amber under 10 minutes) and the ran-out footer follow the board.
 - Accepts: audit entries record the label only; a key the config does not list is refused at the bridge.
 
@@ -383,10 +386,7 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - no announcements after a restart.
 
 **Copy PR**
-- Goal: apply every `●` row of `design/COPY.md` not owned by S5b or S16b (push bodies kept, first-send note, send refused, notifications row, the Dismiss confirm bar with [Keep] [Dismiss]). "desk-1" is the Tailscale machine name from the serve identity, falling back to the hostname.
-
-**S14b Panel Setup wiring**
-- Goal: `setup.check`, `setup.start` and `setup.stop` on the panel channel, so the Remote panel gets its Start serving button; the Security change chains `setup.refreshPhone()`.
+- Goal: apply every `●` row of `design/COPY.md` not owned by S5b or S16b (push bodies kept, first-send note, send refused, notifications row, the Dismiss confirm bar with [Keep] [Dismiss]). "desk-1" is the Tailscale machine name from the serve identity, falling back to the hostname. Whichever of S5b and this PR lands first adds the host name to the PWA; the other reuses it.
 
 **S18 Docs + release**
 - Goal: README, SECURITY.md, RECIPE.md, final protocol docs, CHANGELOG, and the release script.
