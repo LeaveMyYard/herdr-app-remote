@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { bridgeApi, HostState } from "@herdr-remote/protocol";
 import type { ActResult, Hub } from "./hub.js";
 import type { Json } from "./patch.js";
@@ -45,6 +47,7 @@ export function normalizeReport(raw: unknown, home: string): { ok: true; report:
   for (const p of report.providers) {
     if (p.identity) p.identity = tilde(p.identity, home);
     if (p.source) p.source = tilde(p.source, home);
+    if (p.home) p.home = tilde(p.home, home);
   }
   return { ok: true, report };
 }
@@ -60,6 +63,26 @@ export interface UsageTopicOptions {
   now?: () => number;
   /** For the `~` abbreviation. Default: the bridge user's home. */
   home?: string;
+  /**
+   * The herdr-app home. When set, collect runs the way agent-usage's own panel does: the binary and config
+   * dir come from `<appHome>/mods/agent-usage/local.json` (read-only; defaults `~/.local/bin/usagebar` and
+   * `~/.config/agent-usage`), and the command is `/usr/bin/env HERDR_PLUGIN_CONFIG_DIR=<dir> <binary> ...`, so
+   * the phone reads the same accounts and settings as the desktop panel.
+   */
+  appHome?: string;
+}
+
+/** The `local.json` keys the panel honours (`binary`, `configDir`); anything else in it is ignored. */
+async function readLocal(appHome: string): Promise<{ binary?: string; configDir?: string }> {
+  try {
+    const j = JSON.parse(await readFile(join(appHome, "mods/agent-usage/local.json"), "utf8")) as Record<string, unknown>;
+    const out: { binary?: string; configDir?: string } = {};
+    if (typeof j.binary === "string" && j.binary) out.binary = j.binary;
+    if (typeof j.configDir === "string" && j.configDir) out.configDir = j.configDir;
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -76,6 +99,8 @@ export class UsageTopicDriver {
   private error: bridgeApi.UsageError | undefined;
   private timer: NodeJS.Timeout | undefined;
   private inflight: Promise<void> | undefined;
+  /** The generation `inflight` was started under. */
+  private inflightGen = 0;
   /** Bumped when the filter changes, so a collect started under the old filter is dropped. */
   private generation = 0;
   private unwatch: (() => void) | undefined;
@@ -115,10 +140,20 @@ export class UsageTopicDriver {
 
   /** Collects now. Overlapping calls share one run. */
   refresh(): Promise<void> {
-    this.inflight ??= this.collect().finally(() => {
-      this.inflight = undefined;
-    });
+    if (!this.inflight) {
+      this.inflightGen = this.generation;
+      this.inflight = this.collect().finally(() => {
+        this.inflight = undefined;
+      });
+    }
     return this.inflight;
+  }
+
+  /** Like `refresh`, but when the run it joins was dropped for a filter change, collects again. */
+  private async refreshCurrent(): Promise<void> {
+    const joined = this.inflight ? this.inflightGen : this.generation;
+    await this.refresh();
+    if (joined !== this.generation) await this.refreshCurrent();
   }
 
   private publish(): void {
@@ -129,9 +164,16 @@ export class UsageTopicDriver {
 
   private async collect(): Promise<void> {
     const gen = this.generation;
-    const bin = (this.o.binaries ?? DEFAULT_BINARIES).usagebar;
-    const args = ["collect", "--format", "v1", ...(this.filter === "all" ? ["--all"] : []), "--panes", panesArg(this.o.hub.get("host"))];
-    const r = await this.o.run(bin, args, { timeoutMs: this.o.timeoutMs ?? USAGE_TIMEOUT_MS });
+    let cmd = (this.o.binaries ?? DEFAULT_BINARIES).usagebar;
+    const prefix: string[] = [];
+    if (this.o.appHome !== undefined) {
+      const home = this.o.home ?? homedir();
+      const local = await readLocal(this.o.appHome);
+      cmd = "/usr/bin/env";
+      prefix.push(`HERDR_PLUGIN_CONFIG_DIR=${local.configDir ?? `${home}/.config/agent-usage`}`, local.binary ?? `${home}/.local/bin/usagebar`);
+    }
+    const args = [...prefix, "collect", "--format", "v1", ...(this.filter === "all" ? ["--all"] : []), "--panes", panesArg(this.o.hub.get("host"))];
+    const r = await this.o.run(cmd, args, { timeoutMs: this.o.timeoutMs ?? USAGE_TIMEOUT_MS });
     if (gen !== this.generation) return;
     if (r.error === "ENOENT" || r.error === "other") this.error = "unavailable";
     else if (r.error === "timeout") this.error = "timeout";
@@ -158,7 +200,7 @@ export class UsageTopicDriver {
   /** The `act` kinds of the usage topic. Returns undefined for any other kind. */
   async act(kind: string, args: Record<string, unknown>): Promise<ActResult | undefined> {
     if (kind === "usage.refresh") {
-      await this.refresh();
+      await this.refreshCurrent();
       return { ok: this.error === undefined, ...(this.error ? { code: this.error } : {}) };
     }
     if (kind === "usage.set_filter") {

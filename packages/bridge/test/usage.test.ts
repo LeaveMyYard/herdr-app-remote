@@ -5,7 +5,7 @@ import type { Runner, RunResult } from "../src/plugins/exec.js";
 import { run } from "../src/plugins/exec.js";
 import { normalizeReport, panesArg, tilde, UsageTopicDriver, USAGE_INTERVAL_MS } from "../src/usage.js";
 import { fixture, join, newHub } from "./helpers.js";
-import { bins, fakeCli, tmp } from "./plugins/helpers.js";
+import { bins, fakeCli, put, tmp } from "./plugins/helpers.js";
 
 const RAW = readFileSync(new URL("./fixtures/collect-v1.json", import.meta.url), "utf8");
 const HOME = "/home/user-1";
@@ -75,7 +75,7 @@ describe("normalizeReport", () => {
     expect(n.report).not.toHaveProperty("watchDirs");
     expect(n.report).not.toHaveProperty("apiUsage");
     expect(n.report.providers[0]).not.toHaveProperty("paneActivity");
-    expect(n.report.providers[0]).not.toHaveProperty("home");
+    expect(n.report.providers[0]?.home).toBe("~/.claude-1");
     expect(n.report.providers[0]?.windows[0]).not.toHaveProperty("resetsAt");
     expect(n.report.providers[0]?.windows[0]?.runOut).toEqual({ text: "empty in ~18h 56m" } satisfies { text: string });
   });
@@ -291,5 +291,69 @@ describe("usage acts", () => {
     expect(await driver?.act("usage.set_filter", { filter: "nope" })).toEqual({ ok: false, code: "bad_args" });
     expect(await driver?.act("chat.send", {})).toBeUndefined();
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("usage collect command", () => {
+  it("runs the way the desktop panel does: local.json binary and config dir through env", async () => {
+    const appHome = tmp("s9-app-");
+    put(appHome, "mods/agent-usage/local.json", JSON.stringify({ binary: "/opt/fake/usagebar", configDir: "/cfg/agent-usage", showPaneShare: true }));
+    const { calls, runner } = stub(() => okRun());
+    setup(runner, { appHome });
+    await driver?.refresh();
+    expect(calls[0]?.cmd).toBe("/usr/bin/env");
+    expect(calls[0]?.args.slice(0, 5)).toEqual(["HERDR_PLUGIN_CONFIG_DIR=/cfg/agent-usage", "/opt/fake/usagebar", "collect", "--format", "v1"]);
+  });
+
+  it("falls back to the panel's defaults when local.json is missing or unreadable", async () => {
+    const appHome = tmp("s9-app-");
+    const { calls, runner } = stub(() => okRun());
+    setup(runner, { appHome });
+    await driver?.refresh();
+    expect(calls[0]?.args.slice(0, 2)).toEqual([`HERDR_PLUGIN_CONFIG_DIR=${HOME}/.config/agent-usage`, `${HOME}/.local/bin/usagebar`]);
+    put(appHome, "mods/agent-usage/local.json", "{nope");
+    await driver?.refresh();
+    expect(calls[1]?.args.slice(0, 2)).toEqual(calls[0]?.args.slice(0, 2));
+  });
+
+  it("collects through env with a fake CLI (real runner)", async () => {
+    const d = tmp();
+    const appHome = tmp("s9-app-");
+    const log = `${d}/env.log`;
+    const cli = fakeCli(d, "usagebar", `echo "$HERDR_PLUGIN_CONFIG_DIR" >> ${log}\ncat <<'JSON'\n${RAW}\nJSON`);
+    put(appHome, "mods/agent-usage/local.json", JSON.stringify({ binary: cli, configDir: `${d}/cfg` }));
+    const { hub } = setup(run, { appHome });
+    await driver?.refresh();
+    expect(topic(hub).report?.providers).toHaveLength(2);
+    expect(readFileSync(log, "utf8").trim()).toBe(`${d}/cfg`);
+  });
+});
+
+describe("usage driver edge cases", () => {
+  it("polls when started after a client already subscribed", async () => {
+    const { calls, runner } = stub(() => okRun());
+    const hub = newHub();
+    const c = await join(hub);
+    await c.send({ type: "sub", topics: ["usage"] });
+    driver = new UsageTopicDriver({ hub, run: runner, home: HOME });
+    driver.start();
+    await settle();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("usage.refresh during a filter switch collects under the new filter", async () => {
+    let release: () => void = () => undefined;
+    const { runner } = stub((call) => (call.args.includes("--all") ? okRun() : new Promise<RunResult>((r) => (release = () => r(okRun())))));
+    const { hub } = setup(runner);
+    const slow = driver!.refresh();
+    const switching = driver!.act("usage.set_filter", { filter: "all" });
+    await settle();
+    const refreshing = driver!.act("usage.refresh", {});
+    await settle();
+    release();
+    await slow;
+    await switching;
+    expect(await refreshing).toEqual({ ok: true });
+    expect(topic(hub).report?.filter).toBe("all");
   });
 });

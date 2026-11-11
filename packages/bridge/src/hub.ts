@@ -95,12 +95,13 @@ export class Hub {
   }
 
   /**
-   * Calls `fn` with the topic's subscriber count each time it changes (a `sub`, or a client going away),
+   * Calls `fn` with the topic's subscriber count at once if there are subscribers, and each time it changes (a `sub`, or a client going away),
    * so a source can poll only while someone is looking. Returns a function that removes the watcher.
    */
   watchSubscribers(name: string, fn: (count: number) => void): () => void {
     const t = this.topic(name);
     t.watchers.add(fn);
+    if (t.subscribers.size > 0) fn(t.subscribers.size);
     return () => {
       t.watchers.delete(fn);
     };

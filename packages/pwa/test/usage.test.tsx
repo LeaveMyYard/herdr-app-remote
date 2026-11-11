@@ -127,13 +127,21 @@ describe("Usage", () => {
     expect(screen.getByText("grok login", { selector: "code" })).toBeInTheDocument();
     rerender(<Usage {...base} topic={topic} view="compact" />);
     expect(screen.getByText("run grok login")).toBeInTheDocument();
+    rerender(<Usage {...base} topic={{ ...topic, report: { ...(topic.report as bridgeApi.UsageReport), providers: [{ ...needs, action: "" }] } }} view="compact" />);
+    expect(screen.getByText("no data")).toBeInTheDocument();
   });
 
   it("says when there is no usage yet for an account", () => {
     const report = demoUsage.report as bridgeApi.UsageReport;
-    const p = { providerId: "codex", family: "codex", label: "codex", identity: "~/.codex", status: "no-data", windows: [] };
-    render(<Usage {...base} topic={{ ...demoUsage, report: { ...report, providers: [p] } }} />);
+    const codex = { providerId: "codex", family: "codex", label: "codex", identity: "~/.codex", home: "~/.codex", status: "no-data", windows: [] };
+    const { rerender } = render(<Usage {...base} topic={{ ...demoUsage, report: { ...report, providers: [codex] } }} />);
     expect(screen.getByText("No usage yet · updates when Codex runs in ~/.codex")).toBeInTheDocument();
+    // An email identity is not a place an agent runs in.
+    const claude = { providerId: "claude-1", family: "claude", label: "claude-1", identity: "user-1@example.com", home: "~/.claude-1", status: "no-data", windows: [] };
+    rerender(<Usage {...base} topic={{ ...demoUsage, report: { ...report, providers: [claude] } }} />);
+    expect(screen.getByText("No usage yet · updates when Claude runs in ~/.claude-1")).toBeInTheDocument();
+    rerender(<Usage {...base} topic={{ ...demoUsage, report: { ...report, providers: [{ ...claude, home: null }] } }} />);
+    expect(screen.getByText("No usage yet")).toBeInTheDocument();
   });
 
   it("explains an empty Open panes list, and a not-yet-loaded topic", () => {

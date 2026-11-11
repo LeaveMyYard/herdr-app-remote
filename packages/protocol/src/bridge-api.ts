@@ -107,6 +107,8 @@ export const UsageProvider = z.object({
   /** `providerId` of an earlier entry for the same account; the screen shows the account once. */
   sameAccountAs: z.string().nullish(),
   planType: z.string().nullish(),
+  /** The account's config/home dir, where its agent writes readings (abbreviated with `~` by the bridge). */
+  home: z.string().nullish(),
   /** Where the reading came from (a path is abbreviated with `~` by the bridge). */
   source: z.string().nullish(),
   fetchedAtMs: z.number().nullish(),

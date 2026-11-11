@@ -74,7 +74,7 @@ function Account({ p, grouped, word, now }: { p: UsageRow; grouped: boolean; wor
         </div>
       ))}
       {p.status === "no-data" ? (
-        <div className="unote">{p.identity ? `No usage yet · updates when ${familyName(p.family, p.label)} runs in ${p.identity}` : "No usage yet"}</div>
+        <div className="unote">{p.home ? `No usage yet · updates when ${familyName(p.family, p.label)} runs in ${p.home}` : "No usage yet"}</div>
       ) : (
         <>
           {p.status === "needs-login" && p.note ? <Callout note={p.note} /> : p.note && !stale ? <div className="unote">{p.note}</div> : null}
@@ -146,7 +146,7 @@ function CompactRow({ p, g, word }: { p: UsageRow; g: UsageGroup; word: string }
       ))}
       {p.windows.some((w) => w.runOut?.text) ? <span className="ucompact-warn" role="img" aria-label="Will run out before reset">⚠</span> : null}
       {p.windows.length === 0 ? (
-        <span className="ucompact-none">{p.status === "needs-login" ? `run ${p.action ?? "login"}` : p.status === "no-data" ? "no usage yet" : "no data"}</span>
+        <span className="ucompact-none">{p.status === "needs-login" ? p.action ? `run ${p.action}` : "no data" : p.status === "no-data" ? "no usage yet" : "no data"}</span>
       ) : null}
     </div>
   );
