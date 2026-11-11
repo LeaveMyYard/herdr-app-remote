@@ -127,7 +127,8 @@ describe("Keys sheet (S16b)", () => {
   it.each([
     [{ ok: false, code: "rate_limited" }, "Couldn't press Esc. Try again."],
     [{ ok: false, code: "busy" }, "Couldn't press Esc. Try again."],
-    [{ ok: false, code: "timeout", unknown_effect: true }, "Couldn't press Esc. Try again."],
+    [{ ok: false, code: "timeout", unknown_effect: true }, "Esc may have been pressed. Check the terminal before you press it again."],
+    [{ ok: false, code: "cancelled", unknown_effect: true }, "Esc may have been pressed. Check the terminal before you press it again."],
     [{ ok: false, code: "terminal_finished" }, "Agent 1's terminal is closed."],
     [{ ok: false, code: "terminal_not_found" }, "Agent 1's terminal is closed."],
   ] as [SendOutcome, string][])("a failed press %j says it in the approved words, never 'sent'", async (reply, words) => {

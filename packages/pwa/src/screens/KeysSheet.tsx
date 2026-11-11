@@ -20,6 +20,8 @@ export interface KeysInput {
  * other failure). Nothing is ever pressed again by itself: "Try again" is the person's own tap.
  */
 export function pressWords(r: SendOutcome, ctx: { host: string; agent: string; label: string }): string {
+  // It may have been pressed: say so, and never suggest pressing again (a second Ctrl-C can quit the agent).
+  if (r.unknown_effect) return W.pressMaybe(ctx.label);
   switch (r.code) {
     case "keys_changed":
     case "unknown_key":
@@ -194,11 +196,10 @@ const KEYBOARD = (
  * The key bar's "Keys ▴" button and the sheet it opens. On the composer's key bar while typing is on, and on a bar
  * of its own while only `terminal.keys` is on (operator, 2026-11-11).
  */
-export function KeysButton({ agentName, host, keys, disabled, demoSheet }: {
+export function KeysButton({ agentName, host, keys, demoSheet }: {
   agentName: string;
   host: string;
   keys: KeysInput | undefined;
-  disabled?: boolean;
   /** Demo data only: the sheet open at first, and the key shown as pressed. */
   demoSheet?: { open: boolean; pressed: string | null } | undefined;
 }) {
@@ -212,7 +213,6 @@ export function KeysButton({ agentName, host, keys, disabled, demoSheet }: {
         aria-label={W.KEYS_BUTTON_LABEL}
         aria-haspopup="dialog"
         aria-expanded={open}
-        disabled={disabled}
         onClick={() => setOpen(true)}
       >
         {KEYBOARD}

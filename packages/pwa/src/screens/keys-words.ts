@@ -19,8 +19,10 @@ export const keysOff = (host: string): string => `Special keys are off for this 
 export const keysChanged = (host: string): string => `The key list changed on ${host}. Look again.`;
 /** Key menu: dialog open. */
 export const KEYS_DIALOG = "The agent is waiting on a dialog at the desktop. Nothing was pressed.";
-/** Operator, 2026-11-11: any other failed press. */
+/** Operator, 2026-11-11: any other press refused (nothing was pressed). */
 export const pressFailed = (label: string): string => `Couldn't press ${label}. Try again.`;
+/** Conductor, 2026-11-11 (option 2): the press may have happened, so it never invites a retry (PLAN §3). */
+export const pressMaybe = (label: string): string => `${label} may have been pressed. Check the terminal before you press it again.`;
 /** Operator, 2026-11-11: the terminal has closed. */
 export const terminalClosed = (agent: string): string => `${agent}'s terminal is closed.`;
 
