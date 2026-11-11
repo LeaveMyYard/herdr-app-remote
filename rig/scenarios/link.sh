@@ -2,6 +2,7 @@
 # starts the link, a host snapshot arrives, an allowlisted run round-trips (space.select), and a
 # command outside the allowlist is refused without touching the app.
 scenario_main() {
+  [ -f "$REPO/packages/bridge/dist/link/index.js" ] || { fail "bridge not built: run pnpm -r build first"; return 1; }
   start_stack || return 1
   node "$RIG/bin/link-harness.mjs" "$REPO" "$HERDR_APP_HOME" "$RIG/link.log" "$RIG/link.cmd" &
   HARNESS_PID=$!

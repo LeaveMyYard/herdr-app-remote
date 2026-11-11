@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node -e \"0\"",
-    "typecheck": "node --check sidecar.mjs",
+    "typecheck": "node --check sidecar.mjs && node --check link-harness.mjs",
     "test": "vitest run",
     "rig": "sh run.sh"
   }
