@@ -222,7 +222,9 @@ Tiers: **SC** = safety-critical (full review-cycle plus a fresh final reviewer p
 | S2 | Link mod + bridge link server | S1 | S3, S4, S6 | SC |
 | S3 | Rig port | S1 | S2, S4, S6 | N |
 | S4 | Bridge hub + host topic | S1 | S2, S3, S6 | N |
+| S4b | Bridge bootstrap + PWA client | S4, S6 | – | SC |
 | S5 | Security: pairing, devices, guards, audit | S4 | S7 | SC |
+| S5b | PWA pairing screen (`/pair`), banners | S5, S6 | – | SC |
 | S6 | PWA shell, tokens, visual harness, Basic Agents, Missing | S1 | S2–S5 | N |
 | S7 | Plugin detection + `plugins` topic | S4 | S5, S6 | N |
 | S8 | Panorama adapter + Agents/Swarm/Peek | S6, S7 | S9, S10, S12 | N |
@@ -232,10 +234,13 @@ Tiers: **SC** = safety-critical (full review-cycle plus a fresh final reviewer p
 | S12 | Installer + derived layouts | S2 | S8–S11 | SC |
 | S13 | Desktop Remote panel | S5, S7, S12 | S11, S14 | N |
 | S14 | Tailscale setup + serve control | S5, S13 | S15 | SC |
+| S14b | Panel Setup wiring (check/start/stop in the panel channel) | S13, S14 | – | SC |
 | S15 | Chat, read-only | S4, S6 | S11–S14 | N |
 | S16 | Terminal input | S5, S13, S15 | – | SC |
+| S16b | Special keys menu (`hc keys`) | S16 | S17 | SC |
 | S17 | Web Push | S5, S10, S13 | S16 | SC |
 | S18 | Docs + release | all | – | D |
+| Copy | Copy PR: apply the approved `design/COPY.md` rows not owned by S5b or S16b | S5b, S16b | – | N |
 | U1 | (panorama repo, optional) feed-client `viewer`/keepalive role | – | any | SC there |
 
 Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 and S7 start right after S1.
@@ -338,6 +343,17 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - It detects the Linux operator-permission error and shows the exact command to fix it.
 - Accepts: a serve config we did not create is never changed.
 
+**S4b Bridge bootstrap + PWA client** (merged)
+- Goal: the bridge entry point and the PWA client that connects the topic drivers to the screens, which until then ran on `?fixture=` data.
+
+**S5b PWA pairing screen** (design approved 2026-11-11: `design/PhonePair.dc.html`, `PhoneBanners.dc.html`)
+- Goal:
+  - Safari pairs at `/pair#c=<code>`; the screen follows the board states (checking, waiting, approved, expired);
+  - then a dismissible "Add to Home Screen for notifications" prompt, with a bell to reopen it;
+  - the Home Screen app pairs itself on first launch with a one-time transfer code in the manifest `start_url` (`/pair#t=<code>`): short TTL, single use, bound to the paired device;
+  - the connection banners use the strings in `design/COPY.md` (replacing the provisional ones in `Banner.tsx`).
+- Accepts: socket-level tests for the transfer code (replay, expiry, wrong device); verified once on a real iPhone, and the result recorded.
+
 **S15 Chat, read-only**
 - Goal: `hc ls`, `hc read`, and `hc events` if the rig proves it (otherwise 1 s polling); ANSI → spans; the inbox banner.
 
@@ -350,6 +366,14 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - a rate limit;
   - audit entries that record only the length.
 
+**S16b Special keys menu** (design approved 2026-11-11: `design/PhoneKeys.dc.html`)
+- Goal:
+  - a separate phone menu opened from the key bar, sending Esc, Ctrl-C, arrows and the like through `hc keys`;
+  - a separate capability, off by default, with its own desktop "Special keys" switch that mirrors the Typing row exactly (1 hour / 8 hours / No limit);
+  - the set comes from `keys.json`, a list of `{label, keys}` with sensible defaults, shown as "Your keys";
+  - the typing-time line (amber under 10 minutes) and the ran-out footer follow the board.
+- Accepts: audit entries record the label only; a key the config does not list is refused at the bridge.
+
 **S17 Web Push**
 - Goal:
   - VAPID keys;
@@ -357,6 +381,12 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
   - triggers: new inbox questions and alerts, and an agent turning blocked;
   - generic payloads;
   - no announcements after a restart.
+
+**Copy PR**
+- Goal: apply every `●` row of `design/COPY.md` not owned by S5b or S16b (push bodies kept, first-send note, send refused, notifications row, the Dismiss confirm bar with [Keep] [Dismiss]). "desk-1" is the Tailscale machine name from the serve identity, falling back to the hostname.
+
+**S14b Panel Setup wiring**
+- Goal: `setup.check`, `setup.start` and `setup.stop` on the panel channel, so the Remote panel gets its Start serving button; the Security change chains `setup.refreshPhone()`.
 
 **S18 Docs + release**
 - Goal: README, SECURITY.md, RECIPE.md, final protocol docs, CHANGELOG, and the release script.

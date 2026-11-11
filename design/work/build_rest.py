@@ -117,7 +117,7 @@ REMOTE_SCRIPT = f'''class Component extends DCLogic {{
       ],
       log: [
         {{ t: '20:41', text: 'Phone 1 answered Q119 (Option B)' }},
-        {{ t: '20:37', text: 'Push sent: Agent 1 asked Question Title 123' }},
+        {{ t: '20:37', text: 'Push sent to Phone 1: group 123' }},
         {{ t: '20:12', text: 'Phone 1 connected' }},
         {{ t: '19:02', text: 'Laptop 1 disconnected' }},
         {{ t: '18:27', text: 'Bridge started' }}
@@ -570,9 +570,129 @@ def phone_review():
     return ph_page('Phone review', hdr + q_tabs('submit', ['Single', 'Multi'], '2/3') + main + foot, css=f'.ph{{background:{T["popover"]}}}')
 
 
+
+# ---------------- pairing and connection banners ----------------
+# A design-only state switcher (not part of the app). The first state can also come from the URL hash (#wait) for renders.
+SWITCH = f"""<div role="tablist" aria-label="Design state, not part of the app" class="abs row" style="top:8px;left:8px;right:8px;z-index:5;gap:2px;padding:2px;border-radius:8px;border:1px dashed {T["input"]};background:#000000b8">
+<sc-for list="{{{{states}}}}" as="t" hint-placeholder-count="5"><button role="tab" aria-selected="{{{{t.selected}}}}" onClick="{{{{t.pick}}}}" class="row f1" style="justify-content:center;height:28px;padding:0 2px;border-radius:6px;font-size:11px;white-space:nowrap;background:{{{{t.bg}}}};color:{{{{t.fg}}}}">{{{{t.label}}}}</button></sc-for></div>"""
+
+
+def switch_script(names, first, vals):
+    return f"""class Component extends DCLogic {{
+  constructor(props) {{ super(props); let h = ''; try {{ h = location.hash.slice(1); }} catch (e) {{}}
+    this.state = {{ s: {names!r}.some(n => n[0] === h) ? h : '{first}' }}; }}
+  renderVals() {{
+    const cur = this.state.s;
+    const names = {names!r};
+    return {{
+      states: names.map(([id, label]) => ({{ label, selected: String(cur === id), bg: cur === id ? '{T["raised"]}' : 'transparent', fg: cur === id ? '{T["foreground"]}' : '{T["muted"]}', pick: () => this.setState({{ s: id }}) }})),
+      show: Object.fromEntries(names.map(([id]) => [id, cur === id])),
+      {vals}
+    }};
+  }}
+}}"""
+
+
+PAIR_STATES = [['check', 'Checking'], ['wait', 'Waiting'], ['ok', 'Approved'], ['bad', 'Expired'], ['safari', 'In Safari'], ['first', '1st launch']]
+MARK = '<img src="icons/remote.svg" alt="" style="width:64px;height:64px;border-radius:14px">'
+PCARD = f'border-radius:10px;background:{T["background"]};border:1px solid {T["border"]}'
+SOLID_BTN = f'height:48px;width:100%;justify-content:center;border-radius:7px;border:1px solid {T["solid"]};background:{T["solid"]};color:{T["solid_fg"]};font-size:15px;font-weight:500'
+
+
+def kv(k, v):
+    return f'<div class="row" style="gap:8px;font-size:13px"><span class="f1" style="color:{T["dim"]}">{k}</span><span style="font-weight:500">{v}</span></div>'
+
+
+def steps(items):
+    rows = ''.join(f'<div class="row" style="align-items:flex-start;gap:10px;font-size:13.5px;line-height:1.45"><span class="mono nf row" style="width:20px;height:20px;justify-content:center;border-radius:5px;background:{T["raised"]};font-size:11px;color:{T["muted"]}">{i + 1}</span><span class="f1">{s}</span></div>' for i, s in enumerate(items))
+    return f'<div class="col" style="width:100%;padding:14px;gap:12px;text-align:left;{PCARD}">{rows}</div>'
+
+
+def pair_block(key, chip, title, body, extra='', foot=''):
+    return (f'<sc-if value="{{{{show.{key}}}}}" hint-placeholder-val="{{{{ {"true" if key == "wait" else "false"} }}}}">'
+            f'<div class="nf" style="height:44px"></div><main class="col f1" style="min-height:0;padding:24px;align-items:center;justify-content:center;gap:14px;text-align:center">'
+            f'<div class="rel">{MARK}<span class="abs row" style="right:-8px;bottom:-8px;width:28px;height:28px;justify-content:center;border-radius:9px;background:#101114">{chip}</span></div>'
+            f'<div style="font-size:17px;font-weight:600">{title}</div>'
+            f'<div style="font-size:14px;color:{T["muted"]};line-height:1.5;max-width:300px">{body}</div>{extra}</main>{foot}</sc-if>')
+
+
+def phone_pair():
+    dot = lambda c, anim='': f'<span class="nf" style="width:8px;height:8px;border-radius:4px;background:{c}{anim}"></span>'
+    amber = STATES['wait'][2]
+    foot = lambda inner: f'<div class="col nf" style="gap:8px;padding:12px 16px 34px;border-top:1px solid {T["border"]}">{inner}</div>'
+    check = pair_block('check', spinner(16), 'Checking the code…', 'Pairing this phone with desk-1.')
+    wait = pair_block('wait', dot(amber, ';animation:hd-breathe 1.6s ease-in-out infinite'), 'Approve on your computer',
+                      'desk-1 is asking whether to let this phone in. Approve it there to finish.',
+                      f'<div class="col" style="width:100%;padding:12px 14px;gap:10px;text-align:left;{PCARD}">{kv("Shows as", "Phone 1")}{kv("Computer", "desk-1")}'
+                      f'<div class="row" style="gap:8px;padding-top:10px;border-top:1px solid {T["border"]};font-size:13px;color:{amber}">{dot(amber, ";animation:hd-breathe 1.6s ease-in-out infinite")}Waiting for approval…</div></div>'
+                      f'<div style="font-size:12.5px;color:{T["dim"]}">The request ends after 10 minutes if no one approves it.</div>')
+    ok = pair_block('ok', tile('done', 18), 'Phone 1 is paired',
+                    'desk-1 approved this phone. You can remove it any time in Remote on the computer.',
+                    f'<div style="font-size:12.5px;color:{T["dim"]}">Opening Herdr…</div>',
+                    foot(f'<a href="PhoneAgents.dc.html" class="row" style="{SOLID_BTN}">Continue</a>'))
+    bad = pair_block('bad', tile('fail', 18), 'This code no longer works',
+                     'Each code works once, for 5 minutes.',
+                     steps(['On desk-1, open Remote › Devices for a fresh code.', 'Scan it with the iPhone Camera.']))
+    share = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Share" style="vertical-align:-2px"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5"/><path d="M6 11H5v10h14V11h-1"/></svg>'
+    safari_bar = (f'<div class="col nf" style="padding:8px 12px 30px;gap:8px;background:#1c1d20;border-top:1px solid {T["border"]}">'
+                  f'<div class="row" style="height:40px;justify-content:center;border-radius:10px;background:{T["raised"]};font-size:13px;color:{T["muted"]}">desk-1.example-tailnet.ts.net</div>'
+                  f'<div class="row" style="justify-content:space-around;color:{T["dim"]};font-size:15px"><span>‹</span><span>›</span><span style="color:{T["accent"]}">{share}</span><span>▢</span><span>⧉</span></div></div>')
+    bell = ('<button aria-label="Notifications" class="row" style="width:44px;height:44px;margin-right:-8px;justify-content:center;color:' + T['muted'] + '">'
+            '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></button>')
+    brand = ph_brand().replace('icons/remote.png', 'icons/remote.svg').replace('<button aria-label="Search"', bell + '<button aria-label="Search"')
+    prompt = (f'<section aria-label="Get notifications" class="abs col" style="left:8px;right:8px;bottom:154px;z-index:2;padding:14px;gap:10px;border-radius:12px;background:{T["popover"]};border:1px solid #ffffff1f;box-shadow:0 12px 32px #00000080">'
+              f'<div class="row" style="align-items:flex-start;gap:10px"><img src="icons/remote.svg" alt="" class="nf" style="width:36px;height:36px;border-radius:9px">'
+              f'<div class="col f1" style="gap:2px;line-height:1.4"><span style="font-size:15px;font-weight:600">Get notifications on this phone</span>'
+              f'<span style="font-size:13px;color:{T["muted"]}">Add Herdr to your Home Screen. It opens already set up.</span></div>'
+              f'<button aria-label="Close" class="row nf" style="width:44px;height:44px;margin:-12px -12px 0 0;justify-content:center;color:{T["dim"]}">{icon("x", 14)}</button></div>'
+              + steps([f'Tap Share {share} below.', 'Tap Add to Home Screen.', 'Open Herdr from your Home Screen.']).replace(PCARD, f'border-radius:10px;background:{T["background"]};border:1px solid {T["border"]};padding:12px') +
+              f'<div class="row" style="gap:10px"><span class="f1" style="font-size:12px;color:{T["dim"]}">To see this again, tap the bell at the top.</span>'
+              f'<button style="height:44px;padding:0 16px;border-radius:7px;border:1px solid {T["input"]};background:{T["raised"]};font-size:13px">Not now</button></div></section>')
+    safari_bar = (f'<div class="col nf" style="padding:6px 12px 22px;gap:6px;background:#1c1d20;border-top:1px solid {T["border"]}">'
+                  f'<div class="row" style="height:36px;justify-content:center;border-radius:10px;background:{T["raised"]};font-size:13px;color:{T["muted"]}">desk-1.example-tailnet.ts.net</div>'
+                  f'<div class="row" style="justify-content:space-around;color:{T["dim"]};font-size:15px"><span>‹</span><span>›</span><span style="color:{T["accent"]}">{share}</span><span>▢</span><span>⧉</span></div></div>')
+    sp = D.spaces_block(D.SPACES).replace('class="col nf" style="height:143px', 'class="col nf sblock" style="height:143px')
+    ag = D.agents_panel(D.groups(), totals='<span>?1</span>')
+    navbar = nav('Agents').replace('padding:8px 8px 30px', 'padding:4px 8px 4px')
+    safari = (f'<sc-if value="{{{{show.safari}}}}" hint-placeholder-val="{{{{ false }}}}">{brand}'
+              f'<main class="col f1" style="min-height:0;overflow:hidden"><div class="z col" style="width:325px">{sp}{ag}</div></main>'
+              f'{prompt}{navbar}{safari_bar}</sc-if>')
+    first = pair_block('first', spinner(16), 'Finishing setup on this phone…',
+                       'Using the pairing from Safari. No need to approve again.')
+    inner = SWITCH + check + wait + ok + bad + safari + first
+    return ph_page('Phone pairing', inner, switch_script(PAIR_STATES, 'wait', ''), css='.ph{position:relative}')
+
+
+BANNER_STATES = [['unpaired', 'Unpaired'], ['refused', 'Refused'], ['paused', 'Paused'], ['unavailable', 'Unavailable']]
+BANNERS = {  # cls is the state hue the PWA's Banner uses (s-wait amber, s-fail red, s-q grey)
+    'unpaired': ('wait', "This phone isn't paired yet.", 'Scan a fresh code from Remote › Devices on desk-1 with the iPhone Camera.', ''),
+    'refused': ('fail', 'desk-1 no longer accepts this phone.', 'It was removed, or this phone uses another account. Scan a fresh code from Remote › Devices with the iPhone Camera.', ''),
+    'paused': ('q', 'Remote access is paused on desk-1.', 'Resume it in Remote on the computer. This reconnects by itself.', ''),
+    'unavailable': ('wait', "Can't reach desk-1.", "It may be asleep or offline. Trying again every 10 s.", 'Retry now'),
+}
+BANNER = f"""<div role="status" class="banner s-{{{{b.cls}}}}" style="position:absolute;left:8px;right:8px;bottom:96px;z-index:2;display:flex;align-items:center;gap:10px;min-height:48px;padding:8px 8px 8px 12px;border-radius:8px;background:var(--cf);border:1px solid var(--cb);font-size:12.5px">
+ <span aria-hidden="true" class="nf" style="width:7px;height:7px;border-radius:4px;background:var(--hue)"></span>
+ <span class="col f1" style="gap:1px;line-height:1.35"><span style="color:var(--hue)">{{{{b.title}}}}</span><span style="color:{T["muted"]}">{{{{b.sub}}}}</span></span>
+ <sc-if value="{{{{b.action}}}}" hint-placeholder-val="{{{{ true }}}}"><button class="nf" style="height:36px;padding:0 12px;border-radius:6px;border:1px solid var(--cb);background:#00000033;color:var(--hue);font-size:12.5px;font-weight:500;white-space:nowrap">{{{{b.action}}}}</button></sc-if>
+</div>"""
+
+
+def phone_banners():
+    import json
+    data = json.dumps({k: dict(cls=c, title=t, sub=s, action=a) for k, (c, t, s, a) in BANNERS.items()})
+    script = switch_script(BANNER_STATES, 'unavailable', f'b: {data}[cur]')
+    sp = D.spaces_block(D.SPACES).replace('class="col nf" style="height:143px', 'class="col nf sblock" style="height:143px')
+    ag = '<a href="PhoneSwarm.dc.html" class="col f1" style="min-height:0">' + D.agents_panel(D.groups(), totals='<span>?1</span>') + '</a>'
+    brand = ph_brand().replace('icons/remote.png', 'icons/remote.svg')
+    inner = (SWITCH + brand + f'<main class="col f1" style="min-height:0;overflow:hidden"><div class="z col" style="width:325px">{sp}{ag}</div></main>'
+             + BANNER + nav('Agents'))
+    return ph_page('Phone connection banners', inner, script, css='.ph{position:relative}')
+
+
 FILES = {
     'DesktopRemote': desktop_remote, 'DesktopSetup': desktop_setup, 'DesktopInbox': desktop_inbox,
     'PhoneAgents': phone_agents, 'PhoneAgentsBasic': phone_agents_basic, 'PhoneSwarm': phone_swarm, 'PhonePeek': phone_peek,
     'PhoneUsage': phone_usage, 'PhoneMissing': phone_missing, 'PhoneChat': phone_chat, 'PhoneInbox': phone_inbox,
     'PhoneQuestion': phone_question, 'PhoneReview': phone_review,
+    'PhonePair': phone_pair, 'PhoneBanners': phone_banners,
 }
