@@ -166,6 +166,15 @@ describe("serve", () => {
     expect(await b.stopped).toBe("app_gone");
   });
 
+  it("waits out the grace period before asking whether the app is gone", async () => {
+    const { home: h, sha: s } = installed();
+    let asked = 0;
+    const b = (await start(h, s, { graceMs: 60_000, appAlive: async () => (asked++, false) }))!;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await Promise.race([b.stopped, Promise.resolve("running")])).toBe("running");
+    expect(asked).toBe(0);
+  });
+
   it("keeps serving while the link copy is connected, even with the app socket gone", async () => {
     const { home: h, sha: s } = installed();
     const b = (await start(h, s, { appAlive: async () => false }))!;
@@ -195,6 +204,15 @@ describe("launch", () => {
     const r = await launch({ appHome: h, bundle, node: "/n", flock: null, spawn: (...a) => (spawned.push(a), { unref() {}, on() {} }) });
     expect(r).toEqual({ ok: true, started: false });
     expect(spawned).toEqual([]);
+  });
+
+  it("starts a new bridge when the live one runs another bundle (an upgrade it has not noticed yet)", async () => {
+    const { home: h, bundle } = installed();
+    bridges.push((await serve({ appHome: h, bundleSha256: "cd".repeat(32), appAlive: async () => true }))!);
+    const spawned: unknown[] = [];
+    const r = await launch({ appHome: h, bundle, node: "/n", flock: null, spawn: (...a) => (spawned.push(a), { unref() {}, on() {} }) });
+    expect(r).toEqual({ ok: true, started: true });
+    expect(spawned).toHaveLength(1);
   });
 
   it("starts serve detached, under flock -n on the lock file when flock exists", async () => {

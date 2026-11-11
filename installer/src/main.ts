@@ -21,6 +21,12 @@ export const MAIN_LAYOUT = "layouts/main.json";
 export const KEYS = "keys.json";
 /** Files the bridge and installer leave in our data folder that an install may take over. */
 export const RUNTIME_NAMES = ["runtime.json", "bridge.lock", "stage"];
+/**
+ * Files herdr-app itself writes into every mod folder (editor support). They are the app's, not the
+ * person's, so they count as ours at the folder's top level, whatever their bytes: same rule as
+ * herdr-inbox's installer (package.HOST_FILES).
+ */
+export const HOST_FILES = ["gpui-kit.d.ts", "jsconfig.json"];
 const LIMIT = 4 * 1024 * 1024;
 const MOD_STAGE = `${P.STAGE_PATH}/mod`;
 const OLD_STAGE = `${P.STAGE_PATH}/old`;
@@ -76,7 +82,7 @@ function filesUnder(dir: string): string[] {
 export function loadPayload(source: string): Payload {
   const payload: Payload = new Map();
   const modDir = join(source, "mod", P.MOD_NAME);
-  for (const f of filesUnder(modDir)) payload.set(`${P.MOD_DIR}/${relative(modDir, f)}`, { data: readFileSync(f), mode: 0o644 });
+  for (const f of filesUnder(modDir)) if (!HOST_FILES.includes(relative(modDir, f))) payload.set(`${P.MOD_DIR}/${relative(modDir, f)}`, { data: readFileSync(f), mode: 0o644 });
   if (!payload.has(`${P.MOD_DIR}/main.js`) || !payload.has(`${P.MOD_DIR}/mod.json`)) throw new Error(`${modDir} is not the herdr-app-remote mod`);
   let bundle: Buffer;
   try {
@@ -124,9 +130,11 @@ export function known(record: P.InstallReceipt | null): Map<string, Set<string>>
   return out;
 }
 
+const isHostFile = (path: string): boolean => HOST_FILES.some((f) => path === `${P.MOD_DIR}/${f}`);
+
 const isOurs = (home: Home, path: string, k: Map<string, Set<string>>): boolean => {
   const stored = home.kind(path) === "file" ? home.read(path) : null;
-  return !!stored && !!k.get(path)?.has(digest(stored.data));
+  return !!stored && (isHostFile(path) || !!k.get(path)?.has(digest(stored.data)));
 };
 
 // ---- preflight ----
@@ -184,14 +192,13 @@ function erase(home: Home, record: P.InstallReceipt): string[] {
     else leftovers.push(p);
   }
   if (record.keys) {
-    const kj = home.read(KEYS, LIMIT);
-    if (kj) {
-      try {
-        const next = removeBinding(kj.data.toString("utf8"), record.keys);
-        if (next !== null) home.write(KEYS, next, kj.mode);
-      } catch {
-        leftovers.push(`${KEYS} (could not read it to remove ${record.keys.key})`);
-      }
+    // Never let keys.json (a link, unreadable, not JSON) stop the uninstall halfway: report it instead.
+    try {
+      const kj = home.read(KEYS, LIMIT);
+      const next = kj ? removeBinding(kj.data.toString("utf8"), record.keys) : null;
+      if (kj && next !== null) home.write(KEYS, next, kj.mode);
+    } catch {
+      leftovers.push(`${KEYS} (could not read it to remove ${record.keys.key}; remove that binding by hand)`);
     }
   }
   home.rmtree(P.STAGE_PATH);
@@ -390,10 +397,15 @@ export function parseArgs(argv: string[]): ({ action: "install" | "uninstall" } 
  */
 export const LOCK = ".herdr-app-remote-install.lock";
 
+/** The lock's content for this run: the pid to judge it by, and a token nobody else writes. */
+const lockToken = `${process.pid} ${randomBytes(8).toString("hex")}\n`;
+
 function takeLock(home: Home): boolean {
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (home.create(LOCK, 0o600, `${process.pid}\n`)) return true;
-    const pid = Number(home.read(LOCK, 64)?.data.toString().trim());
+    if (home.create(LOCK, 0o600, lockToken)) return true;
+    const seen = home.read(LOCK, 256)?.data.toString();
+    if (seen === undefined) continue; // gone meanwhile: try again
+    const pid = Number(seen.split(" ")[0]);
     if (!Number.isInteger(pid) || pid < 1) return false; // no pid to judge by: never take it
     try {
       process.kill(pid, 0);
@@ -401,9 +413,30 @@ function takeLock(home: Home): boolean {
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ESRCH") return false;
     }
-    home.remove(LOCK);
+    // Take the dead run's lock aside with one atomic rename, then check it is the one judged dead:
+    // a racing run may have taken it over first and written its own.
+    const aside = `${LOCK}.stale-${randomBytes(6).toString("hex")}`;
+    try {
+      home.rename(LOCK, aside);
+    } catch {
+      continue;
+    }
+    if (home.read(aside, 256)?.data.toString() !== seen) {
+      try {
+        home.rename(aside, LOCK); // someone else's live lock: put it back
+      } catch {
+        /* a third run holds LOCK now; the moved one is a live run's and it removes its own */
+      }
+      return false;
+    }
+    home.remove(aside);
   }
   return false;
+}
+
+/** Removes the lock only while it is still this run's. */
+function dropLock(home: Home): void {
+  if (home.read(LOCK, 256)?.data.toString() === lockToken) home.remove(LOCK);
 }
 
 export async function run(argv: string[], extra: Partial<Options> = {}): Promise<number> {
@@ -431,6 +464,6 @@ export async function run(argv: string[], extra: Partial<Options> = {}): Promise
     process.stderr.write(`herdr-app-remote ${o.action}: ${(e as Error).message}\n`);
     return 1;
   } finally {
-    home.remove(LOCK);
+    dropLock(home);
   }
 }

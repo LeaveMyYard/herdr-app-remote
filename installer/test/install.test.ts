@@ -208,6 +208,26 @@ describe("install", () => {
     expect(json(w, P.RECEIPT_PATH).files["mods/herdr-app-remote/old.js"]).toBeUndefined();
   });
 
+  it("takes the files herdr-app writes into the mod folder as ours, only at its top level", async () => {
+    const w = world();
+    const before = tree(w.home);
+    expect(await cli(w, "install")).toBe(0);
+    // what the app writes into every mod folder it loads (editor support)
+    writeFileSync(join(w.home, P.MOD_DIR, "gpui-kit.d.ts"), "// written by the app\n");
+    writeFileSync(join(w.home, P.MOD_DIR, "jsconfig.json"), "{}\n");
+    expect(await cli(w, "install")).toBe(0);
+    writeFileSync(join(w.home, P.MOD_DIR, "jsconfig.json"), "{}\n");
+    mkdirSync(join(w.home, P.MOD_DIR, "sub"));
+    writeFileSync(join(w.home, P.MOD_DIR, "sub", "jsconfig.json"), "{}\n");
+    expect(await cli(w, "install")).toBe(1);
+    expect(err).toMatch(/would be lost, nothing changed: mods\/herdr-app-remote\/sub\/jsconfig.json$/m);
+    rmSync(join(w.home, P.MOD_DIR, "sub"), { recursive: true });
+    w.says(JSON.stringify({ layout: "main" }));
+    expect(await cli(w, "uninstall")).toBe(0);
+    expect(out.filter((l) => l.startsWith("Kept"))).toEqual([]);
+    expect(tree(w.home)).toEqual(before);
+  });
+
   it("finishes after a crash between the two folder renames", async () => {
     const w = world();
     expect(await cli(w, "install")).toBe(0);
@@ -340,6 +360,30 @@ describe("crash safety", () => {
       chmodSync(join(w.home, "layouts"), 0o755);
     }
     expect(tree(w.home)).toEqual(before);
+  });
+
+  it("never removes a lock that is not its own", async () => {
+    const w = world();
+    const other = `${process.pid} someone-else\n`;
+    // another run takes the lock while this one works: simulated from inside the log callback
+    const code = await run(["install", "--app-home", w.home], {
+      source: DEFAULT_SOURCE, which: () => null,
+      log: () => writeFileSync(join(w.home, ".herdr-app-remote-install.lock"), other),
+    });
+    expect(code).toBe(0);
+    expect(readFileSync(join(w.home, ".herdr-app-remote-install.lock"), "utf8")).toBe(other);
+  });
+
+  it("uninstall finishes even when keys.json can't be read, and says so", async () => {
+    const w = world();
+    expect(await cli(w, "install", "--key", "ctrl-alt-r")).toBe(0);
+    renameSync(join(w.home, "keys.json"), join(w.home, "keys.real.json"));
+    symlinkSync(join(w.home, "keys.real.json"), join(w.home, "keys.json"));
+    w.says(JSON.stringify({ layout: "main" }));
+    expect(await cli(w, "uninstall")).toBe(0);
+    expect(out.some((l) => l.startsWith("Kept, not ours: keys.json (could not read it"))).toBe(true);
+    expect(existsSync(join(w.home, P.RECEIPT_PATH))).toBe(false);
+    expect(existsSync(join(w.home, P.MOD_DIR))).toBe(false);
   });
 
   it("takes over a lock whose installer is gone, never a live one", async () => {
