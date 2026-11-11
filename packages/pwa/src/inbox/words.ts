@@ -33,7 +33,7 @@ export const READ_ONLY = "read-only";
 
 /**
  * Answering (S11). The board's own words (design/PhoneQuestion, PhoneReview, PhoneInbox) and the few the boards
- * do not draw. `DISMISS*` belong to an undrawn control, provisional until the design has one (conductor, S11).
+ * do not draw. The Dismiss confirm bar is drawn on PhoneCopy (design/COPY.md).
  */
 export const ANSWER = {
   other: "Something else…",
@@ -63,14 +63,22 @@ export const ANSWER = {
   lookAgain: "Look again",
   backToInbox: "Back to the inbox",
   DISMISS: "Dismiss",
-  DISMISS_CONFIRM: "Dismiss all?",
-  DISMISS_LABEL: "Dismiss: tap again to close every question in this group",
+  /** The confirm bar's question: the plugin's own words (view.js, model/actions.js), `what` from {@link dismissWhat}. */
+  dismissConfirm: (what: string): string => `Dismiss ${what} without answering?`,
+  keep: "Keep",
   seen: "Seen",
   stopShowing: "Stop showing",
   needsNoAnswer: (title: string): string => `${title} needs no answer.`,
   sends: (n: number, of: number, open: readonly string[]): string =>
     `Sends ${n} of ${of}${open.length > 0 ? ` · ${open.join(", ")} ${open.length === 1 ? "stays" : "stay"} open` : ""}`,
 } as const;
+
+/** What a dismissal closes, as the plugin words it: `Q123`, or `Q123–Q125 (3 questions)` for a group. */
+export function dismissWhat(ids: readonly number[]): string {
+  const [first, last] = [ids[0], ids[ids.length - 1]];
+  if (first === undefined || last === undefined) return "this group";
+  return ids.length === 1 ? `Q${first}` : `Q${first}–Q${last} (${ids.length} questions)`;
+}
 
 /** What the phone says for a result when the bridge sent no words of its own. */
 export const RESULT = {

@@ -197,6 +197,12 @@ describe("startApp: binding and the guards", () => {
     await expect(phone("__Host-hr-device=" + "x".repeat(43))).rejects.toThrow(/401/);
   });
 
+  it("meta carries the computer's name from the serve identity", async () => {
+    await start();
+    const m = await http("GET", "/api/v1/meta", OK_GET);
+    expect(JSON.parse(m.body)).toMatchObject({ api: 1, host_name: "desk-1" });
+  });
+
   it("refuses everything but /healthz until setup gave a serve name", async () => {
     await start({ serve: null });
     expect((await http("GET", "/healthz", { Host: "127.0.0.1" })).status).toBe(200);

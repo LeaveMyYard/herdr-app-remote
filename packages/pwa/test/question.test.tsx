@@ -122,17 +122,39 @@ describe("Question: a lone question", () => {
     expect(screen.getByRole("button", { name: /Option A/ })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("dismisses only on a second tap", async () => {
+  it("dismisses only from the confirm bar, which names what it closes", async () => {
     const { a } = question(lone(), 127);
     wait();
     await tap(screen.getByRole("button", { name: "Dismiss" }));
     expect(a.calls).toEqual([]);
+    const bar = screen.getByRole("alertdialog");
+    expect(bar).toHaveTextContent("Dismiss Q127 without answering?");
+    expect(within(bar).getAllByRole("button").map((b) => b.textContent)).toEqual(["Keep", "Dismiss"]);
     // A double tap: the confirming tap is armed on its own.
-    await tap(screen.getByRole("button", { name: /tap again/ }));
+    await tap(within(bar).getByRole("button", { name: "Dismiss" }));
     expect(a.calls).toEqual([]);
     wait();
-    await tap(screen.getByRole("button", { name: /tap again/ }));
+    await tap(within(bar).getByRole("button", { name: "Dismiss" }));
     expect(a.calls).toEqual([{ kind: "inbox.dismiss", args: { key: "group:127", rev: "rev-group-127" } }]);
+  });
+
+  it("names the range of a group's questions", () => {
+    const row = big();
+    question(row, row.questions[0]!.id);
+    wait();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    const ids = row.questions.map((q) => q.id);
+    expect(ids.length).toBeGreaterThan(1);
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(`Dismiss Q${ids[0]}–Q${ids.at(-1)} (${ids.length} questions) without answering?`);
+  });
+
+  it("Keep closes the bar and sends nothing", async () => {
+    const { a } = question(lone(), 127);
+    wait();
+    await tap(screen.getByRole("button", { name: "Dismiss" }));
+    await tap(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(a.calls).toEqual([]);
   });
 
   it("drops the dismiss confirmation on any other tap", async () => {
@@ -140,7 +162,7 @@ describe("Question: a lone question", () => {
     wait();
     await tap(screen.getByRole("button", { name: "Dismiss" }));
     await tap(screen.getByRole("button", { name: /Option A/ }));
-    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(a.calls).toEqual([]);
   });
 

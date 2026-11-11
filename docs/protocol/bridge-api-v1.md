@@ -4,7 +4,7 @@ The API between the PWA (and other clients) and the bridge. Source of truth: `pa
 
 ## HTTP
 
-`GET /api/v1/meta` returns `{api: 1, bridge: "<version>"}`.
+`GET /api/v1/meta` returns `{api: 1, bridge: "<version>", host_name?: "<name>"}`. `host_name` is the computer's name as the phone's copy says it ("Connecting to desk-1…"): the first label of the serve identity's tailnet name (`desk-1.example-tailnet.ts.net:8443` is `desk-1`), else the first label of the bridge machine's hostname. The phone asks once per connect and falls back to the first label of the page's own host name.
 
 `GET /healthz` returns `ok`. It is the only path exempt from the guards below, and it reveals nothing.
 

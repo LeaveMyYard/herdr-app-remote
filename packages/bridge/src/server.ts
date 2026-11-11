@@ -50,6 +50,8 @@ export interface ServerOptions {
    * before the built-in routes; returns true when it answered the request.
    */
   routes?: (req: IncomingMessage, res: ServerResponse, path: string) => boolean | Promise<boolean>;
+  /** The computer's name for `GET /api/v1/meta`'s `host_name`; omitted, the field is left out. */
+  hostName?: () => string;
   /** Called for each accepted WS connection; the returned function runs when it closes. */
   onConnect?: (client: HubClient) => (() => void) | void;
 }
@@ -109,7 +111,8 @@ export function createBridgeServer(opts: ServerOptions): BridgeServer {
     if (req.method !== "GET" && req.method !== "HEAD") return end(res, 405, "method not allowed");
     if (path === "/healthz") return end(res, 200, "ok");
     if (path === "/api/v1/meta") {
-      const body: bridgeApi.Meta = { api: bridgeApi.API_VERSION, bridge: hub.bridgeVersion };
+      const name = opts.hostName?.();
+      const body: bridgeApi.Meta = { api: bridgeApi.API_VERSION, bridge: hub.bridgeVersion, ...(name ? { host_name: name } : {}) };
       return end(res, 200, JSON.stringify(body), MIME[".json"]);
     }
     if (path.startsWith("/api/")) return end(res, 404, "not found");

@@ -71,6 +71,11 @@
 .hd .qn-area{height:auto;min-height:88px;padding:10px 12px;resize:vertical}
 .hd .qn-said{margin:0;padding:8px 12px;border-radius:8px;font-size:12.5px;line-height:1.45;background:var(--t-background);border:1px solid var(--t-border);color:var(--t-working)}
 .qn-foot{gap:8px;padding:10px 16px calc(var(--sab) + 4px);border-top:1px solid var(--t-border)}
+.qn-dismissbar{gap:10px;padding:12px 16px calc(var(--sab) + 4px);border-top:1px solid #f0705f59;background:#f0705f0f}
+.hd .qn-dismissq{margin:0;font-size:14px;line-height:1.4;color:var(--t-blocked)}
+.qn-dismissacts{gap:8px}
+.hd .qn-keep,.hd .qn-dismissgo{height:44px;border-radius:7px;border:1px solid var(--t-input);background:var(--t-raised);color:var(--t-foreground);font-size:14px}
+.hd .qn-dismissgo{border-color:#f0705f80;color:var(--t-blocked)}
 .hd .qn-later{height:48px;justify-content:center;border-radius:7px;border:1px solid var(--t-input);background:var(--t-raised)}
 .hd .qn-next{flex:2;height:48px;justify-content:center;border-radius:7px;border:1px solid var(--t-solid);background:var(--t-solid);color:var(--t-solid-fg);font-weight:500}
 .hd .qn-next:disabled,.hd .qn-send:disabled{opacity:.7}

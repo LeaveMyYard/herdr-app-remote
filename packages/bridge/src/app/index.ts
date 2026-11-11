@@ -17,6 +17,7 @@ import { PanelDriver } from "../panel/driver.js";
 import { PanoramaTopicDriver } from "../panorama/topic.js";
 import { PluginsTopicDriver } from "../plugins/topic.js";
 import { PushService, type PushOptions } from "../push/service.js";
+import { hostName } from "../security/host-name.js";
 import { Security, type DeviceView, type ServeIdentity } from "../security/security.js";
 import { createBridgeServer, type BridgeServer, type GuardVerdict } from "../server.js";
 import { terminalSendActor } from "../terminal/send.js";
@@ -206,6 +207,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     guard,
     routes: async (req, res, path) => (await security.routes(req, res, path)) || pushService.routes(req, res, path),
     onConnect: security.onConnect,
+    hostName: () => hostName(security.serveIdentity),
   });
   const { port } = await server.listen();
   log({ event: "api_listening", port });

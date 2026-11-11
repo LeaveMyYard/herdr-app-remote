@@ -31,6 +31,7 @@ const flush = () => act(async () => {
 
 let terminalInput: TerminalInputView | null;
 let meReads: number;
+let metaName: string | null = null;
 async function mount(hash = "#/agents") {
   window.location.hash = hash;
   client = new BridgeClient({
@@ -47,6 +48,7 @@ async function mount(hash = "#/agents") {
     <LiveApp
       client={client}
       hostName="desk-1"
+      readHostName={async () => metaName}
       readTerminalInput={async () => {
         meReads += 1;
         return terminalInput;
@@ -73,6 +75,7 @@ beforeEach(() => {
   me = 200;
   terminalInput = { enabled: false, until: null };
   meReads = 0;
+  metaName = null;
   forgetConfirmations();
 });
 afterEach(() => {
@@ -240,6 +243,26 @@ describe("LiveApp inbox", () => {
     expect(subs(s).filter((t) => t === "inbox").length).toBe(before + 1);
     expect(s.ofType("act")).toHaveLength(1);
     expect(screen.getByText("The result is unknown (x).")).toBeInTheDocument();
+  });
+});
+
+describe("the computer's name in the copy", () => {
+  it("is the bridge's host_name once the meta answers", async () => {
+    metaName = "desk-7";
+    await mount("#/swarm");
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: HOST });
+    await recv(s, { type: "snap", topic: "plugins", epoch: "e1", seq: 2, data: PLUGINS });
+    expect(await screen.findByRole("region", { name: "Plugins on desk-7" })).toBeInTheDocument();
+  });
+
+  it("falls back to the page's host name while the meta has no name", async () => {
+    metaName = null;
+    await mount("#/swarm");
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: HOST });
+    await recv(s, { type: "snap", topic: "plugins", epoch: "e1", seq: 2, data: PLUGINS });
+    expect(await screen.findByRole("region", { name: "Plugins on desk-1" })).toBeInTheDocument();
   });
 });
 
