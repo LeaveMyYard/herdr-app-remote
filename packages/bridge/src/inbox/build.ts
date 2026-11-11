@@ -245,8 +245,8 @@ export function buildTopic(input: TopicInput, env: BuildEnv): bridgeApi.InboxTop
     generated_at: feed.generated_at,
     errors: feed.errors,
     incomplete: COUNTS(feed, env.modules, input.unlisted),
-    // `entries: []` is an empty inbox only when the feed is ok and nothing was left out; a shown row counts as a row.
-    empty: rows.length === 0 && hidden === 0,
+    // `entries: []` is an empty inbox only when the feed is ok and nothing was left out. It is the feed's entries that count: a row dropped as unbuildable is still something the feed holds.
+    empty: entries.length === 0 && extra.length === 0 && hidden === 0,
     // Left-out groups the bridge has not opened still wait: they count (so the header and badge never say "nothing").
     waiting: rows.filter((r) => r.kind === "group").length + Math.max(feed.omitted.groups - extra.length, 0),
     alerts: rows.filter((r) => r.kind === "alert").length,

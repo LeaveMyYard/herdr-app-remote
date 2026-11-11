@@ -277,6 +277,11 @@ describe("inbox topic: show retries and bad rows", () => {
     expect(topic().entries.map((e) => e.key)).toEqual(["alert:456"]);
   });
 
+  it("is not empty when the feed's only entry is one it could not build", async () => {
+    const { topic } = await started({ feed: feedDoc({ entries: [{ key: "", kind: "wat", token: null, actions: [] }] }) });
+    expect(topic()).toMatchObject({ entries: [], empty: false });
+  });
+
   it("marks the topic stale when a value cannot be published", async () => {
     const s = await started();
     // a topic that fails its own schema must not stay up as fresh
