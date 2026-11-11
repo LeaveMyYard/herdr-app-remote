@@ -410,7 +410,7 @@ describe("startApp: topics over the link", () => {
     expect(await on.until(resOf("s1"))).toMatchObject({ ok: true });
     expect(calls.filter((c) => c.args[0] === "send")).toEqual([{ cmd: "fake-hc", args: ["send", "--json", "--", "t3", "secret words here"] }]);
     const text = app!.security.activity().map((e) => e.text);
-    expect(text).toContain("Phone 1 (2) sent 17 chars to t3");
+    expect(text).toContain("Phone 2 sent 17 chars to t3");
     expect(JSON.stringify(app!.security.activity())).not.toContain("secret");
   });
 
@@ -499,13 +499,16 @@ describe("startApp: the desktop panel", () => {
     const panel = await panelMod();
     await waitLine(panel, (l) => l.type === "panel");
     const { code } = app!.security.issueCode();
-    const r = await http("POST", "/api/v1/pair", OK_POST, JSON.stringify({ code, name: "Phone 1" }));
+    const r = await http("POST", "/api/v1/pair", OK_POST, JSON.stringify({ code, name: "Evil Name 123" }));
     expect(r.status).toBe(202);
     const toast = await waitLine(mod, (l) => l.type === "notify");
     expect(toast).toMatchObject({ level: "info", action: "open_panel" });
-    expect(String(toast.message)).toContain("Phone 1");
-    const view = (await waitLine(panel, (l) => l.type === "panel" && (l.view as { devices: unknown[] }).devices.length === 1)).view as { devices: { state: string }[] };
+    // Exactly this text: nothing the phone sent, not even the bridge-made label.
+    expect(toast.message).toBe("Approve a new phone?");
+    const view = (await waitLine(panel, (l) => l.type === "panel" && (l.view as { devices: unknown[] }).devices.length === 1)).view as { devices: { state: string; name: string }[] };
     expect(view.devices[0]!.state).toBe("pending");
+    expect(view.devices[0]!.name).toBe("Phone 1");
+    expect(JSON.stringify([toast, view])).not.toContain("Evil");
   });
 
   it("a security change reaches the panel at once, not on the 2 s recheck", async () => {

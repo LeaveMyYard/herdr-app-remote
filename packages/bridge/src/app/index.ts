@@ -65,7 +65,7 @@ export interface AppOptions {
   funnelCheckMs?: number;
   /** Extra `act` handlers (later slices: inbox, chat, terminal, push), tried before the built-in ones. */
   actors?: readonly Actor[];
-  /** A device asked to pair: the desktop panel and a toast ask "Approve Phone 1?" (S13 wires it). */
+  /** A device asked to pair: the desktop panel and a toast ask "Approve a new phone?" (S13 wires it); the toast carries no device text. */
   onPending?: (d: DeviceView) => void;
   /** Extra Status checks and panel operations (S14). */
   panel?: Pick<import("../panel/driver.js").PanelDriverOptions, "extraChecks" | "extraAct">;
@@ -146,7 +146,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     onCut: (id) => terminal.cancel(id ?? undefined),
     onAuditHealth: (h) => log({ event: "audit_health", ok: h.ok, failures: h.failures }),
     onPending: (d) => {
-      o.link.notify("info", `Approve ${d.name}? Open the Remote panel.`, "link", "open_panel");
+      o.link.notify("info", "Approve a new phone?", "link", "open_panel");
       o.onPending?.(d);
     },
   });

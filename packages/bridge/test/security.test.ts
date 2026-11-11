@@ -454,8 +454,11 @@ describe("pairing", () => {
     expect(issued.url).toMatch(new RegExp(`^https://${SERVE.replace(/\./g, "\\.")}/pair#c=[A-Za-z0-9_-]{22}$`));
     expect(issued.svg.startsWith("<svg")).toBe(true);
 
-    const r = await pair(issued.code, OK_POST, "Phone\n1\u0000");
+    // The phone-chosen name never reaches the pending row, the listener or Activity.
+    const r = await pair(issued.code, OK_POST, "Evil Name\n1\u0000");
     expect(r.status).toBe(202);
+    expect(r.body).not.toContain("Evil");
+    expect(activity().join("\n")).not.toContain("Evil");
     const body = JSON.parse(r.body) as { device: { id: string; name: string; state: string } };
     expect(body.device).toMatchObject({ name: "Phone 1", state: "pending" });
     expect(pending).toEqual(["Phone 1"]);
@@ -508,17 +511,14 @@ describe("pairing", () => {
     expect((await http("GET", "/api/v1/me", { ...OK_GET, Cookie: cookie })).status).toBe(401);
   });
 
-  it("long emoji names are cut by code point and still load after a restart", async () => {
+  it("a phone-chosen name, long or odd, is ignored: the bridge names the device", async () => {
     await start();
     const r = await pair(sec.issueCode().code, OK_POST, "\u{1F600}".repeat(40));
-    const name = (JSON.parse(r.body) as { device: { name: string } }).device.name;
-    expect([...name]).toHaveLength(32);
-    expect(name).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
-    const r2 = await pair(sec.issueCode().code, OK_POST, "\u{1F600}".repeat(40));
-    expect([...(JSON.parse(r2.body) as { device: { name: string } }).device.name]).toHaveLength(32);
+    expect((JSON.parse(r.body) as { device: { name: string } }).device.name).toBe("Phone 1");
+    expect(r.body).not.toContain("\u{1F600}");
     await srv.close();
     await start();
-    expect(sec.devices()).toHaveLength(2);
+    expect(sec.devices().map((d) => d.name)).toEqual(["Phone 1"]);
   });
 
   it("default names count up, and rejecting a pending device removes it", async () => {
@@ -532,10 +532,11 @@ describe("pairing", () => {
     expect(activity()).toContain("Phone 1: pairing refused");
     sec.rename(db!.id, "Laptop 1");
     expect(sec.devices()[0]?.name).toBe("Laptop 1");
-    // A client-chosen name is a hint: a taken one gets a suffix; renames can't collide.
+    // A client-chosen name is ignored; renames can't collide.
     const c = await pair(sec.issueCode().code, OK_POST, "Laptop 1");
-    expect((JSON.parse(c.body) as { device: { name: string } }).device.name).toBe("Laptop 1 (2)");
-    expect(() => sec.rename(db!.id, "Laptop 1 (2)")).toThrow(/in use/);
+    const dc = (JSON.parse(c.body) as { device: { id: string; name: string } }).device;
+    expect(dc.name).toBe("Phone 1");
+    expect(() => sec.rename(dc.id, "Laptop 1")).toThrow(/in use/);
   });
 
   it("terminal.input expiry must be a future integer", async () => {

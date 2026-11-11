@@ -26,7 +26,7 @@ export interface SecurityOptions {
   /** The real action handler (later slices). Only reached after the capability check. */
   inner?: ActHandler;
   now?: () => number;
-  /** A device asked to pair: the desktop panel and a toast ask "Approve Phone 1?". */
+  /** A device asked to pair: the desktop panel and a toast ask "Approve a new phone?". */
   onPending?: (d: DeviceView) => void;
   /** Devices, capabilities or pause changed. */
   onChange?: () => void;
@@ -349,10 +349,10 @@ export class Security {
       throw new HttpError(403, "bad_code");
     }
     const token = randomBytes(32).toString("base64url");
-    const asked = typeof body.name === "string" ? cleanLabel(body.name, 32) : "";
+    // A name in the body is ignored: pending rows, toasts and audit lines only ever show a bridge-made "Phone N".
     const d: Device = {
       id: newDeviceId(),
-      name: this.uniqueName(asked || this.defaultName()),
+      name: this.defaultName(),
       login: this.serve!.login,
       token_sha256: sha256(token),
       state: "pending",
@@ -371,18 +371,6 @@ export class Security {
     this.audit({ event: "pair.request", device: d.name, text: `${d.name} asked to pair` });
     this.changed();
     this.onPending?.(this.view(d));
-  }
-
-  /** The client's name is a hint: a taken one gets a suffix, so prompts stay unambiguous. */
-  private uniqueName(base: string): string {
-    const used = new Set(this.store.all().map((d) => d.name));
-    if (!used.has(base)) return base;
-    for (let n = 2; ; n++) {
-      const suffix = ` (${n})`;
-      // Stays within the 32-character name the store's schema accepts.
-      const candidate = `${[...base].slice(0, 32 - suffix.length).join("")}${suffix}`;
-      if (!used.has(candidate)) return candidate;
-    }
   }
 
   private defaultName(): string {

@@ -73,7 +73,7 @@ How the mod fills it from herdr-app (`mod/herdr-app-remote/host.js`): agent and 
 | type | fields | notes |
 |---|---|---|
 | `run` | `id`, `name`, `args` | `name` and `args` must pass the allowlist below. The mod checks it again itself and answers with `result`. A `run` without a string `id` of 1 to 128 chars is ignored. |
-| `notify` | `level: info\|warn\|error`, `message`, `action?: "open_panel"` | Shown by the mod as a toast titled "Remote" (`warn` is herdr's `warning`); at most 500 chars. `open_panel` makes a click on the toast run the mod's own `open` command (shows the Remote panel); it is the only action there is. The bridge uses it for "Approve Phone 1?". |
+| `notify` | `level: info\|warn\|error`, `message`, `action?: "open_panel"` | Shown by the mod as a toast titled "Remote" (`warn` is herdr's `warning`); at most 500 chars. `open_panel` makes a click on the toast run the mod's own `open` command (shows the Remote panel); it is the only action there is. The bridge uses it for "Approve a new phone?". |
 | `panel` | `seq`, `view: PanelView` | Sent to the `panel` copy only: on its `hello`, and whenever the view changes (a security change at once, otherwise a 2 s recheck), deduplicated by content. A full snapshot. |
 | `panel_res` | `id`, `ok`, `code?` | Answer to a `panel_act` with the same `id`. `code` when `ok` is false: `unsupported_action` and `bad_args` (refused, nothing done), `not_found`, `serve_not_configured`, `paused`, `unavailable`, `failed`. |
 | `ping` | | Keep-alive, every 15 s. The mod answers with `pong`. A copy that sends nothing for 37.5 s is disconnected. |

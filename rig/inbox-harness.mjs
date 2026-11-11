@@ -109,7 +109,7 @@ const post = (path, body) => new Promise((resolve, reject) => {
 try {
   // Pairing: code -> pending device -> desktop approval.
   const { code } = sec.issueCode();
-  const paired = await post('/api/v1/pair', { code, name: 'Phone 1' });
+  const paired = await post('/api/v1/pair', { code, name: 'Ignored Name 123' });
   check('pairing request accepted', paired.status === 202, paired.status);
   const id = JSON.parse(paired.body).device.id;
   sec.approve(id);

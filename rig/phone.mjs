@@ -38,7 +38,7 @@ if (cmd === 'get') {
   const code = readFileSync(join(rig, 'pair.code'), 'utf8').trim();
   const r = await req('POST', '/api/v1/pair', {
     headers: { Origin: ORIGIN, 'X-Remote-Api': '1', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, name: 'Phone 1' }),
+    body: JSON.stringify({ code, name: 'Ignored Name 123' }),
   });
   const sc = [r.headers['set-cookie'] ?? []].flat()[0] ?? '';
   if (sc) writeFileSync(cookieFile, sc.split(';')[0]);
