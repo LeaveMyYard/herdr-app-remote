@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
+import type { bridgeApi } from "@herdr-remote/protocol";
 import { Banner } from "./components/Banner";
 import { TabBar } from "./components/TabBar";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
 import { TABS, type Connection, type TabBadges, type TabId } from "./model";
 import { AgentsBasic } from "./screens/AgentsBasic";
-import { Missing, UsageGlyph } from "./screens/Missing";
 import { Soon } from "./screens/Soon";
+import { UsageTab } from "./screens/UsageTab";
+import { demoUsageNow, usageScenario } from "./usage-fixtures";
+
+/** `#/usage/<scenario>`: the demo data the Usage tab shows until the bridge client lands. */
+function scenarioFromHash(hash: string): string | undefined {
+  return hash.replace(/^#\/?/, "").split("/")[1];
+}
 
 function tabFromHash(hash: string): TabId {
   const id = hash.replace(/^#\/?/, "").split("/")[0];
@@ -41,6 +48,15 @@ export function App({ connection, tabBadges = badges }: AppProps) {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const conn = useConnection(connection);
+  const [scenarioName, setScenarioName] = useState(() => scenarioFromHash(window.location.hash));
+  useEffect(() => {
+    const onHash = () => setScenarioName(scenarioFromHash(window.location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const scenario = usageScenario(scenarioName);
+  const [usageFilter, setUsageFilter] = useState<Record<string, bridgeApi.UsageTopic["filter"]>>({});
+  const usageTopic = scenario.topic && { ...scenario.topic, filter: usageFilter[scenario.name] ?? scenario.topic.filter };
   const select = (t: TabId) => {
     window.location.hash = `/${t}`;
     setTab(t);
@@ -52,14 +68,15 @@ export function App({ connection, tabBadges = badges }: AppProps) {
       {tab === "agents" ? (
         <AgentsBasic host={host} spaces={spaces} agents={agents} />
       ) : tab === "usage" ? (
-        <Missing
+        <UsageTab
           host={host}
-          title="Agent Usage"
-          plugin="agent-usage"
-          blurb="This tab shows how much of each Claude and Codex account is left."
-          command={usageInstallCommand}
-          icon={<UsageGlyph />}
-          plugins={plugins}
+          state={scenario.state}
+          topic={usageTopic}
+          plugins={plugins.map((p) => (p.name === "agent-usage" ? { ...p, state: scenario.state } : p))}
+          installCommand={usageInstallCommand}
+          now={scenario.fixedNow ? demoUsageNow : undefined}
+          onFilter={(f) => setUsageFilter((m) => ({ ...m, [scenario.name]: f }))}
+          onRefresh={() => undefined}
         />
       ) : (
         <Soon title={TABS.find((t) => t.id === tab)?.label ?? ""} />

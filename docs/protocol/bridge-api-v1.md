@@ -35,12 +35,24 @@ One JSON object per text frame, each with a `type`.
 
 `host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`.
 
-Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`. The other payloads are defined by their slices; until then `snap.data` is open.
+Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`. `usage` is `UsageTopic` (below). The other payloads are defined by their slices; until then `snap.data` is open.
+
+### The `usage` topic
+
+Source: `usagebar collect --format v1 [--all] --panes <JSON>` (agent-usage `docs/collect-json-v1.md`). Schema: `UsageTopic` in `packages/protocol/src/bridge-api.ts`; fixtures in `fixtures/bridge-api/usage/`.
+
+- The bridge runs it only while at least one client is subscribed: at once for the first subscriber, then every 15 s, with a 10 s timeout, never two at a time. When the last client leaves, it stops.
+- `--panes` is built from the `host` topic's agents (`paneId` is the terminal id, `agent` the harness, `label` the agent name; `antigravity` and `cursor-agent` become usagebar's `agy` and `cursor`). Without a host state it is `[]`.
+- The bridge never runs `usagebar notify`: a second consumer of toasts would split them with the desktop mod (PLAN section 7).
+- `UsageTopic = {filter: "open-panes" | "all", report: UsageReport | null, updatedAtMs: number | null, error?}`. `report` keeps what the screen draws: `watchDirs`, `apiUsage`, per-pane shares, `home` and `resetsAt` are dropped, unknown fields are ignored, and paths under the bridge user's home are abbreviated with `~`.
+- `error` is one of `unavailable` (not installed or cannot run), `timeout`, `failed` (non-zero exit), `bad_output` (invalid JSON or shape) and `unsupported` (another `version`). The last good `report` stays while `error` is set; no CLI output is forwarded.
+- `act`: `usage.refresh {}` collects now and answers when it is done; `usage.set_filter {filter}` switches between Open panes and All (shared by every client), clears `report` at once and collects again. A failed collect answers `ok: false` with the error as `code`. Any other `act` kind is not the usage topic's.
+- Plugin states: `plugins.usage` decides what the Usage tab shows. `missing`, `too_old` and `broken` show the Missing screen; `ready`, `stale` and `not_running` show the panel.
 
 ### Resume and consistency
 
 - `seq` is per topic within an epoch. A `snap` sets the topic's `seq`; each `patch` for that topic carries previous + 1. `hello.resume.seqs` maps each topic to the last `seq` the client applied. `patch` carries no `epoch`: a bridge restart is detected through `welcome.epoch`, after which the client resubscribes and gets fresh `snap`s. A `seq` gap on a topic means the client re-subscribes to that topic only and receives a fresh `snap`.
-- `snap.data` is validated against the topic payload schema where one is defined (`host`, `plugins`).
+- `snap.data` is validated against the topic payload schema where one is defined (`host`, `plugins`, `usage`).
 - Each bridge start gets a random epoch. A client that resumes with an unknown epoch, or whose seq has a gap, gets a fresh `snap`.
 - iOS kills background sockets, so the PWA reconnects on `visibilitychange` and `online`.
 - There is no optimistic UI: the UI changes only on `snap`, `patch` or `res`.

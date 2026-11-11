@@ -15,7 +15,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },
-  use: { baseURL: "http://127.0.0.1:4173", colorScheme: "dark" },
+  use: { baseURL: "http://127.0.0.1:4173", colorScheme: "dark", timezoneId: "UTC" },
   projects: [
     { name: "chromium-phone", use: { ...devices["Desktop Chrome"], ...phone, launchOptions: { args: ["--font-render-hinting=slight"], env: { ...process.env, FONTCONFIG_FILE: resolve(import.meta.dirname, "visual/fonts.conf") } as Record<string, string> } } },
     { name: "webkit-phone", use: { ...devices["Desktop Safari"], ...phone } },

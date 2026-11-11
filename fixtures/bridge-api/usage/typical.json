@@ -1,0 +1,89 @@
+{
+  "filter": "all",
+  "updatedAtMs": 1793722431615,
+  "report": {
+    "version": 1,
+    "generatedAtMs": 1793722431615,
+    "filter": "all",
+    "limitPercent": "remaining",
+    "emptyMessage": "(no agent panes open)",
+    "providers": [
+      {
+        "providerId": "claude-1",
+        "family": "claude",
+        "label": "claude-1",
+        "groupLabel": "Claude",
+        "accountLabel": "user-1@example.com",
+        "profileLabel": "claude-1",
+        "identity": "user-1@example.com",
+        "planType": "Max",
+        "source": "claude statusLine cache",
+        "fetchedAtMs": 1793722431615,
+        "note": null,
+        "status": "ok",
+        "staleMinutes": null,
+        "action": "",
+        "inUse": true,
+        "windows": [
+          { "slot": "primary", "tag": "7d", "windowMinutes": 10080, "displayPercent": 15, "barFill": 0.15, "band": "low", "resetIn": "2d 12h", "runOut": { "text": "empty in ~18h 56m" } }
+        ]
+      },
+      {
+        "providerId": "claude-2",
+        "family": "claude",
+        "label": "claude-2",
+        "groupLabel": "Claude",
+        "profileLabel": "claude-2",
+        "identity": "user-2@example.com",
+        "source": "claude statusLine cache via claude",
+        "fetchedAtMs": 1793722371615,
+        "status": "ok",
+        "windows": [
+          { "slot": "primary", "tag": "7d", "windowMinutes": 10080, "displayPercent": 99, "barFill": 0.99, "band": "high", "resetIn": "6d 20h" }
+        ]
+      },
+      {
+        "providerId": "claude-2-dup",
+        "family": "claude",
+        "label": "claude",
+        "profileLabel": "claude",
+        "identity": "user-2@example.com",
+        "sameAccountAs": "claude-2",
+        "source": "claude statusLine cache",
+        "fetchedAtMs": 1793722371615,
+        "status": "ok",
+        "windows": []
+      },
+      {
+        "providerId": "claude-3",
+        "family": "claude",
+        "label": "claude-3",
+        "groupLabel": "Claude",
+        "profileLabel": "claude-3",
+        "identity": "user-3@example.com",
+        "source": "claude statusLine cache",
+        "fetchedAtMs": 1793643331615,
+        "status": "stale",
+        "staleMinutes": 1315,
+        "windows": [
+          { "slot": "primary", "tag": "7d", "windowMinutes": 10080, "displayPercent": 0, "barFill": 0, "band": "low", "resetIn": "1d 9h", "runOut": { "text": "empty in ~<1m" } }
+        ]
+      },
+      {
+        "providerId": "codex",
+        "family": "codex",
+        "label": "codex",
+        "identity": "~/.codex",
+        "planType": "Pro",
+        "source": "codex rollout",
+        "fetchedAtMs": 1793672031615,
+        "status": "stale",
+        "staleMinutes": 840,
+        "windows": [
+          { "slot": "primary", "tag": "7d", "windowMinutes": 10080, "displayPercent": 100, "barFill": 1, "band": "high", "resetIn": "" }
+        ]
+      }
+    ],
+    "lowCachePanes": []
+  }
+}
