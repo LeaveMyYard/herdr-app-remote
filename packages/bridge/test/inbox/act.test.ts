@@ -223,6 +223,48 @@ describe("inbox acts: the token is bound to the content shown", () => {
     expect(s.d.tokenFor("group:123")).toBe("tok-feed-3");
   });
 
+  it("binds the result's token to the row as the verb left it: a Submit right after a draft sends and logs the new draft", async () => {
+    const s = await started();
+    s.h.reply("draft", done("draft", { token: "tok-mine-1", done: [], delivery: null }));
+    expect(await s.act("inbox.draft", { key: "group:123", rev: s.rev("group:123"), question: 124, detail: { choices: [1], notes: { "1": " n " }, text: null } })).toMatchObject({ ok: true });
+    // The feed has not caught up; the bound row (and so the phone's Review) already shows the stored draft.
+    const q124 = (s.row("group:123") as { questions: { id: number; draft: unknown }[] }).questions.find((q) => q.id === 124);
+    expect(q124?.draft).toEqual({ choices: ["Option Y"], notes: { "Option Y": "n" }, text: null });
+    s.h.reply("answer", done("answer", { token: "tok-mine-2", done: [124] }));
+    const r = await s.act("inbox.answer", { key: "group:123", rev: s.rev("group:123"), questions: [124] });
+    expect(r).toMatchObject({ ok: true, audit_label: "Option Y" });
+    expect(s.h.verbCalls()[1]).toBe("app answer --entry group:123 --token tok-mine-1 --question 124 --json");
+    // An answered question leaves the bound row too.
+    expect((s.row("group:123") as { questions: { id: number }[] }).questions.map((q) => q.id)).toEqual([123, 125]);
+  });
+
+  it("keeps a left-out row's result token across newer feeds, until a later show", async () => {
+    const shownRow = (token: string) => ({ ...group(140, { token }), questions: [question(140), question(141)] });
+    const omitted = { groups: 1, questions: 2, failed: 0, alerts: 0, remote: 0, question_ids: [140, 141] };
+    const s = await started({ feed: feedDoc({ entries: [alertEntry(456)], omitted }) }, undefined, (h) => h.show(140, shownRow("tok-show-1")));
+    await s.d.settled();
+    await s.d.refresh();
+    s.h.reply("draft", done("draft", { token: "tok-mine-1", done: [], delivery: null }));
+    expect(await s.act("inbox.draft", { key: "group:140", rev: s.rev("group:140"), question: 140, detail: { choices: [0], notes: {}, text: null } })).toMatchObject({ ok: true });
+    const rev = s.rev("group:140");
+    s.clock.now += 1_000;
+    s.h.writeFeed(feedDoc({ entries: [alertEntry(456)], omitted, generated_at: s.clock.now / 1000 }));
+    await s.d.refresh();
+    expect(s.d.tokenFor("group:140")).toBe("tok-mine-1");
+    expect(s.rev("group:140")).toBe(rev);
+  });
+
+  it("reads the feed again after a verb by itself", async () => {
+    const s = await started();
+    s.h.reply("ack", done("ack", { token: null, done: [456] }));
+    const p = s.d.act("inbox.ack", { key: "alert:456", rev: s.rev("alert:456") });
+    s.clock.now += 1_000;
+    s.h.writeFeed(feedDoc({ entries: [multi(), lone()], generated_at: s.clock.now / 1000 }));
+    await p;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(s.topic().entries.map((e) => e.key)).toEqual(["group:123", "group:127"]);
+  });
+
   it("a result with no token closes the row: the phone is told, and nothing more runs on it", async () => {
     const s = await started();
     s.h.reply("answer", done("answer", { token: null }));

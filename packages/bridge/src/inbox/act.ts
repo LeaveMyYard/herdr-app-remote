@@ -97,3 +97,38 @@ export function planAct(kind: Kind, args: Record<string, unknown>, row: Row): Pl
   const label = made.labels.length > 0 ? made.labels.join(", ") : undefined;
   return { ...base, qids: [id], detail: made.detail, ...(label ? { label } : {}) };
 }
+
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** A stored draft as the verb normalises it (`Detail::make`, plus option order); null when nothing is left. */
+export function normalDraft(options: unknown, d: VerbDetail): VerbDetail | null {
+  const labels = (Array.isArray(options) ? options : []).map((o) => (isObj(o) && typeof o.label === "string" ? o.label : null));
+  const choices = labels.filter((l, i): l is string => l !== null && d.choices.includes(l) && labels.indexOf(l) === i);
+  const notes: Record<string, string> = {};
+  for (const [l, n] of Object.entries(d.notes)) if (choices.includes(l) && n.trim() !== "") notes[l] = n.trim();
+  const text = d.text !== null && d.text.trim() !== "" ? d.text : null;
+  return choices.length === 0 && text === null ? null : { choices, notes, text };
+}
+
+/**
+ * What a done verb changed in the row, applied to the bridge's copy until a feed or `show` newer than the result
+ * arrives: the result's token covers the row as it is NOW, so the content bound to it (and drawn on the phone, and
+ * read for the audit label) must be that too. Returns undefined when the verb changes nothing the row shows.
+ */
+export function effectOf(plan: Plan, done: readonly number[]): ((entry: Obj) => Obj) | undefined {
+  const questions = (entry: Obj, f: (q: Obj) => Obj | null): Obj => {
+    if (!Array.isArray(entry.questions)) return entry;
+    const qs = (entry.questions as unknown[]).map((q) => (isObj(q) ? f(q) : q)).filter((q) => q !== null);
+    return qs.length === 0 ? entry : { ...entry, questions: qs };
+  };
+  if (plan.verb === "draft") {
+    const qid = plan.qids[0];
+    const draft = plan.clear || !plan.detail ? null : plan.detail;
+    return (entry) => questions(entry, (q) => (q.id === qid ? { ...q, draft: draft === null ? null : normalDraft(q.options, draft) } : q));
+  }
+  if ((plan.verb === "answer" || plan.verb === "dismiss") && done.length > 0) {
+    return (entry) => questions(entry, (q) => (typeof q.id === "number" && done.includes(q.id) ? null : q));
+  }
+  return undefined;
+}

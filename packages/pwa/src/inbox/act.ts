@@ -1,4 +1,5 @@
 import type { bridgeApi } from "@herdr-remote/protocol";
+import { RESULT } from "./words";
 
 /** The bridge's answer to an `act`, as the PWA gets it (`res` without its id). */
 export interface ActResult {
@@ -14,22 +15,22 @@ export interface ActResult {
 export type ActFn = (kind: bridgeApi.InboxActKind, args: Record<string, unknown>) => Promise<ActResult>;
 
 /** Without a bridge client (the demo screens), nothing is sent. */
-export const offlineAct: ActFn = () => Promise.resolve({ ok: false, code: "offline", message: "Not connected to the desktop. Nothing was sent." });
+export const offlineAct: ActFn = () => Promise.resolve({ ok: false, code: "offline", message: RESULT.offline });
 
 /** What the phone says for a result, preferring the inbox's own words. */
 export function resultWords(r: ActResult): string {
   if (r.message) return r.message;
-  if (r.unknown_effect) return "The result is unknown. It may or may not have been done, and it was not repeated. Check the row after this reload.";
-  if (r.ok) return "Done.";
+  if (r.unknown_effect) return RESULT.unknown;
+  if (r.ok) return RESULT.done;
   switch (r.code) {
     case "stale":
-      return "This changed, look again. Nothing was sent.";
+      return RESULT.stale;
     case "forbidden":
-      return "This phone may not answer the inbox. Turn on “Answer the inbox” for it on the desktop.";
+      return RESULT.forbidden;
     case "paused":
-      return "Remote access is paused on the desktop.";
+      return RESULT.paused;
     default:
-      return `Not done (${r.code ?? "failed"}). Nothing changed.`;
+      return RESULT.failed(r.code ?? "failed");
   }
 }
 
@@ -51,7 +52,7 @@ const REASON: Record<NonNullable<bridgeApi.Res["closed"]>, string> = {
   delivered: "delivered",
   fetched: "fetched by the agent",
   hidden: "hidden",
-  acked: "seen",
+  acked: "acknowledged",
   cleared: "no longer waiting",
   removed: "removed",
 };

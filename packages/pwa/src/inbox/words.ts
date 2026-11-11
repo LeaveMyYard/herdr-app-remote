@@ -30,3 +30,52 @@ export const GONE_SUB = "check_answers still has them";
 export const answerNotDelivered = (qid: number): string => `Answer to Q${qid} not delivered`;
 export const outboxTitle = (action: string, qid: number): string => `${action} for Q${qid}`;
 export const READ_ONLY = "read-only";
+
+/**
+ * Answering (S11). The board's own words (design/PhoneQuestion, PhoneReview, PhoneInbox) and the few the boards
+ * do not draw. `DISMISS*` belong to an undrawn control, provisional until the design has one (conductor, S11).
+ */
+export const ANSWER = {
+  other: "Something else…",
+  otherSub: "Type your own answer.",
+  chat: "Chat about this",
+  chatSub: "Go to the agent",
+  note: "Note for the agent",
+  notePlaceholder: "Add a note for the agent…",
+  yourAnswer: "Your answer",
+  yourAnswerPlaceholder: "Type your answer…",
+  later: "Later",
+  next: "Next ⏎",
+  send: "Send ⏎",
+  sending: "Sending…",
+  pickFirst: "Pick an option or type an answer.",
+  review: "Review your answers",
+  submit: "Submit answers ✓",
+  submitTab: "Submit ✓",
+  cancel: "Cancel",
+  cancelSub: "Sends nothing",
+  noAnswer: "No answer yet: it stays open",
+  nothingYet: "Nothing to send yet",
+  answerOneFirst: "Answer at least one question first.",
+  gone: "This group is no longer open.",
+  backToInbox: "Back to the inbox",
+  DISMISS: "Dismiss",
+  DISMISS_CONFIRM: "Dismiss all?",
+  DISMISS_LABEL: "Dismiss: tap again to close every question in this group",
+  seen: "Seen",
+  stopShowing: "Stop showing",
+  needsNoAnswer: (title: string): string => `${title} needs no answer.`,
+  sends: (n: number, of: number, open: readonly string[]): string =>
+    `Sends ${n} of ${of}${open.length > 0 ? ` · ${open.join(", ")} ${open.length === 1 ? "stays" : "stay"} open` : ""}`,
+} as const;
+
+/** What the phone says for a result when the bridge sent no words of its own. */
+export const RESULT = {
+  offline: "Not connected to the desktop. Nothing was sent.",
+  unknown: "The result is unknown. It may or may not have been done, and it was not repeated. Check the row after this reload.",
+  done: "Done.",
+  stale: "This changed, look again. Nothing was sent.",
+  forbidden: "This phone may not answer the inbox. Turn on “Answer the inbox” for it on the desktop.",
+  paused: "Remote access is paused on the desktop.",
+  failed: (code: string): string => `Not done (${code}). Nothing changed.`,
+} as const;

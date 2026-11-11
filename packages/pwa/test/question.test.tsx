@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import { DEMO_NOW, demoHost, inboxScenario } from "../src/inbox-fixtures";
 import { ClosedRows, type ActFn, type ActResult } from "../src/inbox/act";
-import { ROW_ARM_MS, VIEW_ARM_MS } from "../src/inbox/arm";
+import { GRACE_MS, ROW_ARM_MS, VIEW_ARM_MS } from "../src/inbox/arm";
 import { Inbox } from "../src/screens/Inbox";
 import { Question } from "../src/screens/Question";
 
@@ -127,8 +127,34 @@ describe("Question: a lone question", () => {
     wait();
     await tap(screen.getByRole("button", { name: "Dismiss" }));
     expect(a.calls).toEqual([]);
+    // A double tap: the confirming tap is armed on its own.
+    await tap(screen.getByRole("button", { name: /tap again/ }));
+    expect(a.calls).toEqual([]);
+    wait();
     await tap(screen.getByRole("button", { name: /tap again/ }));
     expect(a.calls).toEqual([{ kind: "inbox.dismiss", args: { key: "group:127", rev: "rev-group-127" } }]);
+  });
+
+  it("drops the dismiss confirmation on any other tap", async () => {
+    const { a } = question(lone(), 127);
+    wait();
+    await tap(screen.getByRole("button", { name: "Dismiss" }));
+    await tap(screen.getByRole("button", { name: /Option A/ }));
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(a.calls).toEqual([]);
+  });
+
+  it("re-arms after a refusal, so a second tap right after it is dropped", async () => {
+    const a = fakeAct([{ ok: false, code: "busy", message: "The inbox is busy." }]);
+    question(lone(), 127, a);
+    wait();
+    await tap(screen.getByRole("button", { name: /Option A/ }));
+    await tap(screen.getByRole("button", { name: "Send ⏎" }));
+    await tap(screen.getByRole("button", { name: "Send ⏎" }));
+    expect(a.calls).toHaveLength(1);
+    wait(GRACE_MS);
+    await tap(screen.getByRole("button", { name: "Send ⏎" }));
+    expect(a.calls).toHaveLength(2);
   });
 });
 
@@ -195,8 +221,25 @@ describe("Inbox: placeholders and the footer", () => {
     wait();
     await tap(screen.getByRole("button", { name: "Seen" }));
     expect(a.calls).toEqual([{ kind: "inbox.ack", args: { key: "alert:456", rev: "rev-alert-456" } }]);
-    expect(closed.get("alert:456")?.reason).toBe("seen");
-    expect(screen.getByText("✓ Alert Title 456 · seen")).toBeInTheDocument();
+    expect(closed.get("alert:456")?.reason).toBe("acknowledged");
+    expect(screen.getByText("✓ Alert Title 456 · acknowledged")).toBeInTheDocument();
+  });
+
+  it("re-arms the footer when its row changes under the finger", async () => {
+    const t = typical();
+    const second = { ...(t.entries.find((e) => e.key === "alert:456") as bridgeApi.InboxRow), key: "alert:457", rev: "rev-alert-457", title: "Alert Title 457" } as bridgeApi.InboxRow;
+    const a = fakeAct();
+    const closed = new ClosedRows();
+    const { rerender } = view({ ...t, entries: [...t.entries, second] }, a, closed);
+    wait(ROW_ARM_MS);
+    // Alert 456 is acknowledged elsewhere: the footer now names 457, and a tap meant for 456 is dropped.
+    rerender(<Inbox topic={{ ...t, entries: [...t.entries.filter((e) => e.key !== "alert:456"), second] }} host={demoHost} now={DEMO_NOW} act={a.fn} closed={closed} />);
+    expect(screen.getByText("Alert Title 457 needs no answer.")).toBeInTheDocument();
+    await tap(screen.getByRole("button", { name: "Seen" }));
+    expect(a.calls).toEqual([]);
+    wait(GRACE_MS);
+    await tap(screen.getByRole("button", { name: "Seen" }));
+    expect(a.calls.map((c) => c.args.key)).toEqual(["alert:457"]);
   });
 
   it("offers an undelivered answer's own verbs when it is selected", async () => {
@@ -204,6 +247,7 @@ describe("Inbox: placeholders and the footer", () => {
     view(inboxScenario("failed").topic, a);
     wait();
     await tap(screen.getByText("Answer to Q119 not delivered"));
+    wait(GRACE_MS);
     await tap(screen.getByRole("button", { name: "Retry delivery" }));
     await tap(screen.getByRole("button", { name: "Stop showing" }));
     expect(a.calls.map((c) => [c.kind, c.args.key])).toEqual([

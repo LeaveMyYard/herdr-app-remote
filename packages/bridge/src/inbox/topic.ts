@@ -7,7 +7,7 @@ import type { Json } from "../patch.js";
 import { FEED_MAX_BYTES, INBOX_FEED } from "../plugins/constants.js";
 import { detectInbox, type Binaries } from "../plugins/detect.js";
 import type { Runner } from "../plugins/exec.js";
-import { planAct } from "./act.js";
+import { effectOf, planAct } from "./act.js";
 import { buildTopic, type BuildEnv } from "./build.js";
 import { loadInboxModules, resolveLauncher, type InboxModules, type Launch, type RawFeed, type VerbResult } from "./plugin.js";
 
@@ -114,7 +114,7 @@ export class InboxTopicDriver {
   private readonly revKey = randomBytes(32);
   private bound = new Map<string, Binding>();
   /** The token of the bridge's last verb result per row (null: the row is gone), until a newer feed or `show`. */
-  private readonly overrides = new Map<string, { token: string | null; at: number }>();
+  private readonly overrides = new Map<string, { token: string | null; at: number; effect?: ((entry: Record<string, unknown>) => Record<string, unknown>) | undefined }>();
   /** Revs the inbox answered `stale` for: refused here until the row's content or token moves (no silent repeat). */
   private readonly refusedRevs = new Set<string>();
   private acting: Promise<unknown> = Promise.resolve();
@@ -215,7 +215,10 @@ export class InboxTopicDriver {
       this.problem = null;
       // "The mod uses the token of its last result until a newer feed arrives" (app-commands-v1).
       const g = parsed.feed.generated_at;
-      for (const [k, o] of this.overrides) if (typeof g === "number" && g * 1000 > o.at) this.overrides.delete(k);
+      // A left-out row never arrives in a feed: its token comes from `show` and later results only, so a newer
+      // feed ends the override only of a row it lists.
+      const listed = new Set(parsed.feed.entries.map((e) => String(e.key)));
+      for (const [k, o] of this.overrides) if (typeof g === "number" && g * 1000 > o.at && listed.has(k)) this.overrides.delete(k);
       this.takeMarks(parsed.feed, now);
       this.lastGood = parsed.feed;
     } else {
@@ -361,6 +364,7 @@ export class InboxTopicDriver {
       shown,
       isNew: (key) => (this.newUntil.get(key) ?? 0) > now || rows.some((r) => r.key === key && this.isNewShown(r, now)),
       rev: (key, content) => this.revOf(this.tokens.get(key), content),
+      effect: (entry) => this.overrides.get(String(entry.key))?.effect?.(entry) ?? entry,
     };
     const topic = buildTopic(
       {
@@ -434,7 +438,7 @@ export class InboxTopicDriver {
     const res = modules.readResult(r === null ? null : { code: r.error ? null : r.code, stdout: r.stdout }, verb, args.key) as VerbResult;
     let out: ActResult;
     if (res.kind === "done") {
-      this.overrides.set(args.key, { token: res.token, at: this.now() });
+      this.overrides.set(args.key, { token: res.token, at: this.now(), effect: effectOf(plan, res.done) });
       const said = [
         res.delivery === "held" ? modules.heldWords(verb, res.done) : res.delivery === "queued" ? modules.queuedWords(res.done) : "",
         res.skipped.length > 0 ? modules.skippedWords(res.skipped) : "",

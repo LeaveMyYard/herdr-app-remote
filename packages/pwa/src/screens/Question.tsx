@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { closedReason, resultWords, type ActFn, type ActResult, type ClosedRows } from "../inbox/act";
-import { useArmed, VIEW_ARM_MS } from "../inbox/arm";
+import { GRACE_MS, useArmed, VIEW_ARM_MS } from "../inbox/arm";
 import { age, groupTitle, whereOf, type Of } from "../inbox/model";
+import { ANSWER } from "../inbox/words";
 
 type Group = Of<"group">;
 type Q = bridgeApi.InboxQuestion;
@@ -83,7 +84,7 @@ function Tabs({ row, current }: { row: Group; current: number | "submit" }) {
       ))}
       <span className="f1" />
       <a href={hrefOf(row.key, "submit")} role="tab" aria-selected={current === "submit"} className="row nf qn-submit" data-current={current === "submit" ? "true" : undefined}>
-        <span className="qn-submit-label">Submit ✓</span>
+        <span className="qn-submit-label">{ANSWER.submitTab}</span>
         <span className="mono qn-submit-n">
           {drafted}/{row.questions.length}
         </span>
@@ -117,6 +118,8 @@ export function Question(props: QuestionProps) {
 function useSend(props: QuestionProps) {
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
+  /** Bumped on every result that is not a success: the view re-arms, as the overlay's does after a refusal. */
+  const [misses, setMisses] = useState(0);
   const send = async (kind: bridgeApi.InboxActKind, args: Record<string, unknown>, after: (r: ActResult) => void) => {
     if (busy) return;
     setBusy(true);
@@ -128,9 +131,10 @@ function useSend(props: QuestionProps) {
       r = { ok: false, code: "failed", unknown_effect: true };
     }
     setBusy(false);
+    if (!r.ok) setMisses((n) => n + 1);
     after(r);
   };
-  return { busy, said, setSaid, send };
+  return { busy, said, setSaid, send, misses };
 }
 
 /** Back to the list, saying what happened there; a closed row leaves its placeholder. */
@@ -168,10 +172,19 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
   const [pick, setPick] = useState<Pick>(() => (props.initialPick !== undefined && q.options[props.initialPick] && stored.picked.length === 0 ? { ...stored, picked: [props.initialPick] } : stored));
   const [typing, setTyping] = useState(stored.text !== null);
   const [dismissing, setDismissing] = useState(false);
-  const armed = useArmed(VIEW_ARM_MS, row.rev);
-  const { busy, said, setSaid, send } = useSend(props);
+  const { busy, said, setSaid, send, misses } = useSend(props);
+  const armed = useArmed(VIEW_ARM_MS, `${row.rev}|${misses}`, GRACE_MS);
+  // The confirming tap is armed on its own, so a double tap can't dismiss the whole group.
+  const confirmArmed = useArmed(VIEW_ARM_MS, dismissing);
+  useEffect(() => {
+    if (!dismissing) return;
+    const t = setTimeout(() => setDismissing(false), 4_000);
+    return () => clearTimeout(t);
+  }, [dismissing]);
   const guard = (fn: () => void) => () => {
-    if (!busy && armed()) fn();
+    if (busy || !armed()) return;
+    if (fn !== dismiss) setDismissing(false);
+    fn();
   };
   const idx = row.questions.findIndex((x) => x.id === q.id);
   const nextTab: number | "submit" = idx + 1 < row.questions.length ? (row.questions[idx + 1]?.id ?? "submit") : "submit";
@@ -191,7 +204,7 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
   const asker = whereOf(row.asker, host).agent;
   const primary = () => {
     if (lone) {
-      if (isEmpty(pick)) return setSaid("Pick an option or type an answer.");
+      if (isEmpty(pick)) return setSaid(ANSWER.pickFirst);
       void send("inbox.answer", { question: q.id, detail: detailOf(pick) }, (r) => {
         if (r.ok || r.unknown_effect) toList(props, r, [summary, asker].filter((x) => x).join(" · "));
         else setSaid(resultWords(r));
@@ -209,22 +222,23 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
       else setSaid(resultWords(r));
     });
   };
-  const dismiss = () => {
+  function dismiss() {
     if (!dismissing) return setDismissing(true);
+    if (!confirmArmed()) return;
     setDismissing(false);
     void send("inbox.dismiss", {}, (r) => {
       if (r.ok || r.unknown_effect) toList(props, r, [asker].filter((x) => x).join(" · "));
       else setSaid(resultWords(r));
     });
-  };
+  }
   const chatHref = (() => {
     const a = row.asker.terminal ? host?.agents.find((x) => x.terminal_id === row.asker.terminal) : undefined;
     return a ? `#/chat/${encodeURIComponent(a.id)}` : undefined;
   })();
   const pickedOne = pick.picked.length === 1 ? pick.picked[0] : undefined;
   const dismissButton = (
-    <button type="button" className="nf qn-dismiss" onClick={guard(dismiss)} disabled={busy} aria-label={dismissing ? "Dismiss: tap again to close every question in this group" : "Dismiss"}>
-      {dismissing ? "Dismiss all?" : "Dismiss"}
+    <button type="button" className="nf qn-dismiss" onClick={guard(dismiss)} disabled={busy} aria-label={dismissing ? ANSWER.DISMISS_LABEL : ANSWER.DISMISS}>
+      {dismissing ? ANSWER.DISMISS_CONFIRM : ANSWER.DISMISS}
     </button>
   );
   return (
@@ -242,25 +256,25 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
           {q.options.map((o, i) => (
             <Option key={i} n={i + 1} on={pick.picked.includes(i)} label={o.label} desc={o.description} onClick={guard(() => choose(i))} />
           ))}
-          <Option n={q.options.length + 1} on={typing} label="Something else…" desc="Type your own answer." onClick={guard(other)} />
-          {!q.multi_select ? <Option n={q.options.length + 2} on={false} label="Chat about this" desc="Go to the agent" href={chatHref} /> : null}
+          <Option n={q.options.length + 1} on={typing} label={ANSWER.other} desc={ANSWER.otherSub} onClick={guard(other)} />
+          {!q.multi_select ? <Option n={q.options.length + 2} on={false} label={ANSWER.chat} desc={ANSWER.chatSub} href={chatHref} /> : null}
         </div>
         {typing ? (
           <>
             <label htmlFor="qn-text" className="qn-label">
-              Your answer
+              {ANSWER.yourAnswer}
             </label>
-            <textarea id="qn-text" className="qn-input qn-area" rows={3} placeholder="Type your answer…" value={pick.text ?? ""} onChange={(e) => setPick((p) => ({ ...p, text: e.target.value }))} />
+            <textarea id="qn-text" className="qn-input qn-area" rows={3} placeholder={ANSWER.yourAnswerPlaceholder} value={pick.text ?? ""} onChange={(e) => setPick((p) => ({ ...p, text: e.target.value }))} />
           </>
         ) : (
           <>
             <label htmlFor="qn-note" className="qn-label">
-              Note for the agent
+              {ANSWER.note}
             </label>
             <input
               id="qn-note"
               className="qn-input"
-              placeholder="Add a note for the agent…"
+              placeholder={ANSWER.notePlaceholder}
               disabled={pickedOne === undefined}
               value={pickedOne !== undefined ? (pick.notes[pickedOne] ?? "") : ""}
               onChange={(e) => pickedOne !== undefined && setPick((p) => ({ ...p, notes: { ...p.notes, [pickedOne]: e.target.value } }))}
@@ -275,10 +289,10 @@ function OneQuestion(props: QuestionProps & { q: Q; lone: boolean }) {
       </main>
       <div className="row nf qn-foot">
         <a href="#/inbox" className="row f1 qn-later">
-          Later
+          {ANSWER.later}
         </a>
         <button type="button" className="row qn-next" onClick={guard(primary)} disabled={busy}>
-          {busy ? "Sending…" : lone ? "Send ⏎" : "Next ⏎"}
+          {busy ? ANSWER.sending : lone ? ANSWER.send : ANSWER.next}
         </button>
       </div>
     </>
@@ -315,17 +329,14 @@ function Option({ n, on, label, desc, onClick, href }: { n: number; on: boolean;
 
 function Review(props: QuestionProps) {
   const { row, host, now } = props;
-  const armed = useArmed(VIEW_ARM_MS, row.rev);
-  const { busy, said, setSaid, send } = useSend(props);
+  const { busy, said, setSaid, send, misses } = useSend(props);
+  const armed = useArmed(VIEW_ARM_MS, `${row.rev}|${misses}`, GRACE_MS);
   const ready = row.questions.filter((q) => draftWords(q) !== null);
   const open = row.questions.filter((q) => draftWords(q) === null);
-  const line =
-    ready.length === 0
-      ? "Nothing to send yet"
-      : `Sends ${ready.length} of ${row.questions.length}${open.length > 0 ? ` · ${open.map(tabName).join(", ")} ${open.length === 1 ? "stays" : "stay"} open` : ""}`;
+  const line = ready.length === 0 ? ANSWER.nothingYet : ANSWER.sends(ready.length, row.questions.length, open.map(tabName));
   const submit = () => {
     if (busy || !armed()) return;
-    if (ready.length === 0) return setSaid("Answer at least one question first.");
+    if (ready.length === 0) return setSaid(ANSWER.answerOneFirst);
     const asker = whereOf(row.asker, host).agent;
     void send("inbox.answer", { questions: ready.map((q) => q.id) }, (r) => {
       if (r.ok || r.unknown_effect) toList(props, r, [ready.map((q) => draftWords(q)).join("; "), asker].filter((x) => x).join(" · "));
@@ -337,7 +348,7 @@ function Review(props: QuestionProps) {
       <Head row={row} host={host} now={now} q={null} />
       <Tabs row={row} current="submit" />
       <main className="col f1 qn-main qn-review">
-        <h2 className="qn-reviewhead">Review your answers</h2>
+        <h2 className="qn-reviewhead">{ANSWER.review}</h2>
         {row.questions.map((q) => {
           const w = draftWords(q);
           return (
@@ -347,7 +358,7 @@ function Review(props: QuestionProps) {
                   Q{q.id} · {tabName(q)}
                 </span>
                 <span className="qn-itema" data-none={w === null ? "true" : undefined}>
-                  {w ?? "No answer yet: it stays open"}
+                  {w ?? ANSWER.noAnswer}
                 </span>
               </span>
               <span className="nf qn-chev" aria-hidden="true">
@@ -366,14 +377,14 @@ function Review(props: QuestionProps) {
         <button type="button" className="row qn-send" onClick={submit} disabled={busy}>
           <span className="mono nf qn-sendn">1</span>
           <span className="col f1 qn-sendbody">
-            <span className="qn-sendlabel">{busy ? "Sending…" : "Submit answers ✓"}</span>
+            <span className="qn-sendlabel">{busy ? ANSWER.sending : ANSWER.submit}</span>
             <span className="qn-sendsub">{line}</span>
           </span>
         </button>
         <a href="#/inbox" className="row qn-cancel">
           <span className="mono nf qn-sendn">2</span>
-          <span className="qn-cancellabel">Cancel</span>
-          <span className="qn-cancelsub">Sends nothing</span>
+          <span className="qn-cancellabel">{ANSWER.cancel}</span>
+          <span className="qn-cancelsub">{ANSWER.cancelSub}</span>
         </a>
       </div>
     </>

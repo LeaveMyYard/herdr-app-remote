@@ -63,6 +63,8 @@ export interface BuildEnv {
    * row as published, minus `new` and `rev`.
    */
   rev: (key: string, row: Record<string, unknown>) => string;
+  /** The bridge's own verb's effect on a row, until a newer feed or `show` has it (S11). */
+  effect?: (entry: Obj) => Obj;
 }
 
 /** The row with its `rev`, validated; undefined if it fails the schema. */
@@ -244,7 +246,7 @@ export function buildTopic(input: TopicInput, env: BuildEnv): bridgeApi.InboxTop
   let at = entries.map((e) => e.kind).lastIndexOf("group") + 1;
   if (at === 0) at = entries.findIndex((e) => e.kind !== "alert" && e.kind !== "remote_alert");
   if (at < 0) at = entries.length;
-  const rows = [...entries.slice(0, at), ...extra, ...entries.slice(at)].map((e) => buildRow(e, env)).filter((r): r is bridgeApi.InboxRow => r !== undefined);
+  const rows = [...entries.slice(0, at), ...extra, ...entries.slice(at)].map((e) => buildRow(env.effect ? env.effect(e) : e, env)).filter((r): r is bridgeApi.InboxRow => r !== undefined);
   const hidden = env.modules.leftOut(feed);
   return {
     plugin: "ready",

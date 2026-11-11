@@ -146,6 +146,24 @@ describe("LiveApp inbox", () => {
     await recv(s, { type: "snap", topic: "inbox", epoch: "e1", seq: 1, data: typical });
     expect(screen.getByText(`?${typical.waiting}`)).toBeInTheDocument();
   });
+
+  it("sends inbox acts bound to the row's rev, and reads the inbox again after an unknown effect, never resending", async () => {
+    const typical = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../../fixtures/bridge-api/inbox/typical.json"), "utf8")) as { entries: { key: string; rev: string }[] };
+    await mount("#/inbox");
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "inbox", epoch: "e1", seq: 1, data: typical });
+    // The inbox's arm delay for a view that just appeared.
+    await act(() => new Promise((r) => setTimeout(r, 450)));
+    await userEvent.click(screen.getByRole("button", { name: "Seen" }));
+    const sent = s.ofType("act").at(-1)!;
+    expect(sent).toMatchObject({ kind: "inbox.ack", args: { key: "alert:456", rev: typical.entries.find((e) => e.key === "alert:456")!.rev } });
+    const before = subs(s).filter((t) => t === "inbox").length;
+    await recv(s, { type: "res", id: sent.id, ok: false, code: "unknown_effect", unknown_effect: true, message: "The result is unknown (x)." });
+    await flush();
+    expect(subs(s).filter((t) => t === "inbox").length).toBe(before + 1);
+    expect(s.ofType("act")).toHaveLength(1);
+    expect(screen.getByText("The result is unknown (x).")).toBeInTheDocument();
+  });
 });
 
 describe("hostNameFrom", () => {

@@ -4,24 +4,26 @@ import { useEffect, useRef, useState } from "react";
  * herdr-inbox's own arm delays (app/mods/herdr-inbox/model/data.js), applied to taps:
  * - a view ignores its action buttons this long after it appears (`VIEW_ARM`);
  * - a row that arrived takes no tap this long (`ROW_ARM`), so a list that moves under a finger can't take it.
- * The values are the plugin's; `test/arm.test.ts` compares them with a sibling checkout when there is one.
+ * - after a change the operator did not cause (the row moved, a refusal came back), taps are dropped `GRACE` long.
+ * The values are the plugin's; `test/question.test.tsx` compares them with a sibling checkout when there is one.
  */
 export const VIEW_ARM_MS = 400;
 export const ROW_ARM_MS = 1000;
+export const GRACE_MS = 500;
 
 const clock = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 /**
- * Armed `ms` after mount, and again `ms` after `key` changes (the content under the finger changed).
- * Returns a check made at tap time, so a tap that lands early is dropped even before a re-render.
+ * Armed `ms` after mount, and again `changeMs` (default `ms`) after `key` changes (the content under the finger
+ * changed). Returns a check made at tap time, so a tap that lands early is dropped even before a re-render.
  */
-export function useArmed(ms: number, key?: unknown): () => boolean {
+export function useArmed(ms: number, key?: unknown, changeMs = ms): () => boolean {
   const at = useRef(clock() + ms);
   const [, bump] = useState(0);
   const last = useRef(key);
   if (last.current !== key) {
     last.current = key;
-    at.current = clock() + ms;
+    at.current = clock() + changeMs;
   }
   useEffect(() => {
     const t = setTimeout(() => bump((n) => n + 1), Math.max(at.current - clock(), 0));

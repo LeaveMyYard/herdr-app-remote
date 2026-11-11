@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
-import { CUT, EMPTY, GONE_SUB, goneTitle, noFeed, outboxTitle, answerNotDelivered, PLUGIN_WHY, READ_ONLY, staleWords, UNAVAILABLE } from "../inbox/words";
+import { ANSWER, CUT, EMPTY, GONE_SUB, goneTitle, noFeed, outboxTitle, answerNotDelivered, PLUGIN_WHY, READ_ONLY, staleWords, UNAVAILABLE } from "../inbox/words";
 import { ClosedRows, closedReason, offlineAct, resultWords, type ActFn, type ActResult, type ClosedRow } from "../inbox/act";
-import { useArmed, useArrivals, VIEW_ARM_MS } from "../inbox/arm";
+import { GRACE_MS, useArmed, useArrivals, VIEW_ARM_MS } from "../inbox/arm";
 import { age, alertSub, failedSub, goneBatch, groupSub, groupTitle, headerSub, incompleteWords, isKind, whereOf, type Of, type Row } from "../inbox/model";
 
 export interface InboxProps {
@@ -153,6 +153,7 @@ export function Inbox({ topic, host, now, act = offlineAct, closed: given }: Inb
   );
   const [picked, setPicked] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [misses, setMisses] = useState(0);
   const armedView = useArmed(VIEW_ARM_MS);
   const arrived = useArrivals(topic.entries.map((r) => r.key));
   // A row that leaves while the list is shown stays as a placeholder (the overlay's rule), until the operator moves.
@@ -206,16 +207,19 @@ export function Inbox({ topic, host, now, act = offlineAct, closed: given }: Inb
   const inTopic = new Set(topic.entries.map((r) => r.key));
   const extraClosed = topic.state === "ok" ? closed.all().filter((c) => !inTopic.has(c.key)) : [];
   const foot = topic.state === "ok" ? footerRow(rows, selectedKey) : undefined;
+  // The footer's row can change under the finger (an alert leaves, the next one takes its place): re-arm then.
+  const armedFoot = useArmed(VIEW_ARM_MS, `${foot ? `${foot.key}|${foot.rev}` : ""}|${misses}`, GRACE_MS);
   const run = (kind: "inbox.ack" | "inbox.retry" | "inbox.stop_showing", row: Of<"alert"> | Of<"failed">) => {
-    if (busy || !armedView() || !arrived(row.key)) return;
+    if (busy || !armedView() || !armedFoot() || !arrived(row.key)) return;
     setBusy(true);
     void act(kind, { key: row.key, rev: row.rev })
       .catch((): ActResult => ({ ok: false, code: "failed", unknown_effect: true }))
       .then((r) => {
         setBusy(false);
+        if (!r.ok) setMisses((n) => n + 1);
         if (r.closed) {
           const p = placeholderOf(row, host);
-          if (p) closed.add({ ...p, reason: closedReasonWord(r.closed) });
+          if (p) closed.add({ ...p, reason: closedReason(r.closed) });
         }
         closed.say(r.ok && !r.message ? null : resultWords(r));
       });
@@ -283,19 +287,14 @@ export function Inbox({ topic, host, now, act = offlineAct, closed: given }: Inb
   );
 }
 
-
-function closedReasonWord(word: NonNullable<ActResult["closed"]>): string {
-  return closedReason(word);
-}
-
 /** The footer of the board: "Alert Title 456 needs no answer. [Seen]", or an undelivered answer's two verbs. */
 function Footer({ row, busy, run }: { row: Of<"alert"> | Of<"failed">; busy: boolean; run: (kind: "inbox.ack" | "inbox.retry" | "inbox.stop_showing", row: Of<"alert"> | Of<"failed">) => void }) {
   if (isKind(row, "alert")) {
     return (
       <div className="row ib-foot">
-        <span className="f1 ib-foottext">{row.title} needs no answer.</span>
+        <span className="f1 ib-foottext">{ANSWER.needsNoAnswer(row.title)}</span>
         <button type="button" className="nf ib-footbtn" disabled={busy} onClick={() => run("inbox.ack", row)}>
-          Seen
+          {ANSWER.seen}
         </button>
       </div>
     );
@@ -311,7 +310,7 @@ function Footer({ row, busy, run }: { row: Of<"alert"> | Of<"failed">; busy: boo
       ) : null}
       {failed.actions.includes("stop-showing") ? (
         <button type="button" className="nf ib-footbtn" disabled={busy} onClick={() => run("inbox.stop_showing", failed)}>
-          Stop showing
+          {ANSWER.stopShowing}
         </button>
       ) : null}
     </div>

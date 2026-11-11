@@ -20,6 +20,7 @@ import { Question } from "./screens/Question";
 import { DEMO_NOW, demoClosed, demoHost, inboxScenario } from "./inbox-fixtures";
 import { ClosedRows, offlineAct, type ActFn } from "./inbox/act";
 import { inboxBadge } from "./inbox/model";
+import { ANSWER } from "./inbox/words";
 import { demoUsageNow, usageScenario } from "./usage-fixtures";
 
 /** `#/usage/<scenario>`: the demo data the Usage tab shows until the bridge client lands. */
@@ -197,7 +198,8 @@ export function App({ connection, tabBadges, data, live, act }: AppProps) {
     const key = decode(route[2] ?? "");
     const row = inboxTopic?.entries.find((r) => r.key === key);
     const sub = route[3] ?? "";
-    const pick = new URLSearchParams(window.location.search).get("pick");
+    // Demo data only (the visual harness): never pre-picks an answer on a live question.
+    const pick = live ? null : new URLSearchParams(window.location.search).get("pick");
     return (
       <div className="hd ph qn">
         {row && row.kind === "group" ? (
@@ -212,9 +214,9 @@ export function App({ connection, tabBadges, data, live, act }: AppProps) {
           />
         ) : (
           <div className="col f1 ib-empty">
-            <p className="ib-empty-head">This group is no longer open.</p>
+            <p className="ib-empty-head">{ANSWER.gone}</p>
             <a href="#/inbox" className="qn-later row">
-              Back to the inbox
+              {ANSWER.backToInbox}
             </a>
           </div>
         )}
