@@ -59,7 +59,7 @@ The shipped `main` and `panorama` layouts are never edited. If you switch to a l
 scripts/app-install uninstall --app-home ~/.config/herdr-app [--checker /abs/path/to/herdr-app]
 ```
 
-Uninstall removes only files that are unchanged since the install, and refuses while herdr-app is showing a layout that uses the mod (switch to another layout first). Files you edited are kept and listed. It does not touch Tailscale: use "Stop serving" in the Remote panel first, or run `tailscale serve --https=8443 off` yourself. Pairing data (`devices.json`, `activity.jsonl`, push keys) stays in `data/herdr-app-remote` if it is not ours to remove; delete the folder by hand to forget your phones.
+Uninstall removes only files that are unchanged since the install, and refuses while herdr-app is showing a layout that uses the mod (switch to another layout first). Files you edited are kept and listed. It does not touch Tailscale: use "Stop serving" in the Remote panel first, or run `tailscale serve --https=8443 off` yourself. Pairing and push data (`devices.json`, `activity.jsonl`, `vapid.json`, `push.json`) is not part of the install and always stays; delete `data/herdr-app-remote` by hand to forget your phones.
 
 ## Start serving and pair a phone
 
@@ -69,6 +69,8 @@ Uninstall removes only files that are unchanged since the install, and refuses w
 4. On the iPhone, scan it with the Camera. It opens **in Safari**; the phone asks the desktop for approval.
 5. The panel and a desktop toast ask "Approve a new phone?". Approve it, and the phone opens the app.
 6. For notifications, add the app to the Home Screen from Safari's share sheet and turn notifications on from a tap inside the app.
+
+*Steps 4 to 6 describe the flow of PR #24 (pending merge); main's app has no `/pair` screen yet.*
 
 <!-- PENDING-MERGE S5b (PR #24): the /pair screen in Safari, the dismissible "Add to Home Screen" prompt, and the Home Screen app pairing itself on first launch with a one-time transfer code. Until it merges, main's PWA has no /pair screen. Update steps 4 to 6 (and confirm on a real iPhone, see RECIPE.md) when it lands. -->
 
@@ -82,8 +84,10 @@ An approved phone can read. Everything else is a per-phone switch you turn on fr
 | `inbox.answer` | on | answering, drafting, dismissing and acknowledging herdr-inbox questions |
 | `navigate` | off | focusing an agent, pane, tab or space on the desktop |
 | `terminal.input` | **off**; desktop only, can expire | typing text into a terminal (`hc send`) |
-| `terminal.keys` | **off**; desktop only, can expire | pressing special keys (Esc, Ctrl-C, arrows) from a configurable menu (`hc keys`) |
+| `terminal.keys` *(pending PR #22)* | **off**; desktop only, can expire | pressing special keys (Esc, Ctrl-C, arrows) from a configurable menu (`hc keys`) |
 | `push` | off | web push notifications |
+
+*`terminal.keys` and the Keys sheet are pending merge (PR #22); until then main has the first five capabilities.*
 
 <!-- PENDING-MERGE S16b (PR #22): `terminal.keys`, the Keys sheet on the phone, keys.json and the "Special keys" desktop switch are not on main yet. Remove this note and the row above if they change shape; until the PR merges, main has only the first five capabilities. -->
 

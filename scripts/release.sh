@@ -12,10 +12,7 @@
 set -eu
 
 version=${1:-}
-case "$version" in
-  [0-9]*.[0-9]*.[0-9]*) ;;
-  *) echo "usage: scripts/release.sh <version>   (for example 0.1.0)" >&2; exit 2 ;;
-esac
+printf '%s\n' "$version" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' || { echo "usage: scripts/release.sh <version>   (for example 0.1.0)" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 cd "$root"
 
@@ -24,7 +21,9 @@ for t in node pnpm git sha256sum; do
 done
 node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' || { echo "ABORT: node >= 22 is required" >&2; exit 2; }
 [ -z "$(git status --porcelain)" ] || { echo "ABORT: the working tree is not clean; commit or remove changes first" >&2; exit 1; }
-grep -q "^## \[\{0,1\}$version" CHANGELOG.md || { echo "ABORT: CHANGELOG.md has no section for $version" >&2; exit 1; }
+vre=$(printf '%s' "$version" | sed 's/\./\\./g')
+grep -Eq "^## \[?$vre\]?( |$)" CHANGELOG.md || { echo "ABORT: CHANGELOG.md has no section for $version" >&2; exit 1; }
+if grep -Eq "^## \[?$vre\]?.*unreleased" CHANGELOG.md; then echo "note: the CHANGELOG section for $version is still marked unreleased; date it before tagging" >&2; fi
 commit=$(git rev-parse HEAD)
 
 # Two workspace jobs at a time and low priority, like every other build here.
@@ -45,16 +44,16 @@ second=$(sha256sum "$bundle" | cut -d' ' -f1)
 
 echo "== install into a throwaway app home and read the recorded hash"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/herdr-remote-release.XXXXXX")
+trap 'rm -rf -- "$tmp"' EXIT
 home="$tmp/h"
 mkdir -p "$home/layouts"
 cp fixtures/app-home/main.json "$home/layouts/main.json"
-cp fixtures/app-home/settings.json "$home/settings.json"
 scripts/app-install install --app-home "$home" --node "$(command -v node)" >/dev/null
 recorded=$(node -e '
   const r = JSON.parse(require("fs").readFileSync(process.argv[1] + "/data/herdr-app-remote/install.json", "utf8"));
   process.stdout.write(r.files["data/herdr-app-remote/bin/bridge.mjs"].sha256);
 ' "$home")
-rm -rf -- "$tmp"
+# This proves the record key and digest agree with the built file; it cannot prove more than that.
 [ "$recorded" = "$first" ] || { echo "ABORT: install.json records $recorded but the bundle is $first" >&2; exit 1; }
 
 echo "== write the manifest"

@@ -16,7 +16,7 @@ First release candidate: phone access to herdr-app over Tailscale. Nothing here 
 - Terminal input (`hc send`), off by default, desktop-only switch with expiry, length-only audit.
 - Tailscale setup in the panel: the five-step check, Start and Stop serving through `tailscale serve --bg`, the Linux operator fix command.
 - Web Push for new inbox questions, alerts and blocked agents, with generic payloads.
-- Isolated rig (`rig/`) with scenarios for install, link, host, panel, setup, pairing, inbox answers and terminal input.
+- Isolated rig (`rig/`) with scenarios for isolation, install, link, host, panel, setup, pairing, inbox answers and terminal input.
 - Protocol docs (`docs/protocol/`), SECURITY.md, RECIPE.md and the release script `scripts/release.sh`.
 
 ### Changed
@@ -28,7 +28,7 @@ First release candidate: phone access to herdr-app over Tailscale. Nothing here 
 <!-- PENDING-MERGE S5b (PR #24) and S16b (PR #22): move these two entries up into Added when the PRs merge, or edit them to match what merged. -->
 
 - S5b: the `/pair` screen in Safari, a dismissible "Add to Home Screen" prompt, and the Home Screen app pairing itself on first launch with a one-time transfer code (PR #24).
-- S16b: a special-keys menu (Esc, Ctrl-C, arrows and more, from `keys.json`) under a separate `terminal.keys` capability, off by default (PR #22).
+- S16b: a special-keys menu (Esc, Ctrl-C, arrows and more, from `data/herdr-app-remote/keys.json`) under a separate `terminal.keys` capability, off by default (PR #22).
 
 ### Known issues
 
