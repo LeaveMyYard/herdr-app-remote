@@ -1,3 +1,4 @@
+import { useHostName } from "../bridge/host-name";
 import type { Connection } from "../model";
 
 interface Copy {
@@ -48,8 +49,9 @@ const COPY: Record<Exclude<Connection["status"], "online">, Copy> = {
   },
 };
 
-/** Connection and stale-data banner. Renders nothing while online. `host` is the computer's name ("desk-1"). */
-export function Banner({ connection, host, onRetry }: { connection: Connection; host: string; onRetry?: (() => void) | undefined }) {
+/** Connection and stale-data banner. Renders nothing while online. The computer's name ("desk-1") comes from `useHostName`. */
+export function Banner({ connection, onRetry }: { connection: Connection; onRetry?: (() => void) | undefined }) {
+  const host = useHostName();
   if (connection.status === "online") return null;
   const c = COPY[connection.status];
   return (

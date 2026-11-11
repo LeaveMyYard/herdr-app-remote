@@ -14,7 +14,8 @@ import { hostNameFrom, LiveApp } from "./LiveApp";
 import type { ConnectionStatus } from "./model";
 import { PairPage, PairScreen } from "./pair/PairScreen";
 import type { PairView as PairViewState } from "./pair/flow";
-import { boardData } from "./fixtures";
+import { HostNameProvider } from "./bridge/host-name";
+import { boardData, host as demoHost } from "./fixtures";
 import { registerServiceWorker } from "./sw-register";
 
 const STATUSES: readonly ConnectionStatus[] = ["online", "connecting", "offline", "stale", "unpaired", "refused", "paused", "unavailable"];
@@ -52,7 +53,12 @@ if (fixture === "pair") {
   const banner = params.get("banner");
   const connection = banner !== null && isStatus(banner) ? { status: banner } : undefined;
   const prompt = params.get("prompt") === "1" ? { open: true, onOpen: () => undefined, onClose: () => undefined } : undefined;
-  app = <App data={boardData(fixture)} connection={connection} onRetry={() => undefined} homePrompt={prompt} />;
+  // The fake computer's name, as the bridge would give it ("desk-1").
+  app = (
+    <HostNameProvider name={demoHost.name}>
+      <App data={boardData(fixture)} connection={connection} onRetry={() => undefined} homePrompt={prompt} />
+    </HostNameProvider>
+  );
 } else if (window.location.pathname === "/pair") {
   app = <PairScreen host={host} />;
 } else {
