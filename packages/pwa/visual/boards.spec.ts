@@ -5,7 +5,8 @@ import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 /** `fixture` selects the fake data behind the screen (main.tsx); `nav: false` is a full-screen sheet with no tab bar. */
 const BOARDS: readonly { ref: string; url: string; nav?: boolean }[] = [
   { ref: "PhoneAgentsBasic", url: "/#/agents" },
-  { ref: "PhoneMissing", url: "/#/usage" },
+  { ref: "PhoneUsage", url: "/#/usage" },
+  { ref: "PhoneMissing", url: "/#/usage/missing" },
   { ref: "PhoneAgents", url: "/?fixture=agents#/agents" },
   { ref: "PhoneSwarm", url: "/?fixture=swarm#/swarm/sp-1" },
   { ref: "PhonePeek", url: "/?fixture=peek#/swarm/peek/t2%00a9f8e7d6", nav: false },

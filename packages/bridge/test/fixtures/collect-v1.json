@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "generatedAtMs": 1793722431615,
+  "filter": "all",
+  "limitPercent": "remaining",
+  "emptyMessage": "(no agent panes open)",
+  "providers": [
+    {
+      "providerId": "claude-1",
+      "family": "claude",
+      "label": "claude-1",
+      "groupLabel": "Claude",
+      "accountLabel": "user-1@example.com",
+      "profileId": "claude-1",
+      "profileLabel": "claude-1",
+      "identity": "user-1@example.com",
+      "account": "user-1@example.com",
+      "home": "/home/user-1/.claude-1",
+      "configured": true,
+      "inUse": true,
+      "sameAccountAs": "",
+      "planType": "Max",
+      "source": "/home/user-1/.claude-1/herdr-usagebar/cache.json",
+      "fetchedAtMs": 1793722431615,
+      "note": null,
+      "status": "ok",
+      "staleMinutes": null,
+      "action": "",
+      "windows": [
+        { "slot": "primary", "tag": "7d", "windowMinutes": 10080, "usedPercentage": 85, "remainingPercent": 15, "displayPercent": 15, "barFill": 0.15, "band": "low", "resetsAt": 1793730000, "resetIn": "2d 12h", "runOut": { "minutesToEmpty": 1136, "emptyBeforeReset": true, "text": "empty in ~18h 56m" } }
+      ],
+      "paneActivity": { "windowMinutes": 300, "tag": "5h", "totalTokens": 1234, "panes": [{ "paneId": "p1", "label": "Agent 1", "tokens": 876, "sharePercent": 71 }] }
+    },
+    {
+      "providerId": "codex",
+      "family": "codex",
+      "label": "codex",
+      "identity": "/home/user-1/.codex",
+      "home": "/home/user-1/.codex",
+      "inUse": true,
+      "planType": "Pro",
+      "source": "codex rollout",
+      "fetchedAtMs": 1793672031615,
+      "status": "stale",
+      "staleMinutes": 840,
+      "windows": [
+        { "slot": "primary", "tag": "7d", "windowMinutes": 10080, "usedPercentage": 0, "remainingPercent": 100, "displayPercent": 100, "barFill": 1, "band": "high", "resetsAt": null, "resetIn": "", "runOut": null }
+      ],
+      "paneActivity": null
+    }
+  ],
+  "apiUsage": [{ "backendId": "deepseek", "label": "DeepSeek", "hasCost": true, "windows": [], "models": [], "paneActivity": null }],
+  "lowCachePanes": [{ "label": "Task A", "hitPercent": 35 }],
+  "watchDirs": ["/home/user-1/.claude-1/herdr-usagebar", "/home/user-1/.codex/sessions"]
+}

@@ -10,21 +10,35 @@ const LOG_SIZE = 64;
 /** Subscriptions one connection may hold; the real topic set is small (`chat:<t>` is the open-ended one). */
 const MAX_TOPICS_PER_CONN = 64;
 
+/** Who a connection acts as: set by the request guard at upgrade (S5). */
+export interface Principal {
+  readonly deviceId: string;
+}
+
 /** One connected client, transport-agnostic. */
 export interface HubClient {
+  /** The authenticated device, when the server's guard supplied one. */
+  readonly principal?: Principal;
   /** Sends one server message. Must not throw. */
   send(msg: ServerMessage): void;
   /** Closes the connection. */
   close(code: number, reason: string): void;
+  /** Drops the transport at once, without waiting for the peer's close handshake. */
+  terminate?(): void;
 }
 
 export interface ActResult {
   ok: boolean;
   code?: string;
   unknown_effect?: boolean;
+  /**
+   * The option label the bridge itself resolved for an answer (S11), for the audit log.
+   * Never sent to the client, and never taken from the client's args.
+   */
+  audit_label?: string;
 }
 
-/** Handles an `act`. S5 wraps this with the capability checks and the audit log. */
+/** Handles an `act`. `Security.act` wraps the real handler with capability checks and the audit log. */
 export type ActHandler = (client: HubClient, kind: string, args: Record<string, unknown>) => Promise<ActResult> | ActResult;
 
 interface TopicState {
@@ -34,6 +48,8 @@ interface TopicState {
   /** Recent patches, oldest first; `log[i].seq` are consecutive. */
   log: { seq: number; ops: PatchOp[] }[];
   subscribers: Set<ConnState>;
+  /** Called with the new subscriber count whenever it changes. */
+  watchers: Set<(count: number) => void>;
 }
 
 interface ConnState {
@@ -73,7 +89,7 @@ export class Hub {
   private topic(name: string): TopicState {
     let t = this.topics.get(name);
     if (!t) {
-      t = { seq: 0, data: undefined, stale: null, log: [], subscribers: new Set() };
+      t = { seq: 0, data: undefined, stale: null, log: [], subscribers: new Set(), watchers: new Set() };
       this.topics.set(name, t);
     }
     return t;
@@ -90,6 +106,23 @@ export class Hub {
 
   seqOf(name: string): number {
     return this.topics.get(name)?.seq ?? 0;
+  }
+
+  /**
+   * Calls `fn` with the topic's subscriber count at once if there are subscribers, and each time it changes (a `sub`, or a client going away),
+   * so a source can poll only while someone is looking. Returns a function that removes the watcher.
+   */
+  watchSubscribers(name: string, fn: (count: number) => void): () => void {
+    const t = this.topic(name);
+    t.watchers.add(fn);
+    if (t.subscribers.size > 0) fn(t.subscribers.size);
+    return () => {
+      t.watchers.delete(fn);
+    };
+  }
+
+  private notifyWatchers(t: TopicState): void {
+    for (const w of [...t.watchers]) w(t.subscribers.size);
   }
 
   /** Publishes the new full value of a topic. Clears staleness (with a fresh snap) and patches otherwise. */
@@ -144,9 +177,9 @@ export class Hub {
     for (const name of c.topics) {
       const t = this.topics.get(name);
       if (!t) continue;
-      t.subscribers.delete(c);
+      if (t.subscribers.delete(c)) this.notifyWatchers(t);
       // Don't let subscriptions to arbitrary topic names (`chat:<anything>`) leak state.
-      if (t.subscribers.size === 0 && t.data === undefined && t.stale === null) this.topics.delete(name);
+      if (t.subscribers.size === 0 && t.data === undefined && t.stale === null && t.watchers.size === 0) this.topics.delete(name);
     }
     c.topics.clear();
   }
@@ -235,6 +268,7 @@ export class Hub {
    */
   private subscribe(c: ConnState, name: string): void {
     const t = this.topic(name);
+    const added = !t.subscribers.has(c);
     t.subscribers.add(c);
     c.topics.add(name);
     const resumeSeq = c.resume && c.resume.epoch === this.epoch ? c.resume.seqs[name] : undefined;
@@ -245,6 +279,7 @@ export class Hub {
       else for (const p of replay) c.client.send({ type: "patch", topic: name, seq: p.seq, ops: p.ops });
     }
     if (t.stale !== null) c.client.send({ type: "stale", topic: name, reason: t.stale });
+    if (added) this.notifyWatchers(t);
   }
 
   /** Patches after `seq`, [] if already current, or null if the log can't cover it. */

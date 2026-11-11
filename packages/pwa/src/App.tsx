@@ -8,11 +8,17 @@ import { age } from "./panorama/format";
 import { nodeUid, selectAgents, selectBasic, selectSpaces, swarmScope, type SwarmUi } from "./panorama/select";
 import { AgentsBasic } from "./screens/AgentsBasic";
 import { AgentsRich } from "./screens/AgentsRich";
-import { Missing, UsageGlyph } from "./screens/Missing";
 import { Peek, type TranscriptPage } from "./screens/Peek";
 import { Soon } from "./screens/Soon";
 import { Swarm } from "./screens/Swarm";
 import { SwarmUnavailable } from "./screens/SwarmUnavailable";
+import { UsageTab } from "./screens/UsageTab";
+import { demoUsageNow, usageScenario } from "./usage-fixtures";
+
+/** `#/usage/<scenario>`: the demo data the Usage tab shows until the bridge client lands. */
+function scenarioFromHash(hash: string): string | undefined {
+  return hash.replace(/^#\/?/, "").split("/")[1];
+}
 
 function tabFromHash(hash: string): TabId {
   const id = hash.replace(/^#\/?/, "").split("/")[0];
@@ -99,6 +105,15 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
     !connection && base.status === "online" && rich && topic.stale && (tab === "agents" || tab === "swarm")
       ? { status: "stale", age: topic.collected_at !== null ? age(topic.collected_at, now) : undefined, reason: topic.error ?? "feed" }
       : base;
+  const [scenarioName, setScenarioName] = useState(() => scenarioFromHash(window.location.hash));
+  useEffect(() => {
+    const onHash = () => setScenarioName(scenarioFromHash(window.location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const scenario = usageScenario(scenarioName);
+  const [usageFilter, setUsageFilter] = useState<Record<string, bridgeApi.UsageTopic["filter"]>>({});
+  const usageTopic = scenario.topic && { ...scenario.topic, filter: usageFilter[scenario.name] ?? scenario.topic.filter };
   const select = (t: TabId) => {
     window.location.hash = `/${t}`;
     setTab(t);
@@ -149,14 +164,15 @@ export function App({ connection, tabBadges = badges, data }: AppProps) {
     screen = <SwarmUnavailable host={host} error={topic?.error ?? null} plugins={plugins} />;
   } else if (tab === "usage") {
     screen = (
-      <Missing
+      <UsageTab
         host={host}
-        title="Agent Usage"
-        plugin="agent-usage"
-        blurb="This tab shows how much of each Claude and Codex account is left."
-        command={usageInstallCommand}
-        icon={<UsageGlyph />}
-        plugins={plugins}
+        state={scenario.state}
+        topic={usageTopic}
+        plugins={plugins.map((p) => (p.name === "agent-usage" ? { ...p, state: scenario.state } : p))}
+        installCommand={usageInstallCommand}
+        now={scenario.fixedNow ? demoUsageNow : undefined}
+        onFilter={(f) => setUsageFilter((m) => ({ ...m, [scenario.name]: f }))}
+        onRefresh={() => undefined}
       />
     );
   } else {
