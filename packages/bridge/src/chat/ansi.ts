@@ -151,9 +151,16 @@ export function parseAnsi(input: string, opts: ParseOptions = {}): ParsedAnsi {
         while (j < n && input.charCodeAt(j) >= 0x20 && input.charCodeAt(j) <= 0x2f) j++;
         const final = input[j];
         if (final === undefined) break;
-        if (final === "m" && /^[0-9;:]*$/.test(params)) {
+        const fc = final.charCodeAt(0);
+        if (fc < 0x40 || fc > 0x7e) {
+          // Not a final byte: the sequence is broken, so keep this character.
+          i = j - 1;
+          continue;
+        }
+        // Colon sub-parameters (`4:3`, `38:2::R:G:B`) are other features or other layouts; only `;` lists are read.
+        if (final === "m" && /^[0-9;]*$/.test(params)) {
           flush();
-          sgr(st, params === "" ? [] : params.split(/[;:]/).map((x) => (x === "" ? 0 : Number(x))));
+          sgr(st, params === "" ? [] : params.split(";").map((x) => (x === "" ? 0 : Number(x))));
         }
         i = j;
       } else if (next === "]" || next === "P" || next === "X" || next === "^" || next === "_") {

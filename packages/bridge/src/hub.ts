@@ -77,6 +77,8 @@ export class Hub {
   readonly epoch: string;
   readonly bridgeVersion: string;
   private readonly topics = new Map<string, TopicState>();
+  /** Last `seq` of discarded topics, so a topic that comes back never reuses a number a client may have applied. */
+  private readonly retired = new Map<string, number>();
   private readonly conns = new Set<ConnState>();
   private readonly prefixWatchers = new Set<{ prefix: string; fn: (topic: string, count: number) => void }>();
   private readonly onAct: ActHandler | undefined;
@@ -90,7 +92,7 @@ export class Hub {
   private topic(name: string): TopicState {
     let t = this.topics.get(name);
     if (!t) {
-      t = { seq: 0, data: undefined, stale: null, log: [], subscribers: new Set(), watchers: new Set() };
+      t = { seq: this.retired.get(name) ?? 0, data: undefined, stale: null, log: [], subscribers: new Set(), watchers: new Set() };
       this.topics.set(name, t);
     }
     return t;
@@ -138,7 +140,12 @@ export class Hub {
   /** Forgets a topic nobody subscribes to, so an open-ended family (`chat:<t>`) does not keep its last value forever. */
   discard(name: string): void {
     const t = this.topics.get(name);
-    if (t && t.subscribers.size === 0 && t.watchers.size === 0) this.topics.delete(name);
+    if (t && t.subscribers.size === 0 && t.watchers.size === 0) {
+      this.topics.delete(name);
+      this.retired.delete(name);
+      this.retired.set(name, t.seq);
+      if (this.retired.size > 1024) this.retired.delete(this.retired.keys().next().value as string);
+    }
   }
 
   private notifyWatchers(name: string, t: TopicState): void {

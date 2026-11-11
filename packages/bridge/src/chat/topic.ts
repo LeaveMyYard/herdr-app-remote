@@ -9,7 +9,7 @@ export const CHAT_PREFIX = "chat:";
 /** The poll interval: `hc events` is unverified against a live core (PLAN section 8), so a chat is read once a second. */
 export const CHAT_INTERVAL_MS = 1_000;
 export const CHAT_READ_TIMEOUT_MS = 5_000;
-/** How many trailing lines each `hc read` asks for, and the most the topic keeps. */
+/** How many trailing lines each `hc read` asks for, and the most the topic keeps. A `\r` in the output is dropped, not an overwrite: `hc read` returns rendered text. */
 export const CHAT_LINES = 200;
 /** Chats read at once. A further one goes stale (`too_many_chats`) until another closes. */
 export const MAX_ACTIVE_CHATS = 6;
@@ -67,6 +67,8 @@ interface Poll {
 export class ChatTopicDriver {
   private readonly o: ChatTopicOptions;
   private readonly polls = new Map<string, Poll>();
+  /** Subscribed chats that found every slot taken; the first is read when a slot frees. */
+  private readonly waiting = new Set<string>();
   private unwatch: (() => void) | undefined;
 
   constructor(opts: ChatTopicOptions) {
@@ -91,13 +93,18 @@ export class ChatTopicDriver {
     if (this.polls.has(topic)) return;
     const id = bridgeApi.chatTerminal(topic);
     if (id === null) return void this.o.hub.setStale(topic, "bad_terminal");
-    if (this.polls.size >= MAX_ACTIVE_CHATS) return void this.o.hub.setStale(topic, "too_many_chats");
+    if (this.polls.size >= MAX_ACTIVE_CHATS) {
+      this.waiting.add(topic);
+      return void this.o.hub.setStale(topic, "too_many_chats");
+    }
+    this.waiting.delete(topic);
     const poll: Poll = { timer: undefined, reads: 0, failures: 0, stopped: false };
     this.polls.set(topic, poll);
     void this.tick(topic, id, poll);
   }
 
   private close(topic: string): void {
+    this.waiting.delete(topic);
     const poll = this.polls.get(topic);
     if (poll) {
       poll.stopped = true;
@@ -105,6 +112,8 @@ export class ChatTopicDriver {
       this.polls.delete(topic);
     }
     this.o.hub.discard(topic);
+    const next = this.waiting.values().next().value;
+    if (poll && next !== undefined) this.open(next);
   }
 
   private async tick(topic: string, id: string, poll: Poll): Promise<void> {
@@ -125,7 +134,7 @@ export class ChatTopicDriver {
       const r = await this.o.run(bin, ["read", id, "--lines", String(this.o.lines ?? CHAT_LINES)], { timeoutMs: this.o.readTimeoutMs ?? CHAT_READ_TIMEOUT_MS });
       if (poll.stopped) return;
       if (r.code === 0 && !r.error) {
-        const { lines, truncated } = parseAnsi(r.stdout);
+        const { lines, truncated } = parseAnsi(r.stdout, { maxLines: this.o.lines ?? CHAT_LINES });
         const value: bridgeApi.ChatTopic = { terminal: id, lines, ...(truncated ? { truncated: true } : {}) };
         hub.publish(topic, value as unknown as Json);
         ok = true;

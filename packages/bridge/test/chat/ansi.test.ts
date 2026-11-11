@@ -40,6 +40,14 @@ describe("parseAnsi", () => {
     expect(text("x\x1b]0;title\x07y\x1b]8;;http://a.example\x1b\\z\x1bPdcs\x1b\\w")).toEqual(["xyzw"]);
   });
 
+  it("does not read colon sub-parameters as a ; list", () => {
+    expect(parseAnsi("\x1b[4:3mx\x1b[38:2::1:2:3my").lines).toEqual([[{ t: "xy" }]]);
+  });
+
+  it("keeps the character after a broken CSI", () => {
+    expect(text("a\x1b[\nb")).toEqual(["a", "b"]);
+  });
+
   it("copes with a truncated escape at the end", () => {
     expect(text("ok\x1b[3")).toEqual(["ok"]);
     expect(text("ok\x1b")).toEqual(["ok"]);

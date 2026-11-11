@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import claudeIcon from "../assets/claude.svg";
 import codexIcon from "../assets/codex.svg";
@@ -38,8 +38,6 @@ const STALE_TEXT: Record<string, string> = {
   terminal_not_found: "This terminal has closed.",
   too_many_chats: "Too many chats are open. Close one to read this.",
   bad_terminal: "This isn't a terminal herdr knows.",
-  reconnecting: "Reconnecting. Showing the last text.",
-  layout_without_remote: "Switch to a layout with Remote",
 };
 
 const FIT_KEY = "chat.fit";
@@ -89,13 +87,15 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents" }: C
     const el = view.current;
     if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
   };
+  const shown = useRef(topic?.terminal);
   useLayoutEffect(() => {
+    if (shown.current !== topic?.terminal) {
+      shown.current = topic?.terminal;
+      pinned.current = true;
+    }
     const el = view.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [topic]);
-  useEffect(() => {
-    pinned.current = true;
-  }, [topic?.terminal]);
 
   const notice = stale === undefined ? undefined : (STALE_TEXT[stale] ?? "Showing older text.");
   return (

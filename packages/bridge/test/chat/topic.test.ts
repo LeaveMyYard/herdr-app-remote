@@ -201,6 +201,22 @@ describe("ChatTopicDriver", () => {
     expect(hub.isStale(topics[MAX_ACTIVE_CHATS]!)).toBe("too_many_chats");
   });
 
+  it("reads a chat that was over the cap once a slot frees", async () => {
+    vi.useFakeTimers();
+    const { calls, runner } = replay({ ls: ok('["t0","t1","t2","t3","t4","t5","t9"]') });
+    const hub = setup(runner);
+    const subs = [];
+    for (let i = 0; i < MAX_ACTIVE_CHATS; i++) subs.push(await sub(hub, `chat:t${i}`));
+    await sub(hub, "chat:t9");
+    expect(hub.isStale("chat:t9")).toBe("too_many_chats");
+    expect(calls.some((c) => c.args[1] === "t9")).toBe(false);
+    hub.disconnect(subs[0]!.conn);
+    await settle();
+    expect(driver?.activeTopics).toContain("chat:t9");
+    expect(hub.isStale("chat:t9")).toBeNull();
+    expect(hub.get("chat:t9")).toBeDefined();
+  });
+
   it("never sends input: only ls and read reach hc", async () => {
     vi.useFakeTimers();
     const { calls, runner } = replay();
