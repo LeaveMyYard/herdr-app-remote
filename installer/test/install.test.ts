@@ -227,6 +227,19 @@ describe("install", () => {
     expect(shipped(w)).toEqual(before);
   });
 
+  it("skips panorama-remote, and still installs, when panorama's layout can't take the blocks", async () => {
+    const w = world();
+    const changed = readFileSync(join(FIX, "panorama.json"), "utf8").replace('"id": "panel-body"', '"id": "panel-stack"');
+    writeFileSync(join(w.home, "layouts/panorama.json"), changed);
+    const rec = json(w, "data/panorama/install.json");
+    rec.files["layouts/panorama.json"].sha256 = sha(changed);
+    writeFileSync(join(w.home, "data/panorama/install.json"), JSON.stringify(rec), { mode: 0o600 });
+    expect(await cli(w, "install")).toBe(0);
+    expect(existsSync(join(w.home, P.LAYOUT_REMOTE))).toBe(true);
+    expect(existsSync(join(w.home, P.LAYOUT_PANORAMA_REMOTE))).toBe(false);
+    expect(out.join("\n")).toMatch(/No panorama-remote layout: layouts\/panorama.json has no "panel-body" stack/);
+  });
+
   it("makes only herdr-remote without panorama", async () => {
     const w = world({ panorama: false });
     expect(await cli(w, "install")).toBe(0);
@@ -264,6 +277,79 @@ describe("install", () => {
     expect(await cli(w, "install", "--node", old)).toBe(1);
     expect(err).toMatch(/needs node >= 22/);
     expect(tree(w.home)).toEqual(before);
+  });
+});
+
+describe("crash safety", () => {
+  const root = typeof process.getuid === "function" && process.getuid() === 0;
+
+  /** An installed home whose record and mod folder look like an older version's. */
+  async function olderInstalled(w: World) {
+    expect(await cli(w, "install")).toBe(0);
+    const rec = json(w, P.RECEIPT_PATH);
+    writeFileSync(join(w.home, "mods/herdr-app-remote/old.js"), "// gone in this version\n");
+    rec.files["mods/herdr-app-remote/old.js"] = { sha256: sha("// gone in this version\n"), mode: 0o644 };
+    writeFileSync(join(w.home, "mods/herdr-app-remote/main.js"), "// older main\n");
+    rec.files["mods/herdr-app-remote/main.js"].sha256 = sha("// older main\n");
+    writeFileSync(join(w.home, P.RECEIPT_PATH), JSON.stringify(rec), { mode: 0o600 });
+  }
+
+  /** Runs an upgrade that fails after the journal is saved, before the mod folder is replaced. */
+  async function crashedUpgrade(w: World) {
+    chmodSync(join(w.home, "mods"), 0o555); // the rename out of mods/ fails: EACCES
+    try {
+      expect(await cli(w, "install")).toBe(1);
+    } finally {
+      chmodSync(join(w.home, "mods"), 0o755);
+    }
+    const rec = json(w, P.RECEIPT_PATH);
+    expect(rec.previous["mods/herdr-app-remote/main.js"]).toContain(sha("// older main\n")); // the journal
+    expect(readFileSync(join(w.home, "mods/herdr-app-remote/main.js"), "utf8")).toBe("// older main\n");
+  }
+
+  it.skipIf(root)("an upgrade that dies after the journal is finished by a re-run", async () => {
+    const w = world();
+    await olderInstalled(w);
+    await crashedUpgrade(w);
+    expect(await cli(w, "install")).toBe(0);
+    const clean = world();
+    expect(await cli(clean, "install")).toBe(0);
+    const strip = (t: Record<string, string>) => Object.fromEntries(Object.entries(t).filter(([p]) => p !== P.RECEIPT_PATH));
+    expect(strip(tree(w.home))).toEqual(strip(tree(clean.home)));
+    expect(json(w, P.RECEIPT_PATH).previous).toEqual({});
+  });
+
+  it.skipIf(root)("an upgrade that dies after the journal can be uninstalled cleanly", async () => {
+    const w = world();
+    const before = tree(w.home);
+    await olderInstalled(w);
+    await crashedUpgrade(w);
+    w.says(JSON.stringify({ layout: "main" }));
+    expect(await cli(w, "uninstall")).toBe(0);
+    expect(out.filter((l) => l.startsWith("Kept"))).toEqual([]);
+    expect(tree(w.home)).toEqual(before);
+  });
+
+  it.skipIf(root)("a first install that fails part-way leaves the home as it was", async () => {
+    const w = world();
+    const before = tree(w.home);
+    chmodSync(join(w.home, "layouts"), 0o555); // the derived layouts are written after the mod folder
+    try {
+      expect(await cli(w, "install")).toBe(1);
+    } finally {
+      chmodSync(join(w.home, "layouts"), 0o755);
+    }
+    expect(tree(w.home)).toEqual(before);
+  });
+
+  it("takes over a lock whose installer is gone, never a live one", async () => {
+    const w = world();
+    writeFileSync(join(w.home, ".herdr-app-remote-install.lock"), `${2 ** 22 + 12345}\n`);
+    expect(await cli(w, "install")).toBe(0);
+    expect(existsSync(join(w.home, ".herdr-app-remote-install.lock"))).toBe(false);
+    writeFileSync(join(w.home, ".herdr-app-remote-install.lock"), `${process.pid}\n`);
+    expect(await cli(w, "install")).toBe(1);
+    expect(err).toMatch(/another install is running/);
   });
 });
 
@@ -457,8 +543,19 @@ describe("--key", () => {
       expect(tree(w.home)).toEqual(before);
     }
     const w = world();
-    expect(await cli(w, "install", "--key", "r")).toBe(1);
-    expect(err).toMatch(/is not a key like ctrl-alt-r/);
+    for (const bad of ["r", "ctrl-ctrl-r"]) {
+      expect(await cli(w, "install", "--key", bad)).toBe(1);
+      expect(err).toMatch(/is not a key like ctrl-alt-r/);
+    }
+  });
+
+  it("sees the same chord spelled another way", async () => {
+    const w = world();
+    const keys = json(w, "keys.json");
+    keys.global["Alt-Ctrl-R"] = "tab.new";
+    writeFileSync(join(w.home, "keys.json"), JSON.stringify(keys));
+    expect(await cli(w, "install", "--key", "ctrl-alt-r")).toBe(1);
+    expect(err).toMatch(/already bound in keys.json \(global: "tab.new"\)/);
   });
 
   it("leaves a binding the person changed since", async () => {

@@ -148,10 +148,15 @@ export class Home {
     }
   }
 
-  /** Creates an empty file only if nothing is there; false when something was. */
-  create(rel: string, mode: number): boolean {
+  /** Creates a file with `data` only if nothing is there; false when something was. */
+  create(rel: string, mode: number, data = ""): boolean {
     try {
-      closeSync(openSync(this.abs(rel), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode));
+      const fd = openSync(this.abs(rel), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+      try {
+        writeSync(fd, data);
+      } finally {
+        closeSync(fd);
+      }
       return true;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;

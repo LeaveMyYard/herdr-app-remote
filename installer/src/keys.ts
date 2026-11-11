@@ -26,8 +26,17 @@ function parse(text: string): Sections {
 
 const render = (s: Sections): string => JSON.stringify(s, null, 2) + "\n";
 
+/** A key as a chord: modifiers in a fixed order, then the key, so `alt-ctrl-R` equals `ctrl-alt-r`. */
+export function chord(key: string): string {
+  const ps = key.toLowerCase().split("-");
+  // "ctrl--" spells the minus key: an empty last part after the split.
+  const last = ps.length > 1 && ps.at(-1) === "" ? "-" : ps.at(-1)!;
+  const mods = (last === "-" ? ps.slice(0, -2) : ps.slice(0, -1)).filter(Boolean);
+  return [...new Set(mods)].sort().concat(last).join("-");
+}
+
 const boundIn = (section: Record<string, unknown> | undefined, key: string): string | undefined =>
-  section ? Object.keys(section).find((k) => k.toLowerCase() === key.toLowerCase()) : undefined;
+  section ? Object.keys(section).find((k) => chord(k) === chord(key)) : undefined;
 
 /**
  * keys.json with our binding added, after removing `owned` (the one the record names, if any).

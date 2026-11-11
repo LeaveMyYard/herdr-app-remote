@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { addBinding, derive, panoramaLayoutSha, removeBinding, sectionFor, usesMod } from "../src/index.js";
+import { addBinding, chord, derive, panoramaLayoutSha, removeBinding, sectionFor, usesMod } from "../src/index.js";
 
 const FIX = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "fixtures", "app-home");
 const main = () => JSON.parse(readFileSync(join(FIX, "main.json"), "utf8"));
@@ -53,6 +53,13 @@ describe("panorama's record", () => {
 
 describe("key bindings", () => {
   const binding = { key: "ctrl-alt-r", action: "herdr-app-remote.open" as const, sections: [sectionFor("layouts/herdr-remote.json")] };
+
+  it("normalises chords: modifier order and case don't matter, the minus key survives", () => {
+    expect(chord("Alt-Ctrl-R")).toBe(chord("ctrl-alt-r"));
+    expect(chord("ctrl-alt-r")).not.toBe(chord("ctrl-r"));
+    expect(chord("ctrl--")).toBe("ctrl--");
+    expect(chord("shift-ctrl--")).toBe(chord("ctrl-shift--"));
+  });
 
   it("names sections after our layouts", () => {
     expect(sectionFor("layouts/herdr-remote.json")).toBe("layout:herdr-remote");

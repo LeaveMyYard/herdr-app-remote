@@ -227,6 +227,20 @@ describe('mounted copies', () => {
     expect(launches()).toEqual([]);
   });
 
+  it('a link that was reached and then dropped launches nothing', async () => {
+    world.files[FAKE_RECEIPT] = fakeReceipt(BYTES_SHA);
+    world.bytes[`${HOME}/${BUNDLE_PATH}`] = BYTES; // a launch would verify, so only the gate stops it
+    const b = new FakeBridge();
+    bridges.push(b);
+    await b.listen();
+    b.advertise(undefined, { sha: BYTES_SHA });
+    mount('link');
+    (await b.conn(0)).socket.destroy();
+    (await b.conn(1)).socket.destroy();
+    await b.conn(2);
+    expect(launches()).toEqual([]);
+  });
+
   it('the open command shows the panel column and selects the Remote child', async () => {
     mount('link');
     sendCommand('open');

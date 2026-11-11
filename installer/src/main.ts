@@ -6,13 +6,13 @@
 // settings, and never touches `tailscale serve`.
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { install as P } from "@herdr-remote/protocol";
 import { guardRemoval } from "./guard.js";
 import { digest, Home } from "./home.js";
-import { addBinding, removeBinding, sectionFor } from "./keys.js";
+import { addBinding, chord, removeBinding, sectionFor } from "./keys.js";
 import { derive, panoramaLayoutSha } from "./layouts.js";
 
 export const PANORAMA_RECEIPT = "data/panorama/install.json";
@@ -48,7 +48,9 @@ function which(name: string): string | null {
   for (const dir of (process.env.PATH ?? "").split(":")) {
     if (!dir.startsWith("/")) continue;
     try {
-      if (statSync(join(dir, name)).isFile()) return join(dir, name);
+      const p = join(dir, name);
+      accessSync(p, constants.X_OK);
+      if (statSync(p).isFile()) return p;
     } catch {
       /* next */
     }
@@ -230,7 +232,7 @@ export async function install(o: Options): Promise<void> {
   const log = o.log ?? ((l: string) => process.stdout.write(l + "\n"));
   const home = new Home(o.appHome);
   const node = checkNode(o.node ?? process.execPath);
-  if (o.key != null && !P.KEY_PATTERN.test(o.key)) throw new Error(`--key ${o.key} is not a key like ctrl-alt-r; nothing changed`);
+  if (o.key != null && (!P.KEY_PATTERN.test(o.key) || chord(o.key).split("-").length !== o.key.split("-").length)) throw new Error(`--key ${o.key} is not a key like ctrl-alt-r; nothing changed`);
   const payload = loadPayload(o.source ?? DEFAULT_SOURCE);
   const old = loadReceipt(home);
   const notes: string[] = [];
@@ -242,7 +244,7 @@ export async function install(o: Options): Promise<void> {
   const carried: string[] = [];
   const pano = panoramaSource(home);
   if (pano.ok) {
-    payload.set(P.LAYOUT_PANORAMA_REMOTE, { data: Buffer.from(derive(pano.data, PANORAMA_LAYOUT)), mode: 0o644 });
+    payload.set(P.LAYOUT_PANORAMA_REMOTE, { data: Buffer.from(pano.derived), mode: 0o644 });
   } else if (old?.files[P.LAYOUT_PANORAMA_REMOTE] && isOurs(home, P.LAYOUT_PANORAMA_REMOTE, known(old))) {
     carried.push(P.LAYOUT_PANORAMA_REMOTE);
     notes.push(`Kept panorama-remote from the last install: ${pano.reason}.`);
@@ -303,7 +305,7 @@ export async function install(o: Options): Promise<void> {
   log("Switch to the herdr-remote layout to start it: herdr-app do layout.switch '{\"name\":\"herdr-remote\"}'.");
 }
 
-function panoramaSource(home: Home): { ok: true; data: Buffer } | { ok: false; reason: string } {
+function panoramaSource(home: Home): { ok: true; derived: string } | { ok: false; reason: string } {
   let receipt: { data: Buffer } | null;
   try {
     receipt = home.read(PANORAMA_RECEIPT, LIMIT);
@@ -321,7 +323,12 @@ function panoramaSource(home: Home): { ok: true; data: Buffer } | { ok: false; r
   }
   if (!layout) return { ok: false, reason: `${PANORAMA_LAYOUT} is missing` };
   if (digest(layout.data) !== want) return { ok: false, reason: `${PANORAMA_LAYOUT} differs from panorama's install record (edited?)` };
-  return { ok: true, data: layout.data };
+  // panorama-remote is optional: a panorama release we can't extend skips it, it never blocks ours.
+  try {
+    return { ok: true, derived: derive(layout.data, PANORAMA_LAYOUT) };
+  } catch (e) {
+    return { ok: false, reason: `${(e as Error).message}, so it can't take the Remote blocks` };
+  }
 }
 
 // ---- uninstall ----
@@ -377,8 +384,27 @@ export function parseArgs(argv: string[]): ({ action: "install" | "uninstall" } 
   return o.appHome ? o : null;
 }
 
-/** One install or uninstall at a time per home: a lock file next to the home's own files. */
-const LOCK = ".herdr-app-remote-install.lock";
+/**
+ * One install or uninstall at a time per home: a lock file holding the installer's pid. Node has no
+ * flock(), so a lock left by a killed run is taken over once its pid is gone.
+ */
+export const LOCK = ".herdr-app-remote-install.lock";
+
+function takeLock(home: Home): boolean {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (home.create(LOCK, 0o600, `${process.pid}\n`)) return true;
+    const pid = Number(home.read(LOCK, 64)?.data.toString().trim());
+    if (!Number.isInteger(pid) || pid < 1) return false; // no pid to judge by: never take it
+    try {
+      process.kill(pid, 0);
+      return false; // that run is alive
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ESRCH") return false;
+    }
+    home.remove(LOCK);
+  }
+  return false;
+}
 
 export async function run(argv: string[], extra: Partial<Options> = {}): Promise<number> {
   const args = parseArgs(argv);
@@ -394,7 +420,7 @@ export async function run(argv: string[], extra: Partial<Options> = {}): Promise
     process.stderr.write(`herdr-app-remote ${o.action}: ${(e as Error).message}\n`);
     return 1;
   }
-  if (!home.create(LOCK, 0o600)) {
+  if (!takeLock(home)) {
     process.stderr.write(`herdr-app-remote ${o.action}: another install is running in this app home (or one was killed: if none runs, remove ${join(home.path, LOCK)})\n`);
     return 1;
   }
