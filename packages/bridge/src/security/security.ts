@@ -4,7 +4,7 @@ import { bridgeApi } from "@herdr-remote/protocol";
 import type { ActHandler, ActResult, HubClient } from "../hub.js";
 import type { GuardVerdict } from "../server.js";
 import { AuditLog, cleanLabel, describeAct, type AuditEntry, type AuditOptions } from "./audit.js";
-import { ACTION_CAPS, CAPABILITIES, defaultCaps, hasCap, type Capability } from "./caps.js";
+import { ACTION_CAPS, CAPABILITIES, defaultCaps, EXPIRING, hasCap, isExpiring, untilKey, type Capability, type ExpiringCapability } from "./caps.js";
 import { DeviceStore, newDeviceId, type Device } from "./devices.js";
 import { headerValues, readCookie, singleHeader } from "./headers.js";
 import { qrSvg } from "./qr.js";
@@ -32,10 +32,11 @@ export interface SecurityOptions {
   onChange?: () => void;
   audit?: Omit<AuditOptions, "dir">;
   /**
-   * A device (or, with null, every device) just lost the right to type: revoked, paused, `terminal.input` or `view`
-   * turned off or expired, or the serve identity changed. The app kills that device's `hc send` in flight.
+   * A device (or, with null, every device) just lost the right to type or press keys: revoked, paused, `view`
+   * turned off, or the serve identity changed (`cap` undefined: both), or just `terminal.input` or `terminal.keys`
+   * turned off or expired (`cap` names it). The app kills that device's `hc send` / `hc keys` in flight.
    */
-  onCut?: (deviceId: string | null) => void;
+  onCut?: (deviceId: string | null, cap?: ExpiringCapability) => void;
   /** An Activity line could not be written (`ok: false`), or could again after failing (`ok: true`). */
   onAuditHealth?: (h: AuditHealth) => void;
 }
@@ -55,9 +56,11 @@ export interface DeviceView {
   name: string;
   login: string;
   state: "pending" | "approved";
-  /** Effective capabilities right now (an expired `terminal.input` reads false). */
+  /** Effective capabilities right now (an expired `terminal.input` or `terminal.keys` reads false). */
   caps: Record<Capability, boolean>;
   terminal_input_until: number | null;
+  /** When `terminal.keys` turns off by itself (S16b), or null. */
+  terminal_keys_until: number | null;
   created_at: number;
   approved_at: number | null;
   last_seen: number | null;
@@ -92,9 +95,13 @@ export const CONNECT_LIMIT: Limit = { max: 20, windowMs: 60_000 };
 /** `act`s one device may send per 10 s, of any kind and outcome (refused ones count: they are audited too). */
 export const ACT_LIMIT: Limit = { max: 30, windowMs: 10_000 };
 /** Tighter limits for single kinds, on top of {@link ACT_LIMIT}. A person sends a few messages, not a stream. */
-export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([["terminal.send", { max: 6, windowMs: 10_000 }]]);
+export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([
+  ["terminal.send", { max: 6, windowMs: 10_000 }],
+  // A menu press is one tap, but arrows get tapped a few times in a row.
+  ["terminal.keys", { max: 10, windowMs: 10_000 }],
+]);
 /** Kinds that must not run while the Activity log can't be written: their whole safeguard is the audit line. */
-const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send"]);
+const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send", "terminal.keys"]);
 /** Kinds the security layer answers itself, never handed to the inner handler. */
 const LOCAL_KINDS: ReadonlySet<string> = new Set(["pair.transfer"]);
 /** setTimeout's ceiling (about 24.8 days); a later expiry is re-armed when this fires. */
@@ -163,7 +170,7 @@ export class Security {
   private readonly actLimit: RateLimiter;
   private readonly kindLimits = new Map<string, RateLimiter>();
   private readonly onAuditHealth: ((h: AuditHealth) => void) | undefined;
-  private readonly onCut: ((deviceId: string | null) => void) | undefined;
+  private readonly onCut: ((deviceId: string | null, cap?: ExpiringCapability) => void) | undefined;
   private health: AuditHealth = { ok: true, since: null, failures: 0 };
   private expiryTimer: NodeJS.Timeout | null = null;
 
@@ -181,7 +188,7 @@ export class Security {
     for (const [kind, limit] of KIND_LIMITS) this.kindLimits.set(kind, new RateLimiter(limit, this.now));
     this.serve = null;
     this.setServe(opts.serve ?? null);
-    // A `terminal.input` that ran out while the bridge was down is turned off now.
+    // A `terminal.input` or `terminal.keys` that ran out while the bridge was down is turned off now.
     this.scheduleExpiry();
   }
 
@@ -553,6 +560,7 @@ export class Security {
       state: d.state,
       caps,
       terminal_input_until: d.caps["terminal.input.until"],
+      terminal_keys_until: d.caps["terminal.keys.until"],
       created_at: d.created_at,
       approved_at: d.approved_at,
       last_seen: d.last_seen,
@@ -602,36 +610,37 @@ export class Security {
   }
 
   /**
-   * Turns a capability on or off. `until` (epoch ms) applies to `terminal.input` only.
+   * Turns a capability on or off. `until` (epoch ms) applies to `terminal.input` and `terminal.keys` only.
    * Turning `view` off drops the device's live connections.
    */
   setCap(id: string, cap: Capability, on: boolean, until: number | null = null): void {
     const d = this.store.get(id);
     if (!d || d.state !== "approved") throw new Error("no such approved device");
-    if (until !== null && cap !== "terminal.input") throw new Error("only terminal.input can expire");
+    if (until !== null && !isExpiring(cap)) throw new Error("only terminal.input and terminal.keys can expire");
     if (until !== null && (!Number.isSafeInteger(until) || until <= this.now())) throw new Error("until must be a future epoch ms");
     // Drop first, as in revoke.
     if (cap === "view" && !on) {
       this.drop(id, CLOSE_NO_VIEW, "view off");
       this.transfers.delete(id);
     }
-    if (!on && (cap === "view" || cap === "terminal.input")) this.cut(id);
+    if (!on && cap === "view") this.cut(id);
+    else if (!on && isExpiring(cap)) this.cut(id, cap);
     this.store.update(id, (x) => {
       x.caps[cap] = on;
-      if (cap === "terminal.input") x.caps["terminal.input.until"] = on ? until : null;
+      if (isExpiring(cap)) x.caps[untilKey(cap)] = on ? until : null;
     });
     this.scheduleExpiry();
-    const limit = cap === "terminal.input" && on && until !== null ? ` until ${new Date(until).toISOString().slice(0, 16)}Z` : "";
+    const limit = isExpiring(cap) && on && until !== null ? ` until ${new Date(until).toISOString().slice(0, 16)}Z` : "";
     this.audit({ event: "device.cap", device: d.name, text: `${d.name}: ${cap} ${on ? "on" : "off"}${limit}` });
     this.changed();
   }
 
-  // ---- terminal.input expiry ----
+  // ---- terminal.input / terminal.keys expiry ----
 
   /**
-   * Turns off every `terminal.input` whose time is up, and arms a timer for the next one. `hasCap` already reads an
-   * expired grant as off at every check; this makes it off in `devices.json`, says so in Activity and tells the
-   * panel, so nothing shows a grant that no longer works.
+   * Turns off every `terminal.input` and `terminal.keys` whose time is up, and arms a timer for the next one.
+   * `hasCap` already reads an expired grant as off at every check; this makes it off in `devices.json`, says so in
+   * Activity and tells the panel, so nothing shows a grant that no longer works.
    */
   private scheduleExpiry(): void {
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
@@ -640,21 +649,24 @@ export class Security {
     let next = Infinity;
     let expired = false;
     for (const d of this.store.all()) {
-      const until = d.caps["terminal.input.until"];
-      if (!d.caps["terminal.input"] || until === null) continue;
-      if (until > now) {
-        next = Math.min(next, until);
-        continue;
-      }
-      expired = true;
-      this.cut(d.id);
-      this.bestEffort(() => {
-        this.store.update(d.id, (x) => {
-          x.caps["terminal.input"] = false;
-          x.caps["terminal.input.until"] = null;
+      for (const cap of EXPIRING) {
+        const key = untilKey(cap);
+        const until = d.caps[key];
+        if (!d.caps[cap] || until === null) continue;
+        if (until > now) {
+          next = Math.min(next, until);
+          continue;
+        }
+        expired = true;
+        this.cut(d.id, cap);
+        this.bestEffort(() => {
+          this.store.update(d.id, (x) => {
+            x.caps[cap] = false;
+            x.caps[key] = null;
+          });
         });
-      });
-      this.bestEffort(() => this.audit({ event: "device.cap", device: d.name, text: `${d.name}: terminal.input expired` }));
+        this.bestEffort(() => this.audit({ event: "device.cap", device: d.name, text: `${d.name}: ${cap} expired` }));
+      }
     }
     if (expired) this.changed();
     if (next !== Infinity) {
@@ -833,10 +845,14 @@ export class Security {
     }
   }
 
-  /** Kills sends in flight for a device that may no longer type. Runs before anything is written, like the drops. */
-  private cut(deviceId: string | null): void {
+  /**
+   * Kills sends and key presses in flight for a device that may no longer type (`cap` undefined), or only those of
+   * the one capability it just lost. Runs before anything is written, like the drops.
+   */
+  private cut(deviceId: string | null, cap?: ExpiringCapability): void {
     try {
-      this.onCut?.(deviceId);
+      if (cap === undefined) this.onCut?.(deviceId);
+      else this.onCut?.(deviceId, cap);
     } catch {
       // A listener's failure must not undo a security change.
     }

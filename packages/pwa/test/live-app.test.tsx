@@ -73,7 +73,7 @@ const subs = (s: FakeSocket) => s.ofType("sub").flatMap((m) => m.topics as strin
 beforeEach(() => {
   sockets = [];
   me = 200;
-  terminalInput = { enabled: false, until: null };
+  terminalInput = { enabled: false, until: null, keys: { enabled: false, until: null } };
   meReads = 0;
   metaName = null;
   forgetConfirmations();
@@ -184,7 +184,7 @@ describe("LiveApp terminal input", () => {
   });
 
   it("sends terminal.send to the chat's terminal, and reads me again when the bridge says forbidden", async () => {
-    terminalInput = { enabled: true, until: null };
+    terminalInput = { enabled: true, until: null, keys: { enabled: false, until: null } };
     const s = await openChat();
     await userEvent.type(screen.getByRole("textbox", { name: "Message to the agent" }), "run the tests");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -193,7 +193,7 @@ describe("LiveApp terminal input", () => {
     const sent = s.ofType("act").at(-1)!;
     expect(sent).toMatchObject({ kind: "terminal.send", args: { terminal: "term-2", text: "run the tests" } });
     const reads = meReads;
-    terminalInput = { enabled: false, until: null };
+    terminalInput = { enabled: false, until: null, keys: { enabled: false, until: null } };
     await recv(s, { type: "res", id: sent.id, ok: false, code: "forbidden" });
     await flush();
     expect(meReads).toBe(reads + 1);
@@ -201,8 +201,52 @@ describe("LiveApp terminal input", () => {
     expect(screen.getByText(/Read-only here/)).toBeInTheDocument();
   });
 
+  it("subscribes the key menu while a chat is open, and a key press acts terminal.keys with the entry id and rev (S16b)", async () => {
+    terminalInput = { enabled: true, until: null, keys: { enabled: true, until: null } };
+    const s = await openChat();
+    expect(subs(s)).toContain("keys");
+    const menu = { rev: "0123456789abcdef", keys: [{ id: "esc", label: "Esc", keys: ["esc"] }, { id: "clear-line", label: "Clear line", keys: ["ctrl+u"] }] };
+    await recv(s, { type: "snap", topic: "keys", epoch: "e1", seq: 1, data: menu });
+    await userEvent.click(screen.getByRole("button", { name: "Keys: open the special keys menu" }));
+    await userEvent.click(screen.getByText("Clear line").closest("button")!);
+    const sent = s.ofType("act").at(-1)!;
+    expect(sent).toMatchObject({ kind: "terminal.keys", args: { terminal: "term-2", key: "clear-line", rev: "0123456789abcdef" } });
+    await recv(s, { type: "res", id: sent.id, ok: true });
+    await flush();
+    expect(screen.getByText("Pressed Clear line.")).toBeInTheDocument();
+    // A changed menu: the press is refused, said, and the menu is read again.
+    await userEvent.click(screen.getByText("Esc").closest("button")!);
+    const again = s.ofType("act").at(-1)!;
+    const before = subs(s).filter((t) => t === "keys").length;
+    await recv(s, { type: "res", id: again.id, ok: false, code: "keys_changed" });
+    await flush();
+    expect(screen.getByText("The key list changed on desk-1. Look again.")).toBeInTheDocument();
+    expect(subs(s).filter((t) => t === "keys").length).toBe(before + 1);
+  });
+
+  it("a forbidden key press reads /api/v1/me again; an unknown effect re-reads the chat (S16b)", async () => {
+    terminalInput = { enabled: true, until: null, keys: { enabled: true, until: null } };
+    const s = await openChat();
+    await recv(s, { type: "snap", topic: "keys", epoch: "e1", seq: 1, data: { rev: "0123456789abcdef", keys: [{ id: "esc", label: "Esc", keys: ["esc"] }] } });
+    await userEvent.click(screen.getByRole("button", { name: "Keys: open the special keys menu" }));
+    await userEvent.click(screen.getByText("Esc").closest("button")!);
+    const first = s.ofType("act").at(-1)!;
+    const reads = meReads;
+    await recv(s, { type: "res", id: first.id, ok: false, code: "forbidden" });
+    await flush();
+    expect(meReads).toBe(reads + 1);
+    await userEvent.click(screen.getByText("Esc").closest("button")!);
+    const second = s.ofType("act").at(-1)!;
+    expect(second.id).not.toBe(first.id);
+    const chats = subs(s).filter((t) => t === "chat:term-2").length;
+    await recv(s, { type: "res", id: second.id, ok: false, code: "timeout", unknown_effect: true });
+    await flush();
+    expect(subs(s).filter((t) => t === "chat:term-2").length).toBe(chats + 1);
+    expect(s.ofType("act").filter((m) => m.kind === "terminal.keys")).toHaveLength(2);
+  });
+
   it("an unknown effect re-reads the chat and is not sent again", async () => {
-    terminalInput = { enabled: true, until: null };
+    terminalInput = { enabled: true, until: null, keys: { enabled: false, until: null } };
     const s = await openChat();
     await userEvent.click(screen.getByRole("button", { name: "Enter" }));
     const dlg = screen.getByRole("alertdialog");

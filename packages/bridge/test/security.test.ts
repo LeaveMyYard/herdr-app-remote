@@ -471,7 +471,7 @@ describe("pairing", () => {
     sec.approve(body.device.id);
     const me2 = JSON.parse((await http("GET", "/api/v1/me", { ...OK_GET, Cookie: cookie })).body) as { device: { state: string; caps: Record<string, boolean> } };
     expect(me2.device.state).toBe("approved");
-    expect(me2.device.caps).toEqual({ view: true, "inbox.answer": true, navigate: false, "terminal.input": false, push: false });
+    expect(me2.device.caps).toEqual({ view: true, "inbox.answer": true, navigate: false, "terminal.input": false, "terminal.keys": false, push: false });
     (await greeted(cookie)).ws.close();
 
     // Only the token's hash is stored, in a 0600 file.
@@ -938,5 +938,147 @@ describe("cutting a device's sends in flight (S16)", () => {
       sec.close();
       vi.useRealTimers();
     }
+  });
+});
+
+// ---- S16b: terminal.keys, a capability of its own ----
+
+describe("terminal.keys (S16b)", () => {
+  const client = (id: string) => ({ principal: { deviceId: id }, send: () => undefined, close: () => undefined });
+  const PRESS = { terminal: "t3", key: "ctrl-c", rev: "0123456789abcdef" };
+  /** Stands in for the keys actor: it resolves the entry and names it for Activity. */
+  const keysInner: ActHandler = (_c, kind, args) => {
+    acts.push({ kind, args });
+    return kind === "terminal.keys" ? { ok: true, audit_label: "ctrl-c (1 key)" } : { ok: true };
+  };
+  async function startWith(extra: Partial<ConstructorParameters<typeof Security>[0]> = {}) {
+    await start();
+    const { id } = await pairedDevice();
+    sec.close();
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: keysInner, ...extra });
+    return id;
+  }
+
+  it("is off after approval, refused while off, and the refusal names no key", async () => {
+    const id = await startWith();
+    expect(sec.devices()[0]).toMatchObject({ caps: { "terminal.keys": false }, terminal_keys_until: null });
+    expect(await sec.act(client(id), "terminal.keys", { ...PRESS, key: "secretword" })).toEqual({ ok: false, code: "forbidden" });
+    expect(acts).toHaveLength(0);
+    expect(activity()).toContain("Phone 1 pressed a key in t3: refused");
+    expect(JSON.stringify(sec.activity(1000))).not.toContain("secretword");
+  });
+
+  it("is separate from terminal.input both ways", async () => {
+    const id = await startWith();
+    sec.setCap(id, "terminal.input", true);
+    expect(await sec.act(client(id), "terminal.keys", PRESS)).toMatchObject({ ok: false, code: "forbidden" });
+    sec.setCap(id, "terminal.input", false);
+    sec.setCap(id, "terminal.keys", true);
+    expect(await sec.act(client(id), "terminal.send", { terminal: "t3", text: "x" })).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await sec.act(client(id), "terminal.keys", PRESS)).toEqual({ ok: true, audit_label: "ctrl-c (1 key)" });
+    expect(acts.map((a) => a.kind)).toEqual(["terminal.keys"]);
+    // Activity names the entry the bridge resolved (id and count), never what the client sent beyond the terminal.
+    expect(activity()).toContain("Phone 1 pressed ctrl-c (1 key) in t3");
+    expect(activity()).toContain("Phone 1: terminal.keys on");
+  });
+
+  it("expires by itself, and only it: Activity, devices.json, the panel, and a cut of keys alone", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const onCut = vi.fn();
+      const id = await startWith({ onCut });
+      sec.setCap(id, "terminal.input", true, clock + 120_000);
+      sec.setCap(id, "terminal.keys", true, clock + 60_000);
+      expect(sec.devices()[0]).toMatchObject({ terminal_keys_until: clock + 60_000, terminal_input_until: clock + 120_000 });
+      expect(activity().some((t) => /^Phone 1: terminal\.keys on until \d{4}-\d\d-\d\dT\d\d:\d\dZ$/.test(t))).toBe(true);
+      clock += 60_000;
+      vi.advanceTimersByTime(60_000);
+      expect(activity()).toContain("Phone 1: terminal.keys expired");
+      expect(activity()).not.toContain("Phone 1: terminal.input expired");
+      expect(onCut).toHaveBeenCalledWith(id, "terminal.keys");
+      expect(onCut).not.toHaveBeenCalledWith(id, "terminal.input");
+      const stored = JSON.parse(await readFile(join(dir, "data", "devices.json"), "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+      expect(stored.devices[0]?.caps).toMatchObject({ "terminal.keys": false, "terminal.keys.until": null, "terminal.input": true });
+      expect(await sec.act(client(id), "terminal.keys", PRESS)).toMatchObject({ code: "forbidden" });
+      clock += 60_000;
+      vi.advanceTimersByTime(60_000);
+      expect(activity()).toContain("Phone 1: terminal.input expired");
+      expect(onCut).toHaveBeenCalledWith(id, "terminal.input");
+    } finally {
+      sec.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("a keys grant that ran out while the bridge was down is off at start", async () => {
+    const id = await startWith();
+    sec.setCap(id, "terminal.keys", true, clock + 1000);
+    sec.close();
+    clock += 5000;
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: keysInner });
+    expect(activity()).toContain("Phone 1: terminal.keys expired");
+    expect(sec.devices()[0]?.caps["terminal.keys"]).toBe(false);
+  });
+
+  it("losing one capability cuts only its own work; losing the device or view cuts both", async () => {
+    const onCut = vi.fn();
+    const id = await startWith({ onCut });
+    sec.setCap(id, "terminal.input", true);
+    sec.setCap(id, "terminal.keys", true);
+    sec.setCap(id, "terminal.keys", false);
+    expect(onCut).toHaveBeenLastCalledWith(id, "terminal.keys");
+    sec.setCap(id, "terminal.input", false);
+    expect(onCut).toHaveBeenLastCalledWith(id, "terminal.input");
+    sec.setCap(id, "view", false);
+    expect(onCut.mock.lastCall).toEqual([id]);
+    sec.revoke(id);
+    expect(onCut.mock.lastCall).toEqual([id]);
+  });
+
+  it("only terminal.input and terminal.keys can expire", async () => {
+    const id = await startWith();
+    for (const cap of ["view", "navigate", "push", "inbox.answer"] as const) expect(() => sec.setCap(id, cap, true, clock + 1000)).toThrow();
+    expect(() => sec.setCap(id, "terminal.keys", true, clock - 1)).toThrow();
+  });
+
+  it("has its own rate limit, counted only once the capability allows it", async () => {
+    const id = await startWith();
+    const c = client(id);
+    const lim = KIND_LIMITS.get("terminal.keys")!;
+    expect(lim).toEqual({ max: 10, windowMs: 10_000 });
+    for (let i = 0; i < 3; i++) expect(await sec.act(c, "terminal.keys", PRESS)).toMatchObject({ code: "forbidden" });
+    sec.setCap(id, "terminal.keys", true);
+    for (let i = 0; i < lim.max; i++) expect(await sec.act(c, "terminal.keys", PRESS)).toMatchObject({ ok: true });
+    expect(await sec.act(c, "terminal.keys", PRESS)).toMatchObject({ ok: false, code: "rate_limited" });
+    expect(await sec.act(c, "terminal.keys", PRESS)).toMatchObject({ ok: false, code: "rate_limited" });
+    expect(acts).toHaveLength(lim.max);
+    expect(activity().filter((t) => t === "Phone 1 terminal.keys: too fast, refused")).toHaveLength(1);
+    clock += lim.windowMs;
+    expect(await sec.act(c, "terminal.keys", PRESS)).toMatchObject({ ok: true });
+  });
+
+  it("is refused while Activity can't be written", async () => {
+    const id = await startWith();
+    sec.setCap(id, "terminal.keys", true);
+    const f = join(dir, "data", "activity.jsonl");
+    await rm(f, { force: true });
+    await import("node:fs/promises").then((fs) => fs.mkdir(f));
+    await sec.act(client(id), "inbox.ack", {});
+    expect(sec.auditHealth.ok).toBe(false);
+    expect(await sec.act(client(id), "terminal.keys", PRESS)).toEqual({ ok: false, code: "audit_unavailable" });
+    expect(acts.filter((a) => a.kind === "terminal.keys")).toHaveLength(0);
+  });
+
+  it("a devices.json from before S16b loads, with terminal.keys off", async () => {
+    const id = await startWith();
+    sec.close();
+    const p = join(dir, "data", "devices.json");
+    const stored = JSON.parse(await readFile(p, "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+    delete stored.devices[0]!.caps["terminal.keys"];
+    delete stored.devices[0]!.caps["terminal.keys.until"];
+    await import("node:fs/promises").then((fs) => fs.writeFile(p, JSON.stringify(stored)));
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: keysInner });
+    expect(sec.devices()[0]).toMatchObject({ id, caps: { "terminal.keys": false }, terminal_keys_until: null });
+    expect(await sec.act(client(id), "terminal.keys", PRESS)).toMatchObject({ code: "forbidden" });
   });
 });

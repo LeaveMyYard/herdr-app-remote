@@ -1,0 +1,7 @@
+{
+  "rev": "0123456789abcdef",
+  "keys": [
+    { "id": "esc", "label": "Esc", "keys": ["esc"] },
+    { "id": "accept", "label": "Accept ✓", "keys": ["ctrl+alt+shift+f12", "alt+1", "ctrl+space"] }
+  ]
+}

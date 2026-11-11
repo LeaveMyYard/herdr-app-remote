@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { bridgeApi } from "@herdr-remote/protocol";
 import { useHostName } from "../bridge/host-name";
+import { KeysSheet, type KeysInput } from "./KeysSheet";
 
 /** The bridge's answer to `terminal.send`. */
 export interface SendOutcome {
@@ -16,6 +17,8 @@ export interface ChatInput {
   until: number | null;
   /** Sends `terminal.send {terminal, text}`; `hc send` pastes the text and presses Enter. */
   send: (text: string) => Promise<SendOutcome>;
+  /** The special-keys menu (S16b), opened from the key bar. */
+  keys?: KeysInput | undefined;
 }
 
 /**
@@ -69,13 +72,72 @@ export function textProblem(text: string): string | null {
   return null;
 }
 
+/** `21:40`, in the phone's local time. */
+export function clockOf(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Under this much time left, the typing line turns amber and counts down. */
+export const SOON_MS = 10 * 60_000;
+
+/** The typing-time line (design/PhoneKeys), or null with no limit. Whole minutes, rounded up. */
+export function typingLine(until: number | null, now: number): { text: string; soon: boolean } | null {
+  if (until === null) return null;
+  const left = until - now;
+  if (left >= SOON_MS) return { text: `Typing is on until ${clockOf(until)}`, soon: false };
+  return { text: `Typing turns off in ${Math.max(1, Math.ceil(left / 60_000))} min, at ${clockOf(until)}`, soon: true };
+}
+
+/** Re-renders at each minute boundary while `on`, so the countdown moves. */
+function useMinuteTick(on: boolean, now: () => number): void {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    let t: ReturnType<typeof setTimeout>;
+    const arm = () => {
+      t = setTimeout(() => {
+        bump((n) => n + 1);
+        arm();
+      }, 60_000 - (now() % 60_000) + 5);
+    };
+    arm();
+    return () => clearTimeout(t);
+  }, [on, now]);
+}
+
+const KEYBOARD = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M7 14h10" />
+  </svg>
+);
+
+const CLOCK = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ flex: "none" }}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+);
+
 /**
- * The key bar and composer of PhoneChat. `hc send` can only paste text and press Enter (verified in the rig), so the
- * key bar has just the keys that means: ⏎ (Enter alone) and `/`, which only types a slash into the composer. Esc,
- * Tab, ⇧Tab, Ctrl-C and the arrows on the board need special keys and are left out.
+ * The key bar and composer of PhoneChat (design/PhoneKeys). `hc send` can only paste text and press Enter, so the
+ * bar's own keys are ⏎ (Enter alone) and `/`, which only types a slash into the composer. Esc, Tab, Shift-Tab,
+ * Ctrl-C and the arrows are in the Keys sheet (S16b), opened from the bar so none is tapped by accident.
  */
-export function ChatComposer({ terminal, agentName, input }: { terminal: string; agentName: string; input: ChatInput }) {
+export function ChatComposer({ terminal, agentName, input, now = Date.now, demoSheet }: {
+  terminal: string;
+  agentName: string;
+  input: ChatInput;
+  now?: () => number;
+  /** Demo data only: see Chat's `demoSheet`. */
+  demoSheet?: { open: boolean; pressed: string | null };
+}) {
   const host = useHostName();
+  const [sheet, setSheet] = useState(demoSheet?.open ?? false);
+  const closeSheet = useCallback(() => setSheet(false), []);
+  useMinuteTick(input.until !== null, now);
+  const line = typingLine(input.until, now());
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   /** The text waiting on the first-send confirmation (`""` is Enter alone). */
@@ -83,11 +145,15 @@ export function ChatComposer({ terminal, agentName, input }: { terminal: string;
   const [note, setNote] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
 
-  // A new terminal starts clean.
+  // A new terminal starts clean (not on mount: a demo may open the sheet at first).
+  const shownTerminal = useRef(terminal);
   useEffect(() => {
+    if (shownTerminal.current === terminal) return;
+    shownTerminal.current = terminal;
     setText("");
     setAsking(null);
     setNote(null);
+    setSheet(false);
   }, [terminal]);
 
   const go = async (value: string) => {
@@ -167,12 +233,31 @@ export function ChatComposer({ terminal, agentName, input }: { terminal: string;
           {note}
         </p>
       ) : null}
+      {line ? (
+        <div role="status" className={`row nf chat-expiry${line.soon ? " chat-expiry-soon" : ""}`}>
+          {CLOCK}
+          <span>{line.text}</span>
+        </div>
+      ) : null}
       <div role="toolbar" aria-label="Keys" className="mono row nf chat-keys">
         <button type="button" className="nf chat-key" aria-label="Enter" disabled={busy} onClick={() => submit("")}>
           ⏎
         </button>
         <button type="button" className="nf chat-key" aria-label="Type a slash" disabled={busy} onClick={insertSlash}>
           /
+        </button>
+        <span className="f1" />
+        <button
+          type="button"
+          className={`row nf chat-key chat-keys-open${input.keys?.enabled ? "" : " chat-keys-off"}`}
+          aria-label="Keys: open the special keys menu"
+          aria-haspopup="dialog"
+          aria-expanded={sheet}
+          onClick={() => setSheet(true)}
+        >
+          {KEYBOARD}
+          <span className="chat-keys-word">Keys</span>
+          <span className="chat-keys-caret">▴</span>
         </button>
       </div>
       <form className="row nf chat-form" onSubmit={onSubmit}>
@@ -201,6 +286,7 @@ export function ChatComposer({ terminal, agentName, input }: { terminal: string;
           </svg>
         </button>
       </form>
+      {sheet ? <KeysSheet agentName={agentName} host={host} keys={input.keys} onClose={closeSheet} fallbackWords={(r) => sendWords(r, host)} {...(demoSheet?.pressed ? { demoPressed: demoSheet.pressed } : {})} /> : null}
     </>
   );
 }

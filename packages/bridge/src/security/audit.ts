@@ -80,6 +80,10 @@ export function describeAct(kind: string, args: Record<string, unknown>, label?:
   switch (kind) {
     case "terminal.send":
       return `sent ${charCount(args.text)} chars to ${target("terminal", "a terminal")}`;
+    case "terminal.keys":
+      // The entry is named only once the bridge found it in its own key menu (`label`: "<id>, <n> keys"); the id
+      // the client sent is never logged, so a refused press reads "pressed a key".
+      return `pressed ${label !== undefined && cleanLabel(label) ? cleanLabel(label) : "a key"} in ${target("terminal", "a terminal")}`;
     case "inbox.answer": {
       const what = labelOrLength(label, args);
       return `answered ${inboxTarget(args, "a question")}${what}`;

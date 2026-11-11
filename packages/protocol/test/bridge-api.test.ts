@@ -109,3 +109,83 @@ describe("TerminalSendArgs (S16)", () => {
     expect(ok({ terminal: "t3" })).toBe(false);
   });
 });
+
+describe("terminal keys (S16b)", () => {
+  const { isKeyToken, allKeyTokens } = bridgeApi;
+
+  it("accepts named keys with any modifiers, in canonical order", () => {
+    for (const t of ["esc", "enter", "tab", "shift+tab", "ctrl+left", "alt+enter", "ctrl+alt+shift+f12", "pagedown", "f1", "ctrl+backspace"]) {
+      expect(isKeyToken(t), t).toBe(true);
+    }
+  });
+
+  it("accepts letters only with ctrl or alt, digits only with alt, space only with ctrl or alt", () => {
+    for (const t of ["ctrl+c", "alt+b", "ctrl+alt+x", "ctrl+alt+i", "alt+m", "alt+1", "ctrl+space", "alt+space", "ctrl+alt+space"]) expect(isKeyToken(t), t).toBe(true);
+  });
+
+  it("refuses every token that would type plain text", () => {
+    // A bare or shifted letter, digit or space is text; the rig showed ctrl+0 types "0" and super+x / cmd+x type "x".
+    for (const t of ["a", "x", "shift+a", "ctrl+shift+a", "1", "ctrl+0", "ctrl+alt+1", "shift+1", "space", "shift+space", "super+x", "cmd+x", "meta+x", ";", "+"]) {
+      expect(isKeyToken(t), t).toBe(false);
+    }
+  });
+
+  it("refuses hc's other spellings, odd orders, repeats and anything not a token", () => {
+    // hc itself refuses ctrl+i and ctrl+m (the rig pressed every token): they are tab and enter.
+    for (const t of ["ctrl+i", "ctrl+m", "Escape", "ESC", "escape", "Ctrl+C", "ctrl+C", "C-c", "ctrl-c", "pgup", "del", "return", "shift+ctrl+tab", "alt+ctrl+x", "ctrl+ctrl+c", "f13", "f0", "", "ctrl+", "--force", "-x", "up up", "$(id)", "ctrl+é", "esc\n", " esc"]) {
+      expect(isKeyToken(t), JSON.stringify(t)).toBe(false);
+    }
+    for (const v of [undefined, null, 1, ["esc"], { k: "esc" }]) expect(isKeyToken(v)).toBe(false);
+  });
+
+  it("allKeyTokens lists exactly the accepted tokens, each once", () => {
+    const all = allKeyTokens();
+    expect(new Set(all).size).toBe(all.length);
+    expect(all.every((t) => isKeyToken(t))).toBe(true);
+    expect(all).toContain("shift+tab");
+    expect(all).toContain("alt+9");
+    expect(all.length).toBe(8 * bridgeApi.KEY_NAMES.length + 3 * 27 - 2 + 10);
+  });
+
+  it("labels are plain text of 1 to 24 characters", () => {
+    const ok = (s: unknown) => bridgeApi.KeyLabel.safeParse(s).success;
+    expect(ok("Ctrl-C")).toBe(true);
+    expect(ok("↑ Up")).toBe(true);
+    expect(ok("x".repeat(24))).toBe(true);
+    expect(ok("😀".repeat(24))).toBe(true);
+    for (const bad of ["", " Esc", "Esc ", "x".repeat(25), "a\nb", "a\u0007b", "a\u202eb", "a\u200bb", "a\u2028b", "\ufeffEsc", "a\u061cb", "a\ufff9b", "a\u{e0041}b", "a\u034fb", "a\u180eb", 3]) expect(ok(bad), JSON.stringify(bad)).toBe(false);
+  });
+
+  it("KeysTopic: unique ids, bounded entries and keys, valid rev", () => {
+    const entry = (id: string, keys = ["esc"]) => ({ id, label: "Esc", keys });
+    const rev = "0123456789abcdef";
+    const ok = (v: unknown) => bridgeApi.KeysTopic.safeParse(v).success;
+    expect(ok({ rev, keys: [entry("esc"), entry("tab", ["tab"])] })).toBe(true);
+    expect(ok({ rev, keys: [] })).toBe(true);
+    expect(ok({ rev, keys: [entry("esc"), entry("esc")] })).toBe(false);
+    expect(ok({ rev, keys: [entry("esc", [])] })).toBe(false);
+    expect(ok({ rev, keys: [entry("esc", Array(9).fill("up"))] })).toBe(false);
+    expect(ok({ rev, keys: [entry("esc", ["a"])] })).toBe(false);
+    expect(ok({ rev, keys: Array.from({ length: 33 }, (_, i) => entry(`k${i}`)) })).toBe(false);
+    expect(ok({ rev: "XYZ", keys: [] })).toBe(false);
+    expect(ok({ rev, keys: [{ ...entry("esc"), extra: 1 }] })).toBe(false);
+  });
+
+  it("TerminalKeysArgs names an entry and a rev, never keys", () => {
+    const ok = (a: unknown) => bridgeApi.TerminalKeysArgs.safeParse(a).success;
+    expect(ok({ terminal: "t3", key: "ctrl-c", rev: "0123456789abcdef" })).toBe(true);
+    expect(ok({ terminal: "vps/t7", key: "up_up", rev: "0123456789abcdef" })).toBe(true);
+    expect(ok({ terminal: "t3", key: "ctrl-c" })).toBe(false);
+    expect(ok({ terminal: "t3", key: "ctrl+c", rev: "0123456789abcdef" })).toBe(false);
+    expect(ok({ terminal: "t3", key: "Ctrl-C", rev: "0123456789abcdef" })).toBe(false);
+    expect(ok({ terminal: "-t3", key: "esc", rev: "0123456789abcdef" })).toBe(false);
+    expect(ok({ terminal: "t3", key: "esc", rev: "0123456789abcdef", keys: ["a"] })).toBe(false);
+  });
+
+  it("keys is a topic, and its snap payload is checked", () => {
+    expect(bridgeApi.Topic.safeParse("keys").success).toBe(true);
+    const snap = (data: unknown) => bridgeApi.ServerMessage.safeParse({ type: "snap", topic: "keys", epoch: "e1", seq: 1, data }).success;
+    expect(snap({ rev: "0123456789abcdef", keys: [{ id: "esc", label: "Esc", keys: ["esc"] }] })).toBe(true);
+    expect(snap({ rev: "0123456789abcdef", keys: [{ id: "esc", label: "Esc", keys: ["a"] }] })).toBe(false);
+  });
+});

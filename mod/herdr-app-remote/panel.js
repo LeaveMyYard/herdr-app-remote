@@ -14,7 +14,7 @@ export const TABS = Object.freeze([
   ['plugins', 'Plugins'],
   ['activity', 'Activity'],
 ]);
-/** The choices offered when turning terminal input on: minutes, or null for no limit. */
+/** The choices offered when turning terminal input or special keys on: minutes, or null for no limit. */
 export const EXPIRY_CHOICES = Object.freeze([
   { label: '1 hour', minutes: 60 },
   { label: '8 hours', minutes: 480 },
@@ -26,10 +26,14 @@ const CAPS = Object.freeze([
   ['inbox.answer', 'Answer questions', 'Answer, draft and dismiss in the inbox'],
   ['navigate', 'Navigate', 'Focus agents, tabs and spaces on this computer'],
   ['terminal.input', 'Terminal input', 'Type text into terminals, then Enter'],
+  // S16b: the same switch as terminal input (asks how long, shows "until"). No description line: the board has none.
+  ['terminal.keys', 'Special keys', ''],
   ['push', 'Notifications', 'Receive push notifications'],
 ]);
 
 const ID = /^d-[0-9a-f]{16}$/;
+/** Switches that ask how long before turning on. */
+const EXPIRING = new Set(['terminal.input', 'terminal.keys']);
 const STATUS = new Set(['serving', 'paused', 'setup', 'blocked']);
 const CHECK = new Set(['ok', 'warn', 'bad', 'off']);
 const PLUGIN = new Set(['ready', 'missing', 'too_old', 'broken', 'stale', 'not_running']);
@@ -97,7 +101,7 @@ export function sanitize(raw) {
     for (const [k] of CAPS) caps[k] = d.caps?.[k] === true;
     devices.push({
       id: d.id, name: str(d.name, 32), login: str(d.login, 120), state: d.state, caps,
-      terminal_input_until: num(d.terminal_input_until), created_at: num(d.created_at) ?? 0,
+      terminal_input_until: num(d.terminal_input_until), terminal_keys_until: num(d.terminal_keys_until), created_at: num(d.created_at) ?? 0,
       last_seen: num(d.last_seen), live: num(d.live) ?? 0,
     });
   }
@@ -415,8 +419,12 @@ function statusTab(m, c, on) {
 
 function capRow(m, c, d, on, [cap, label, about]) {
   const enabled = d.caps[cap];
-  const asking = cap === 'terminal.input' && m.expiryFor === d.id;
-  const until = cap === 'terminal.input' && enabled && d.terminal_input_until ? `until ${clock(d.terminal_input_until)}` : null;
+  const expiring = EXPIRING.has(cap);
+  const asking = expiring && m.expiryFor === d.id && (m.expiryCap ?? 'terminal.input') === cap;
+  const at = cap === 'terminal.keys' ? d.terminal_keys_until : d.terminal_input_until;
+  const until = expiring && enabled && at ? `until ${clock(at)}` : null;
+  // Element ids: terminal input keeps the ones it had (`expiry-<id>…`); special keys add `-keys`.
+  const eid = cap === 'terminal.keys' ? `expiry-${d.id}-keys` : `expiry-${d.id}`;
   const toggle = div().id(`cap-${d.id}-${cap}`).w(30).h(16).rounded(8).flex_none().flex().items_center()
     .px(2).bg(enabled ? c.ok : c.raised).justify_end()
     .when(!enabled, (e) => e.justify_start())
@@ -426,15 +434,15 @@ function capRow(m, c, d, on, [cap, label, about]) {
     h_flex().gap(8).children([
       v_flex().flex_1().gap(1).children([
         div().text_size(12).child(label),
-        div().text_size(11).text_color(c.dim).child(until ? `${about} · ${until}` : about),
+        about || until ? div().text_size(11).text_color(c.dim).child(about && until ? `${about} · ${until}` : (about || until)) : div(),
       ]),
       toggle,
     ]),
     asking
-      ? h_flex().id(`expiry-${d.id}`).gap(6).children([
+      ? h_flex().id(eid).gap(6).children([
         div().text_size(11).text_color(c.muted).child('Allow for'),
-        ...EXPIRY_CHOICES.map((o) => button(c, `expiry-${d.id}-${o.minutes ?? 'none'}`, o.label, (_e, cx) => on.setTerminalInput(cx, d, o.minutes), { height: 22 })),
-        button(c, `expiry-${d.id}-cancel`, 'Cancel', (_e, cx) => on.askExpiry(cx, null), { height: 22 }),
+        ...EXPIRY_CHOICES.map((o) => button(c, `${eid}-${o.minutes ?? 'none'}`, o.label, (_e, cx) => on.setTerminalInput(cx, d, o.minutes, cap), { height: 22 })),
+        button(c, `${eid}-cancel`, 'Cancel', (_e, cx) => on.askExpiry(cx, null), { height: 22 }),
       ])
       : div(),
   ]);
@@ -539,10 +547,10 @@ const BADGE = Object.freeze({
 export const showsSetup = (view) => Boolean(view && view.status === 'setup' && view.setup && view.devices.length === 0);
 
 /**
- * The whole panel. `m`: {view|null, tab, expanded, expiryFor, copied, error, connected, now, theme,
+ * The whole panel. `m`: {view|null, tab, expanded, expiryFor, expiryCap, copied, error, connected, now, theme,
  *   confirmStop, pendingSetup (the setup.* kind in flight, or null)}.
  * `on`: act(cx, kind, args), setTab(cx, id), expand(cx, id|null), askExpiry(cx, id|null),
- *       toggleCap(cx, device, cap), setTerminalInput(cx, device, minutes|null), copy(cx, text),
+ *       toggleCap(cx, device, cap), setTerminalInput(cx, device, minutes|null, cap?), copy(cx, text),
  *       openUrl(cx, url), askStop(cx, bool).
  */
 export function renderPanel(m, on) {

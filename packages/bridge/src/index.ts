@@ -19,8 +19,10 @@ export { loadInboxModules, resolveLauncher, type InboxModules, type Launch } fro
 export { ChatTopicDriver, CHAT_PREFIX, CHAT_INTERVAL_MS, CHAT_LINES, MAX_ACTIVE_CHATS, terminalIds, type ChatTopicOptions } from "./chat/topic.js";
 export { parseAnsi, type ParsedAnsi, type ParseOptions } from "./chat/ansi.js";
 export * from "./daemon/index.js";
-export { startApp, DEFAULT_API_PORT, FUNNEL_CHECK_MS, FUNNEL_RETRY_MS, CLOSE_FUNNEL, BRIDGE_VERSION, routeActs, navigateActor, fromRun, checkFunnel, funnelFromStatus, targetPort, SERVE_PORT, FUNNEL_TIMEOUT_MS, type App, type AppOptions, type AppLogEvent, type Actor, type FunnelVerdict } from "./app/index.js";
+export { startApp, DEFAULT_API_PORT, FUNNEL_CHECK_MS, FUNNEL_RETRY_MS, CLOSE_FUNNEL, BRIDGE_VERSION, KEYS_REFRESH_MS, routeActs, navigateActor, fromRun, checkFunnel, funnelFromStatus, targetPort, SERVE_PORT, FUNNEL_TIMEOUT_MS, type App, type AppOptions, type AppLogEvent, type Actor, type FunnelVerdict } from "./app/index.js";
 export { PanelDriver, duration, type PanelDriverOptions } from "./panel/driver.js";
 export * as tailscale from "./tailscale/index.js";
 export { PushService, summarize, PUSH_TTL_S, type PushGate, type PushOptions } from "./push/service.js";
 export { terminalSendActor, readSend, sendArgs, TERMINAL_SEND, SEND_TIMEOUT_MS, TIMEOUT_HOLD_MS, type TerminalSendActor, type TerminalSendOptions } from "./terminal/send.js";
+export { terminalKeysActor, TERMINAL_KEYS, type TerminalKeysActor } from "./terminal/keys.js";
+export { KeysMenu, menuTopic, DEFAULT_KEYS } from "./terminal/keys-config.js";

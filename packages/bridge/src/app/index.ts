@@ -21,6 +21,8 @@ import { hostName } from "../security/host-name.js";
 import { Security, type DeviceView, type ServeIdentity } from "../security/security.js";
 import { createBridgeServer, type BridgeServer, type GuardVerdict } from "../server.js";
 import { terminalSendActor } from "../terminal/send.js";
+import { terminalKeysActor } from "../terminal/keys.js";
+import { KeysMenu, type Loaded as KeysLoaded, type LoadState as KeysLoadState } from "../terminal/keys-config.js";
 import { UsageTopicDriver } from "../usage.js";
 import type { Json } from "../patch.js";
 import { navigateActor, routeActs, type Actor } from "./act.js";
@@ -41,6 +43,8 @@ export const FUNNEL_RETRY_MS = 5_000;
 /** Close code for clients dropped because Funnel turned on (the 4001–4003 codes are the security layer's). */
 export const CLOSE_FUNNEL = 4004;
 export const BRIDGE_VERSION = "0.0.0";
+/** How often `keys.json` is looked at (a stat) for an edit; a press also looks first. */
+export const KEYS_REFRESH_MS = 5_000;
 
 export interface AppOptions {
   /** The herdr-app home (absolute): data, plugin receipts and feeds are read under it. */
@@ -84,7 +88,9 @@ export type AppLogEvent =
   | { event: "funnel"; verdict: FunnelVerdict }
   | { event: "invalid_topic"; topic: string; error: string }
   /** The Activity log could not be written (`ok: false`), or can be again. The panel's Status shows it too. */
-  | { event: "audit_health"; ok: boolean; failures: number };
+  | { event: "audit_health"; ok: boolean; failures: number }
+  /** The key menu (S16b) was read: the default, `keys.json`, or a damaged file set aside (never its content). */
+  | ({ event: "keys_config" } & KeysLoadState);
 
 export interface App {
   readonly hub: Hub;
@@ -119,6 +125,12 @@ export async function startApp(o: AppOptions): Promise<App> {
   let usage: UsageTopicDriver | undefined = undefined;
   // `terminal.send` (S16): `hc send` only, under `terminal.input` (expiry, rate limit and audit in Security).
   const terminal = terminalSendActor({ run, binaries });
+  const dataDir = join(o.appHome, "data/herdr-app-remote");
+  // The key menu (S16b), from `keys.json` or the default; reported once the hub and security exist (below).
+  let onKeysLoad: (l: KeysLoaded) => void = () => {};
+  const keysMenu = new KeysMenu(dataDir, (l) => onKeysLoad(l));
+  // `terminal.keys` (S16b): `hc keys` with a menu entry's tokens only, under `terminal.keys`.
+  const keys = terminalKeysActor({ run, binaries, menu: keysMenu });
   let inboxDriver: InboxTopicDriver | undefined = undefined;
   let push: PushService | undefined = undefined;
   const actors: Actor[] = [
@@ -129,6 +141,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     // `push.subscribe` / `push.unsubscribe` (S17), bound to the device the socket acts as.
     (c, kind, args) => push?.act(c, kind, args),
     terminal,
+    keys,
     navigateActor(o.link),
   ];
   // The desktop panel (S13) hears of security changes and new pairing requests through these two.
@@ -136,7 +149,7 @@ export async function startApp(o: AppOptions): Promise<App> {
   // Tailscale setup (S14); assigned once the API port is known.
   let setup: Setup | null = null;
   const security = new Security({
-    dataDir: join(o.appHome, "data/herdr-app-remote"),
+    dataDir,
     serve: o.serve ?? null,
     inner: routeActs(actors),
     onChange: () => {
@@ -146,8 +159,12 @@ export async function startApp(o: AppOptions): Promise<App> {
       // Step 5 ("Add your phone") follows approvals and revocations.
       setup?.refreshPhone();
     },
-    // A device that may no longer type has its `hc send` in flight killed (hc holds one while the desktop is typed on).
-    onCut: (id) => terminal.cancel(id ?? undefined),
+    // A device that may no longer type has its `hc send` in flight killed (hc holds one while the desktop is typed on),
+    // and its `hc keys` likewise; losing just one of the two capabilities kills just that one.
+    onCut: (id, cap) => {
+      if (cap !== "terminal.keys") terminal.cancel(id ?? undefined);
+      if (cap !== "terminal.input") keys.cancel(id ?? undefined);
+    },
     onAuditHealth: (h) => log({ event: "audit_health", ok: h.ok, failures: h.failures }),
     onPending: (d) => {
       o.link.notify("info", "Approve a new phone?", "link", "open_panel");
@@ -162,6 +179,21 @@ export async function startApp(o: AppOptions): Promise<App> {
     bridgeVersion: o.bridgeVersion ?? BRIDGE_VERSION,
     onAct: (client, kind, args) => (serving() ? security.act(client, kind, args) : { ok: false, code: "funnel" }),
   });
+
+  // The key menu as topic `keys`. An edited keys.json is published within KEYS_REFRESH_MS (or at the next press); a
+  // damaged one is set aside and said in Activity and the log, by reason only (never the file's content).
+  onKeysLoad = (l) => {
+    log({ event: "keys_config", ...l.load });
+    if (l.load.state === "damaged") {
+      const at = l.load.where ? ` at ${l.load.where}` : "";
+      const fate = l.load.setAside ? "set aside as keys.json.damaged" : "ignored";
+      security.note({ event: "keys.config", text: `Key menu file is invalid (${l.load.reason}${at}): ${fate}, the default menu is in use`, ok: false, code: l.load.reason });
+    }
+    hub.publish("keys", l.topic as unknown as Json);
+  };
+  onKeysLoad(keysMenu.loaded);
+  const keysTimer = setInterval(() => keysMenu.refresh(), KEYS_REFRESH_MS);
+  keysTimer.unref();
 
   const host = new HostTopic({ hub, source: new LinkHostSource(o.link, { owned: false }), onInvalid: invalid("host") });
   const plugins = new PluginsTopicDriver({ hub, appHome: o.appHome, run, binaries, onInvalid: invalid("plugins") });
@@ -253,6 +285,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     if (funnel.state === "on" && before !== "on") {
       hub.closeAll(CLOSE_FUNNEL, "funnel");
       terminal.cancel();
+      keys.cancel();
     }
     log({ event: "funnel", verdict: v });
     return v;
@@ -272,6 +305,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     // Last: its first look seeds the triggers from the topics as they are now, so nothing already there is announced.
     pushService.start();
   } catch (e) {
+    clearInterval(keysTimer);
     pushService.stop();
     panel.stop();
     // Each stop is safe on a driver that never started.
@@ -315,6 +349,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     async stop() {
       if (stopped) return;
       stopped = true;
+      clearInterval(keysTimer);
       panel.stop();
       pushService.stop();
       if (timer) clearTimeout(timer);

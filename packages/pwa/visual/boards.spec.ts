@@ -7,10 +7,11 @@ import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
  * `skip` is a region of the design render that this slice leaves out on purpose (painted out of both images).
  * `viewport` and `clip` are for a board drawn inside browser chrome: the page gets the height the browser leaves it,
  * and only `clip` (the part above the chrome, from the top) is compared.
+ * `compare` lists `[data-vis-mask]` elements this board does draw, so they are compared, not masked.
  */
-/** The design-only state switcher at the top of the PhonePair and PhoneBanners boards; not part of the app. */
+/** The design-only state switcher at the top of the PhonePair, PhoneBanners and PhoneKeys boards; not part of the app. */
 const SWITCHER: Rect = { x: 0, y: 0, width: 390, height: 44 };
-const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[]; viewport?: { width: number; height: number }; clip?: Rect }[] = [
+const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[]; viewport?: { width: number; height: number }; clip?: Rect; compare?: string }[] = [
   { ref: "PhoneAgentsBasic", url: "/?fixture=basic#/agents" },
   { ref: "PhoneUsage", url: "/?fixture=usage#/usage" },
   { ref: "PhoneMissing", url: "/?fixture=usage#/usage/missing" },
@@ -19,6 +20,8 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[];
   { ref: "PhonePeek", url: "/?fixture=peek#/swarm/peek/t2%00a9f8e7d6", nav: false },
   // Chat's terminal text, spinner, tile and footer slot (S16's key bar and composer) are masked in the page.
   { ref: "PhoneChat", url: "/?fixture=chat#/chat/a-1", nav: false },
+  // PhoneKeys (S16b): the key bar, Keys sheet, typing-time line and ran-out footer are compared; the text stays masked.
+  ...(["bar", "menu", "off", "soon", "gone"] as const).map((s) => ({ ref: `PhoneKeys-${s}`, url: `/?fixture=chat&typing=${s}#/chat/a-1`, nav: false, skip: [SWITCHER], compare: ".chat-foot" })),
   // PhoneInbox: the fourth row is the placeholder of an answer the phone saw delivered (demo data seeds it).
   { ref: "PhoneInbox", url: "/?fixture=inbox#/inbox" },
   { ref: "PhoneQuestion", url: "/?fixture=inbox&pick=0#/inbox/q/group%3A123/123", nav: false },
@@ -46,12 +49,17 @@ for (const board of BOARDS) {
     await page.evaluate(() => document.fonts.ready);
     await page.waitForSelector(nav ? ".tabbar" : "[aria-label=Peek], .chat-head, .qn-head, .pair");
     const masks: Rect[] = [
-      ...(await page.$$eval("[data-vis-mask]", (els) =>
-        els.map((e) => {
-          const r = e.getBoundingClientRect();
-          return { x: r.x, y: r.y, width: r.width, height: r.height };
-        }),
-      )),
+      ...(await page.$$eval("[data-vis-mask]", (els, keep) => {
+        // A mask stops where an open sheet starts: the sheet is drawn over it and is compared.
+        const sheet = document.querySelector(".keys-sheet")?.getBoundingClientRect();
+        return els
+          .filter((e) => !(keep && e.matches(keep)) && !e.closest(".keys-sheet"))
+          .map((e) => {
+            const r = e.getBoundingClientRect();
+            const bottom = sheet ? Math.min(r.bottom, sheet.top) : r.bottom;
+            return { x: r.x, y: r.y, width: r.width, height: Math.max(0, bottom - r.y) };
+          });
+      }, board.compare ?? "")),
       ...(board.skip ?? []),
     ];
     const shot = await page.screenshot({ type: "png", animations: "disabled", caret: "hide" });

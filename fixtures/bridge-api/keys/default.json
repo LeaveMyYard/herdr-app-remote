@@ -1,0 +1,61 @@
+{
+  "rev": "c389a83ce9e32faf",
+  "keys": [
+    {
+      "id": "esc",
+      "label": "Esc",
+      "keys": [
+        "esc"
+      ]
+    },
+    {
+      "id": "tab",
+      "label": "Tab",
+      "keys": [
+        "tab"
+      ]
+    },
+    {
+      "id": "shift-tab",
+      "label": "Shift-Tab",
+      "keys": [
+        "shift+tab"
+      ]
+    },
+    {
+      "id": "ctrl-c",
+      "label": "Ctrl-C",
+      "keys": [
+        "ctrl+c"
+      ]
+    },
+    {
+      "id": "up",
+      "label": "↑",
+      "keys": [
+        "up"
+      ]
+    },
+    {
+      "id": "down",
+      "label": "↓",
+      "keys": [
+        "down"
+      ]
+    },
+    {
+      "id": "left",
+      "label": "←",
+      "keys": [
+        "left"
+      ]
+    },
+    {
+      "id": "right",
+      "label": "→",
+      "keys": [
+        "right"
+      ]
+    }
+  ]
+}

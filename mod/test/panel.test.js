@@ -145,6 +145,33 @@ describe('panel copy', () => {
     expect(modLink.checkPanelAct(b.kind, b.args).ok).toBe(true);
   });
 
+  it('special keys (S16b) mirror terminal input: an expiry first, then minutes; off at once; until shown', async () => {
+    await push(view());
+    click('tab-devices');
+    click(`settings-${P2}`);
+    expect(text(m)).toContain('Special keys');
+    click(`cap-${P2}-terminal.keys`);
+    expect(conn.lines.filter((l) => l.msg.type === 'panel_act')).toEqual([]);
+    expect(find(m.tree, `expiry-${P2}-keys`)).not.toBeNull();
+    // Only the special keys row asks: the terminal input row's chooser stays closed.
+    expect(find(m.tree, `expiry-${P2}`)).toBeNull();
+    click(`expiry-${P2}-keys-480`);
+    const a = await FakeBridge.next(conn, (x) => x.type === 'panel_act');
+    expect(a).toMatchObject({ kind: 'device.cap', args: { id: P2, cap: 'terminal.keys', on: true, minutes: 480 } });
+    expect(modLink.checkPanelAct(a.kind, a.args).ok).toBe(true);
+    click(`cap-${P2}-terminal.keys`);
+    click(`expiry-${P2}-keys-none`);
+    expect((await FakeBridge.next(conn, (x) => x.type === 'panel_act')).args).toEqual({ id: P2, cap: 'terminal.keys', on: true });
+    const v = view();
+    v.devices[1].caps['terminal.keys'] = true;
+    v.devices[1].terminal_keys_until = Date.now() + 3600_000;
+    await push(v);
+    expect(text(m)).toContain('until');
+    expect(text(m)).toContain('special keys');
+    click(`cap-${P2}-terminal.keys`);
+    expect(await FakeBridge.next(conn, (x) => x.type === 'panel_act')).toMatchObject({ args: { id: P2, cap: 'terminal.keys', on: false } });
+  });
+
   it('other switches flip at once, and an enabled terminal input turns off at once', async () => {
     const v = view();
     v.devices[1].caps['terminal.input'] = true;

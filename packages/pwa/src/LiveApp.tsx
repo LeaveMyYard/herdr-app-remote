@@ -63,7 +63,7 @@ export const ME_POLL_MS = 20_000;
  * at once, every {@link ME_POLL_MS}, and on `refresh()`. Off until the first answer.
  */
 function useTerminalInput(active: boolean, online: boolean, read: () => Promise<TerminalInputView | null>) {
-  const [view, setView] = useState<TerminalInputView>({ enabled: false, until: null });
+  const [view, setView] = useState<TerminalInputView>({ enabled: false, until: null, keys: { enabled: false, until: null } });
   const refresh = useCallback(() => {
     void read().then((v) => {
       if (v) setView(v);
@@ -174,13 +174,30 @@ export function LiveApp({
   const terminal = chatAgentId !== null ? host?.agents.find((a) => a.id === chatAgentId)?.terminal_id : undefined;
   const chatName = terminal !== undefined ? `chat:${terminal}` : null;
   useTopics(client, chatName ? [chatName] : [], chatName !== null);
+  // The desktop's key menu (S16b), read only while a chat is open (the Keys sheet is there).
+  useTopics(client, ["keys"], chatName !== null);
+  const keysMenu = useMemo(() => parsed(bridgeApi.KeysTopic, t.keys?.data), [t.keys?.data]);
   const chatView = chatName ? t[chatName] : undefined;
   const chatTopic = useMemo(() => parsed(bridgeApi.ChatTopic, chatView?.data), [chatView?.data]);
   const typing = useTerminalInput(chatName !== null, snap.status === "online", readTerminalInput);
   const input: ChatInput | undefined =
     terminal !== undefined
       ? {
-          ...typing.view,
+          enabled: typing.view.enabled,
+          until: typing.view.until,
+          keys: {
+            enabled: typing.view.keys.enabled,
+            menu: keysMenu,
+            press: async (key, rev) => {
+              const r = await client.act("terminal.keys", { terminal, key, rev });
+              if (!r.ok && r.code === "forbidden") typing.refresh();
+              // The menu changed under the phone: read it again (the topic also brings the new one).
+              if (!r.ok && (r.code === "keys_changed" || r.code === "unknown_key")) client.refresh("keys");
+              // It may have pressed: show the terminal as it is now. Never pressed again by itself.
+              if (r.unknown_effect && chatName) client.refresh(chatName);
+              return r;
+            },
+          },
           send: async (text) => {
             const r = await client.act("terminal.send", { terminal, text });
             // The desktop turned it off (or it ran out): read the device again, so the composer goes.
