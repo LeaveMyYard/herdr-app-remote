@@ -1,1 +1,1 @@
-{ "type": "notify", "level": "info", "message": "Approve Phone 1? Open the Remote panel.", "action": "open_panel" }
+{ "type": "notify", "level": "info", "message": "Approve a new phone?", "action": "open_panel" }

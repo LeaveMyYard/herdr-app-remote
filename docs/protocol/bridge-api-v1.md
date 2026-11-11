@@ -43,7 +43,7 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
    - `403 {error: "bad_code"}`: the code is unknown, expired or already used. Every failure looks the same.
    - `429 {error: "rate_limited"}` after 10 failed codes within a minute; `429 {error: "too_many_pending"}` while 3 requests are already pending (the code isn't consumed). The rate limit is global, not per client. Requests sent at the same moment can exceed it slightly, which doesn't matter against a 128-bit code. A local process that forges the headers can use it to block pairing, but that process could already do worse.
    - `415 json_required`, `413 too_large`, `400 bad_json` for malformed bodies.
-3. The desktop panel and a toast ask "Approve Phone 1?". The name the phone sends is only a hint: if it is taken, it gets a suffix ("Phone 1 (2)"). A request not approved within 10 minutes is dropped.
+3. The desktop panel and a toast ask "Approve a new phone?"; the toast has no device text. A `name` in the pair request is ignored: the bridge names every pending device itself ("Phone 1", "Phone 2", ...), and the desktop may rename it after approval. A request not approved within 10 minutes is dropped.
 4. The app polls `GET /api/v1/me` until `device.state` is `approved`, then opens the WebSocket.
 
 PLAN §2 says the phone gets its cookie "on approval". Setting it at pairing time instead is deliberate: the cookie is worthless until approval, and the bridge never has to hold a plaintext token while it waits for the desktop.

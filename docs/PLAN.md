@@ -75,7 +75,7 @@ Sources:
 **Pairing**
 1. The desktop panel shows a QR for `https://<serve>/pair#c=<code>`. The code is 128-bit, valid for 5 min and single use.
 2. The phone, inside the installed Home Screen app, posts the code.
-3. The device becomes pending, and the desktop panel and a toast ask "Approve Phone 1?".
+3. The device becomes pending, and the desktop panel and a toast ask "Approve a new phone?" (the toast never carries a device name).
 4. On approval, the phone gets a `__Host-` cookie (`HttpOnly; Secure; SameSite=Strict`) holding a random 256-bit token. Only its sha256 is stored, in `devices.json` (0600).
 5. Devices can be revoked or renamed. A revoked device is dropped live.
 

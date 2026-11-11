@@ -227,7 +227,7 @@ describe('link copy', () => {
     await bridge.listen();
     m = new Mounted(Remote, { props: { role: 'link' } });
     const c = await bridge.conn();
-    FakeBridge.send(c, { type: 'notify', level: 'info', message: 'Approve Phone 1?', action: 'open_panel' });
+    FakeBridge.send(c, { type: 'notify', level: 'info', message: 'Approve a new phone?', action: 'open_panel' });
     FakeBridge.send(c, { type: 'notify', level: 'info', message: 'plain' });
     for (let i = 0; i < 100 && world.ran.filter(([k]) => k === 'notify').length < 2; i += 1) await settle(10);
     const toasts = world.ran.filter(([k]) => k === 'notify').map(([, n]) => n);
