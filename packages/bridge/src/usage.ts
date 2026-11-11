@@ -33,8 +33,8 @@ export function tilde(path: string | null | undefined, home: string): string | n
 }
 
 /**
- * Validates a `collect --format v1` document and keeps what the screen draws. The home directory is
- * abbreviated like the desktop panel does (`~/.codex`), and Claude's identity is left alone (an email).
+ * Validates a `collect --format v1` document and keeps what the screen draws. Paths under the home directory
+ * are abbreviated like the desktop panel does (`~/.codex`); an email identity has no path to abbreviate.
  */
 export function normalizeReport(raw: unknown, home: string): { ok: true; report: bridgeApi.UsageReport } | { ok: false; error: bridgeApi.UsageError } {
   const version = raw !== null && typeof raw === "object" ? (raw as { version?: unknown }).version : undefined;
@@ -43,7 +43,7 @@ export function normalizeReport(raw: unknown, home: string): { ok: true; report:
   if (!r.success) return { ok: false, error: "bad_output" };
   const report = r.data;
   for (const p of report.providers) {
-    if (p.identity && p.family !== "claude" && !p.identity.includes("@")) p.identity = tilde(p.identity, home);
+    if (p.identity) p.identity = tilde(p.identity, home);
     if (p.source) p.source = tilde(p.source, home);
   }
   return { ok: true, report };

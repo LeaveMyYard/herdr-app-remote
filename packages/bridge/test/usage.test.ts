@@ -79,9 +79,11 @@ describe("normalizeReport", () => {
     expect(n.report.providers[0]?.windows[0]).not.toHaveProperty("resetsAt");
     expect(n.report.providers[0]?.windows[0]?.runOut).toEqual({ text: "empty in ~18h 56m" } satisfies { text: string });
   });
-  it("abbreviates home paths in identity (not for Claude emails) and source", () => {
+  it("abbreviates home paths in identity (emails are left alone) and source", () => {
     const n = normalizeReport(raw, HOME);
     if (!n.ok) throw new Error("expected ok");
+    const claudeDir = normalizeReport({ ...(raw as object), providers: [{ ...(raw as { providers: object[] }).providers[0], identity: "/home/user-1/.claude-1" }] }, HOME);
+    expect(claudeDir.ok && claudeDir.report.providers[0]?.identity).toBe("~/.claude-1");
     expect(n.report.providers.map((p) => p.identity)).toEqual(["user-1@example.com", "~/.codex"]);
     expect(n.report.providers[0]?.source).toBe("~/.claude-1/herdr-usagebar/cache.json");
   });
@@ -264,6 +266,12 @@ describe("usage acts", () => {
       call.args.includes("--all") ? okRun(docs.all) : new Promise<RunResult>((r) => (release = () => r(okRun(docs.old)))),
     );
     const { hub } = setup(runner);
+    const published: (string | undefined)[] = [];
+    const orig = hub.publish.bind(hub);
+    hub.publish = (name, data) => {
+      published.push((data as bridgeApi.UsageTopic).report?.filter);
+      orig(name, data);
+    };
     const slow = driver!.refresh();
     const switching = driver!.act("usage.set_filter", { filter: "all" });
     await settle();
@@ -272,6 +280,8 @@ describe("usage acts", () => {
     await switching;
     expect(topic(hub).filter).toBe("all");
     expect(topic(hub).report?.filter).toBe("all");
+    // The old collect's report never reaches the topic.
+    expect(published).not.toContain("open-panes");
   });
 
   it("refuses a bad filter and ignores kinds that are not its own", async () => {
