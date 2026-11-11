@@ -107,7 +107,8 @@ export function normalDraft(options: unknown, d: VerbDetail): VerbDetail | null 
   const choices = labels.filter((l, i): l is string => l !== null && d.choices.includes(l) && labels.indexOf(l) === i);
   const notes: Record<string, string> = {};
   for (const [l, n] of Object.entries(d.notes)) if (choices.includes(l) && n.trim() !== "") notes[l] = n.trim();
-  const text = d.text !== null && d.text.trim() !== "" ? d.text : null;
+  // Blank text is none, and kept text is stripped, as the popup's `Detail::make` does.
+  const text = d.text !== null && d.text.trim() !== "" ? d.text.trim() : null;
   return choices.length === 0 && text === null ? null : { choices, notes, text };
 }
 

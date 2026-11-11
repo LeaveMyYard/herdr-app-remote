@@ -438,7 +438,11 @@ export class InboxTopicDriver {
     const res = modules.readResult(r === null ? null : { code: r.error ? null : r.code, stdout: r.stdout }, verb, args.key) as VerbResult;
     let out: ActResult;
     if (res.kind === "done") {
-      this.overrides.set(args.key, { token: res.token, at: this.now(), effect: effectOf(plan, res.done) });
+      // Effects compose: an earlier verb's effect still stands until a newer feed or `show` carries it.
+      const prev = this.overrides.get(args.key)?.effect;
+      const next = effectOf(plan, res.done);
+      const effect = prev && next ? (e: Record<string, unknown>) => next(prev(e)) : (next ?? prev);
+      this.overrides.set(args.key, { token: res.token, at: this.now(), effect });
       const said = [
         res.delivery === "held" ? modules.heldWords(verb, res.done) : res.delivery === "queued" ? modules.queuedWords(res.done) : "",
         res.skipped.length > 0 ? modules.skippedWords(res.skipped) : "",

@@ -238,6 +238,20 @@ describe("inbox acts: the token is bound to the content shown", () => {
     expect((s.row("group:123") as { questions: { id: number }[] }).questions.map((q) => q.id)).toEqual([123, 125]);
   });
 
+  it("composes verbs: Next on Q123, Next on Q124, then Submit sends and logs both new drafts", async () => {
+    const s = await started();
+    s.h.reply("draft", done("draft", { token: "tok-mine-1", done: [], delivery: null }));
+    expect(await s.act("inbox.draft", { key: "group:123", rev: s.rev("group:123"), question: 123, detail: { choices: [1], notes: {}, text: null } })).toMatchObject({ ok: true });
+    s.h.reply("draft", done("draft", { token: "tok-mine-2", done: [], delivery: null }));
+    expect(await s.act("inbox.draft", { key: "group:123", rev: s.rev("group:123"), question: 124, detail: { choices: [1], notes: {}, text: " Text 1 " } })).toMatchObject({ ok: true });
+    const drafts = (s.row("group:123") as { questions: { id: number; draft: unknown }[] }).questions.map((q) => q.draft);
+    expect(drafts).toEqual([{ choices: ["Option B"], notes: {}, text: null }, { choices: ["Option Y"], notes: {}, text: "Text 1" }, null]);
+    s.h.reply("answer", done("answer", { token: null, done: [123, 124] }));
+    const r = await s.act("inbox.answer", { key: "group:123", rev: s.rev("group:123"), questions: [123, 124] });
+    expect(r).toMatchObject({ ok: true, audit_label: "Q123: Option B; Q124: Option Y" });
+    expect(s.h.verbCalls()[2]).toBe("app answer --entry group:123 --token tok-mine-2 --question 123 --question 124 --json");
+  });
+
   it("keeps a left-out row's result token across newer feeds, until a later show", async () => {
     const shownRow = (token: string) => ({ ...group(140, { token }), questions: [question(140), question(141)] });
     const omitted = { groups: 1, questions: 2, failed: 0, alerts: 0, remote: 0, question_ids: [140, 141] };
@@ -261,7 +275,8 @@ describe("inbox acts: the token is bound to the content shown", () => {
     s.clock.now += 1_000;
     s.h.writeFeed(feedDoc({ entries: [multi(), lone()], generated_at: s.clock.now / 1000 }));
     await p;
-    await new Promise((r) => setTimeout(r, 100));
+    // No manual refresh: wait (bounded) for the driver's own reload.
+    for (let i = 0; i < 100 && s.topic().entries.some((e) => e.key === "alert:456"); i++) await new Promise((r) => setTimeout(r, 20));
     expect(s.topic().entries.map((e) => e.key)).toEqual(["group:123", "group:127"]);
   });
 
