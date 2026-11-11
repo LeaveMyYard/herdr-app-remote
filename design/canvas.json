@@ -109,6 +109,22 @@
       "w": 1440,
       "h": 900,
       "title": "Desktop · Remote setup (Tailscale checked automatically)"
+    },
+    "PhonePair.dc.html": {
+      "x": 5120,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Pairing (tap a state)",
+      "is_interactive": true
+    },
+    "PhoneBanners.dc.html": {
+      "x": 5590,
+      "y": 1300,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · Connection banners (tap a state)",
+      "is_interactive": true
     }
   },
   "order": [
@@ -125,7 +141,9 @@
     "PhoneReview.dc.html",
     "PhoneUsage.dc.html",
     "PhoneMissing.dc.html",
-    "PhoneAgentsBasic.dc.html"
+    "PhoneAgentsBasic.dc.html",
+    "PhonePair.dc.html",
+    "PhoneBanners.dc.html"
   ],
   "notes": {
     "t-desktop": {
