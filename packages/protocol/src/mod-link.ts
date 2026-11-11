@@ -26,15 +26,21 @@ export const State = z.object({
 });
 export type State = z.infer<typeof State>;
 
-export const Result = z.object({
-  type: z.literal("result"),
-  id: z.string().min(1),
-  ok: z.boolean(),
-  error: z.string().optional(),
-});
+export const Result = z
+  .object({
+    type: z.literal("result"),
+    id: z.string().min(1),
+    ok: z.boolean(),
+    error: z.string().optional(),
+  })
+  .refine((r) => !r.ok || r.error === undefined, { message: "error is only valid when ok is false", path: ["error"] });
 export type Result = z.infer<typeof Result>;
 
-export const ModToBridge = z.discriminatedUnion("type", [Hello, State, Result]);
+/** Reply to `ping`. */
+export const Pong = z.object({ type: z.literal("pong") });
+export type Pong = z.infer<typeof Pong>;
+
+export const ModToBridge = z.union([Hello, State, Result, Pong]);
 export type ModToBridge = z.infer<typeof ModToBridge>;
 
 // ---- bridge -> mod ----

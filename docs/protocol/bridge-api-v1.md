@@ -25,11 +25,11 @@ One JSON object per text frame, each with a `type`.
 |---|---|---|
 | `welcome` | `api`, `bridge`, `epoch` | `epoch` is random per bridge start. |
 | `snap` | `topic`, `epoch`, `seq`, `data` | Full state of a topic. |
-| `patch` | `topic`, `seq`, `ops` | RFC 6902 operations (`add remove replace move copy test`). |
+| `patch` | `topic`, `seq`, `ops` | RFC 6902 operations (`add remove replace move copy test`); paths are RFC 6901 JSON Pointers. |
 | `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`. The field is open. |
-| `res` | `id`, `ok`, `code?`, `unknown_effect?` | Result of an `act`. |
+| `res` | `id`, `ok`, `code?`, `unknown_effect?` | Result of an `act`. `code` is required when `ok` is false; `unknown_effect` is only valid when `ok` is false. |
 | `event` | `topic`, `name`, `data` | Fire-and-forget notification. |
-| `pong` | | |
+| `pong` | | Reply to `ping` (not in the plan's list; added so clients can detect dead sockets). |
 
 ### Topics
 
@@ -39,6 +39,8 @@ Payload schemas defined in S1: `host` is `HostState` (see mod-link v1) and `plug
 
 ### Resume and consistency
 
+- `seq` is one server-wide counter per epoch, shared by all topics; every `snap` and `patch` takes the next value. `hello.resume.seq` is the last `seq` the client applied. `patch` carries no `epoch`: a bridge restart is detected through `welcome.epoch`, after which the client resubscribes and gets fresh `snap`s. A `seq` gap means the client must resubscribe.
+- `snap.data` is validated against the topic payload schema where one is defined (`host`, `plugins`).
 - Each bridge start gets a random epoch. A client that resumes with an unknown epoch, or whose seq has a gap, gets a fresh `snap`.
 - iOS kills background sockets, so the PWA reconnects on `visibilitychange` and `online`.
 - There is no optimistic UI: the UI changes only on `snap`, `patch` or `res`.

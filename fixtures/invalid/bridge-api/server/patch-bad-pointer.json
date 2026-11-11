@@ -1,0 +1,1 @@
+{ "type": "patch", "topic": "host", "seq": 2, "ops": [{ "op": "replace", "path": "agents/0", "value": 1 }] }

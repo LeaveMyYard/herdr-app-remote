@@ -63,9 +63,22 @@ describe("fixtures", () => {
   });
 });
 
-describe("fixtures contain no real data", () => {
-  it("uses only example/fake values", () => {
-    const text = walk(ROOT).map((f) => readFileSync(f, "utf8")).join("\n");
-    expect(text).not.toMatch(/\/home\/|\/Users\/|@(?!example)[a-z0-9-]+\.[a-z]/i);
+describe("no real data in fixtures, protocol docs or design", () => {
+  const REPO = join(ROOT, "..");
+  const files = [
+    ...walk(ROOT),
+    ...walk(join(REPO, "docs/protocol")),
+    ...walk(join(REPO, "design")).filter((f) => !f.endsWith(".png")),
+  ];
+
+  it("scans a non-trivial set of files", () => {
+    expect(files.length).toBeGreaterThan(40);
+  });
+
+  it.each(files.map((f) => relative(REPO, f)))("%s has no machine-specific paths or addresses", (rel) => {
+    const text = readFileSync(join(REPO, rel), "utf8");
+    expect(text).not.toMatch(/\/home\/|\/Users\/|\/tmp\/claude|scratchpad|leavemyyard|\.claude/i);
+    const emails = text.match(/[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[a-z]+/g) ?? [];
+    for (const e of emails) expect(e, `address ${e}`).toMatch(/^user-\d+@example\.com$/);
   });
 });

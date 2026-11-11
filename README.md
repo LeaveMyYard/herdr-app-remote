@@ -4,7 +4,7 @@ Phone access to herdr-app over Tailscale: a bridge, a PWA and a mod. See `docs/P
 
 ```
 pnpm install
-pnpm -r build test
+pnpm verify   # typecheck, lint, build, test
 pnpm typecheck && pnpm lint
 ```
 

@@ -10,7 +10,7 @@ Every message has a `type` field. A line that is not valid JSON, or does not mat
 
 ## Handshake and authentication
 
-The first line from the mod must be `hello`. The bridge checks `token` and keeps a single link: a second authenticated `hello` replaces the first. No other message is processed before a valid `hello`.
+The first line from the mod must be `hello`. The bridge checks `token` and keeps one connection slot per `copy`: a second authenticated `hello` with the same `copy` replaces the first, while `link` and `panel` never displace each other. Only the `link` copy's `state` feeds the `host` topic; a `panel` connection may send `result` for the commands routed to it and receives `notify`/`ping`. No other message is processed before a valid `hello`.
 
 ## Mod to bridge
 
@@ -18,7 +18,8 @@ The first line from the mod must be `hello`. The bridge checks `token` and keeps
 |---|---|---|
 | `hello` | `v: 1`, `token`, `copy: "link" \| "panel"`, `layout`, `app: {version}` | `copy` says which copy of the mod this is. `v` must be exactly 1. |
 | `state` | `seq`, `host: HostState` | Sent from `render()`, deduplicated by a hash of its content, at most once per 100 ms. |
-| `result` | `id`, `ok`, `error?` | Answer to a `run` with the same `id`. |
+| `result` | `id`, `ok`, `error?` | Answer to a `run` with the same `id`. `error` only when `ok` is false. |
+| `pong` | | Reply to `ping`. |
 
 `HostState` (shared with the bridge-api `host` topic):
 
@@ -37,7 +38,7 @@ The first line from the mod must be `hello`. The bridge checks `token` and keeps
 |---|---|---|
 | `run` | `id`, `name`, `args` | `name` must be on the allowlist (defined with the link mod, S2). The mod checks the allowlist again itself and answers with `result`. |
 | `notify` | `level: info\|warn\|error`, `message` | Shown by the mod as a toast. |
-| `ping` | | Keep-alive. |
+| `ping` | | Keep-alive. The mod answers with `pong`. |
 
 ## Lifecycle
 
