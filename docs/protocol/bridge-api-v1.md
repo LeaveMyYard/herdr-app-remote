@@ -99,7 +99,7 @@ One JSON object per text frame, each with a `type`.
 
 `host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`.
 
-Payload schemas defined so far: `host` is `HostState` (see mod-link v1), `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`, `usage` is `UsageTopic` (below) and `panorama` is described below. The other payloads are defined by their slices; until then `snap.data` is open.
+Payload schemas defined so far: `host` is `HostState` (see mod-link v1), `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`, `usage` is `UsageTopic` (below), `panorama` and `setup` are described below. The other payloads are defined by their slices; until then `snap.data` is open.
 
 ### The `usage` topic
 
@@ -114,6 +114,39 @@ Source: `usagebar collect --format v1 [--all] --panes <JSON>` (agent-usage `docs
 - `error` is one of `unavailable` (not installed or cannot run), `timeout`, `failed` (non-zero exit), `bad_output` (invalid JSON or shape) and `unsupported` (another `version`). The last good `report` stays while `error` is set; no CLI output is forwarded.
 - `act`: `usage.refresh {}` collects now and answers when it is done; `usage.set_filter {filter}` switches between Open panes and All (shared by every client), clears `report` at once and collects again. Both acts collect even with no subscriber (they are explicit requests; the polling is what is subscription-gated). A failed collect answers `ok: false` with the error as `code`. Any other `act` kind is not the usage topic's.
 - Plugin states: `plugins.usage` decides what the Usage tab shows. `missing`, `too_old` and `broken` show the Missing screen; `ready`, `stale` and `not_running` show the panel.
+
+### `setup` topic (Tailscale setup and serve control)
+
+Source: `packages/bridge/src/tailscale/` (`Setup`). Schema: `SetupTopic` in `packages/protocol/src/bridge-api.ts`; fixtures in `fixtures/bridge-api/setup/`. The desktop panel shows it (DesktopSetup board); phones may subscribe, read-only.
+
+`{step, steps[5], serving, port, url, login, can_start, can_stop, busy, checked_at}`. Each step is `{id, state, title, detail, problem?}` with `state` `done`, `current` (the first not done) or `todo`; only the current step carries a `problem` `{code, message, fix?, url?}`. `message` is a fixed sentence, never CLI output. `fix` is a command for the person to run (the bridge never runs it); `url` is always a `https://login.tailscale.com/` page. `step` is 6 when all five are done.
+
+| step | done when | problems |
+|---|---|---|
+| 1 `installed` | `tailscale version` is at least 1.52 (serve v2) | `not_installed`, `too_old`, `unknown` |
+| 2 `signed_in` | `tailscale status --json`: `BackendState` `Running`, the node is not tagged, the owner (`User[Self.UserID].LoginName`) is known | `daemon_down`, `needs_login`, `stopped`, `tagged`, `unknown` |
+| 3 `https` | MagicDNS is on and `CertDomains` holds this node's name | `magicdns_off`, `https_off` (both link the admin DNS page) |
+| 4 `serving` | the serve port (`:8443`) holds exactly our handler | `port_taken`, `funnel_on`, `operator`, `serve_disabled`, `not_ours`, `failed`, `unknown` |
+| 5 `phone` | a device is approved | `no_device` |
+
+`serving` says how the port is configured: `ours` (our handler, created by this bridge), `identical` (exactly our handler, created by someone else: used, never removed), `off`, `foreign`, `funnel` or `unknown`. "Exactly our handler" means `TCP[port] == {HTTPS: true}`, one web entry `<this node's DNS name>:<port>` whose only handler is `/` with `Proxy: http://127.0.0.1:47391`, no Funnel and no foreground session on the port.
+
+Checks only read: `tailscale version`, `status --json` and `serve status --json`, every 5 s for 10 minutes after the last explicit check, start or stop while setup is not complete, every 30 s otherwise. A check that fails or prints something unreadable proves nothing and keeps the last identity.
+
+**Start serving** (`setup.start()`):
+- refuses unless steps 1 to 3 are done and the port is `off`: any other handler on the port, foreground sessions included, is `port_taken`; Funnel on it is `funnel_on`. Nothing is run then;
+- runs `tailscale serve --bg --https=8443 http://127.0.0.1:47391` (20 s limit: when serve is not enabled for the tailnet, the CLI prints an enable link and waits; it is cut off, and the link is shown as `serve_disabled`);
+- reads the config back: only an exact handler is recorded as ours, in `data/herdr-app-remote/serve.json` (0600). Anything else is `failed` and left alone.
+
+**Stop serving** (`setup.stop()`) runs `tailscale serve --https=8443 off` only while the port is `ours`: our record exists and the port still reads exactly our handler. The record is dropped as soon as a check finds the port empty, different or funneled, so a handler that later reads exact again is someone else's and is never removed. Handlers on other ports are never touched.
+
+**The operator error (Linux).** A user who is not tailscale's operator may not change serve config. The CLI's "access denied" output becomes `operator` with `fix: "sudo tailscale set --operator=$USER"`. The bridge never runs it.
+
+**Funnel** is never used: no command the bridge runs enables it, start refuses while it is on, and the API refuses while it is on (see "Listener and Funnel").
+
+**Serve identity.** While the port is `ours` or `identical` on a signed-in, untagged node, the bridge's serve identity (`Security.setServe`) is `{host: "<DNS name>:8443", login: <owner login>}`: the `Host` every request must carry and the `Tailscale-User-Login` it must match. When a check proves otherwise (stopped, not served, foreign, Funnel, signed out, another owner) it is cleared or replaced, which drops every live socket (`4001`) and the current pairing code. It changes only when the value changes. A bridge started with an explicit `serve` (tests, rigs) runs no setup.
+
+The desktop panel reaches `check`, `start` and `stop` through the mod link (S13's panel channel); until that is wired they are methods on the bridge's `App.setup`.
 
 ### `chat:<t>` (read-only)
 

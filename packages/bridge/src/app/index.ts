@@ -19,8 +19,11 @@ import { PluginsTopicDriver } from "../plugins/topic.js";
 import { Security, type DeviceView, type ServeIdentity } from "../security/security.js";
 import { createBridgeServer, type BridgeServer, type GuardVerdict } from "../server.js";
 import { UsageTopicDriver } from "../usage.js";
+import type { Json } from "../patch.js";
 import { navigateActor, routeActs, type Actor } from "./act.js";
 import { checkFunnel, SERVE_PORT, type FunnelVerdict } from "./funnel.js";
+import { Setup } from "../tailscale/setup.js";
+import { bridgeApi } from "@herdr-remote/protocol";
 
 export { routeActs, navigateActor, fromRun, type Actor } from "./act.js";
 export { checkFunnel, funnelFromStatus, targetPort, SERVE_PORT, FUNNEL_TIMEOUT_MS, type FunnelVerdict } from "./funnel.js";
@@ -44,7 +47,11 @@ export interface AppOptions {
   staticDir?: string;
   /** Default {@link DEFAULT_API_PORT}; 0 picks a free port (tests). Always bound on 127.0.0.1. */
   port?: number;
-  /** The serve name and owner login. Unset until setup (S14) is done: then only `/healthz` answers. */
+  /**
+   * The serve name and owner login. Left out (the bridge process), the Tailscale setup (S14) supplies it while
+   * the serve port is served exactly as ours, and only `/healthz` answers until then. Given (tests, rigs that
+   * stand in for serve), it is used as is and no setup runs.
+   */
   serve?: ServeIdentity | null;
   bridgeVersion?: string;
   /** Test seams: the command runner and binaries (fake CLIs). */
@@ -80,6 +87,8 @@ export interface App {
   /** Re-reads the Funnel state now (also runs every `funnelCheckMs`). */
   checkFunnel(): Promise<FunnelVerdict>;
   setServe(serve: ServeIdentity | null): void;
+  /** Tailscale setup and serve control; null when an explicit `serve` was given. Also published as topic `setup`. */
+  readonly setup: Setup | null;
   /** Stops the topics and the API listener. Leaves the link server running. */
   stop(): Promise<void>;
 }
@@ -106,11 +115,17 @@ export async function startApp(o: AppOptions): Promise<App> {
   ];
   // The desktop panel (S13) hears of security changes and new pairing requests through these two.
   const panelRef: { current?: PanelDriver } = {};
+  // Tailscale setup (S14); assigned once the API port is known.
+  let setup: Setup | null = null;
   const security = new Security({
     dataDir: join(o.appHome, "data/herdr-app-remote"),
     serve: o.serve ?? null,
     inner: routeActs(actors),
-    onChange: () => panelRef.current?.changed(),
+    onChange: () => {
+      panelRef.current?.changed();
+      // Step 5 ("Add your phone") follows approvals and revocations.
+      setup?.refreshPhone();
+    },
     onPending: (d) => {
       o.link.notify("info", `Approve ${d.name}? Open the Remote panel.`, "link", "open_panel");
       o.onPending?.(d);
@@ -158,6 +173,24 @@ export async function startApp(o: AppOptions): Promise<App> {
   const { port } = await server.listen();
   log({ event: "api_listening", port });
 
+  setup =
+    o.serve === undefined
+      ? new Setup({
+          run,
+          tailscale: o.tailscale ?? "tailscale",
+          apiPort: port,
+          port: SERVE_PORT,
+          dataDir: join(o.appHome, "data/herdr-app-remote"),
+          hasPhone: () => security.devices().some((d) => d.state === "approved"),
+          onIdentity: (id) => security.setServe(id),
+          onState: (st) => {
+            const r = bridgeApi.SetupTopic.safeParse(st);
+            if (r.success) hub.publish("setup", r.data as Json);
+            else log({ event: "invalid_topic", topic: "setup", error: r.error.message });
+          },
+        })
+      : null;
+
   const recheck = async (): Promise<FunnelVerdict> => {
     let v: FunnelVerdict;
     try {
@@ -178,6 +211,7 @@ export async function startApp(o: AppOptions): Promise<App> {
   let stopped = false;
   try {
     await recheck();
+    setup?.startTimer();
     await host.start();
     await plugins.start();
     await panorama.start();
@@ -187,6 +221,7 @@ export async function startApp(o: AppOptions): Promise<App> {
   } catch (e) {
     panel.stop();
     // Each stop is safe on a driver that never started.
+    setup?.close();
     chat.stop();
     usage.stop();
     inbox.stop();
@@ -216,11 +251,13 @@ export async function startApp(o: AppOptions): Promise<App> {
     },
     checkFunnel: recheck,
     setServe: (s) => security.setServe(s),
+    setup,
     async stop() {
       if (stopped) return;
       stopped = true;
       panel.stop();
       if (timer) clearTimeout(timer);
+      setup?.close();
       usage?.stop();
       chat.stop();
       inbox.stop();

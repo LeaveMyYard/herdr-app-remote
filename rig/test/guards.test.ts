@@ -16,17 +16,18 @@ function sandbox() {
   made.push(root);
   const bin = join(root, "fakebin");
   mkdirSync(bin);
-  for (const t of ["hc", "herdr-app", "node", "mutter", "dbus-run-session"]) {
+  for (const t of ["hc", "herdr-app", "node", "mutter", "dbus-run-session", "tailscale"]) {
     writeFileSync(join(bin, t), `#!/bin/sh\necho "FAKE-${t} reached" >> "${root}/reached"\nexit 0\n`);
     chmodSync(join(bin, t), 0o755);
   }
   mkdirSync(join(root, "empty-run-user"));
+  mkdirSync(join(root, "empty-ts"));
   return { root, bin };
 }
 
 function runInner(env: Record<string, string>, root: string, bin: string) {
   return spawnSync("sh", [join(rigDir, "inner.sh")], {
-    env: { RIG_RUN_USER: join(root, "empty-run-user"), PATH: `${bin}:/usr/bin:/bin`, RIG: root, SCENARIO: "isolation", ...env },
+    env: { RIG_RUN_USER: join(root, "empty-run-user"), RIG_TS_DIRS: join(root, "empty-ts"), PATH: `${bin}:/usr/bin:/bin`, RIG: root, SCENARIO: "isolation", ...env },
     encoding: "utf8",
   });
 }
@@ -102,6 +103,31 @@ it("aborts when /run/user is visible", () => {
   expect(r.stdout).toContain("ABORT: /run/user is visible");
 });
 
+it("aborts when tailscaled's socket dir is visible", () => {
+  const { root, bin } = sandbox();
+  writeFileSync(join(root, "empty-ts", "tailscaled.sock"), "");
+  const r = runInner({ XDG_RUNTIME_DIR: `${root}/run`, HERDR_APP_HOME: `${root}/h`, HOME: `${root}/h`, HC_SESSION: "x" }, root, bin);
+  expect(r.status).toBe(1);
+  expect(r.stdout).toContain("ABORT: tailscaled's socket dir is visible");
+  expect(existsSync(`${root}/reached`)).toBe(false);
+});
+
+it("aborts when tailscale is not the rig's fake", () => {
+  const { root, bin } = sandbox();
+  rmSync(join(bin, "tailscale"));
+  const other = join(root, "other");
+  mkdirSync(other);
+  writeFileSync(join(other, "tailscale"), `#!/bin/sh\necho "REAL-tailscale reached" >> "${root}/reached"\n`);
+  chmodSync(join(other, "tailscale"), 0o755);
+  const r = spawnSync("sh", [join(rigDir, "inner.sh")], {
+    env: { RIG_RUN_USER: join(root, "empty-run-user"), RIG_TS_DIRS: join(root, "empty-ts"), PATH: `${bin}:${other}:/usr/bin:/bin`, RIG: root, SCENARIO: "isolation", XDG_RUNTIME_DIR: `${root}/run`, HERDR_APP_HOME: `${root}/h`, HOME: `${root}/h`, HC_SESSION: "x" },
+    encoding: "utf8",
+  });
+  expect(r.status).toBe(1);
+  expect(r.stdout).toContain("ABORT: tailscale is not the rig's fake");
+  expect(existsSync(`${root}/reached`)).toBe(false);
+});
+
 describe("run.sh outer guards", () => {
   // Never creates anything: the path is judged before mkdir (the dir must not exist afterwards).
   it.each([
@@ -125,7 +151,7 @@ describe("run.sh outer guards", () => {
   it("keeps the bwrap isolation flags", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(join(rigDir, "run.sh"), "utf8");
-    for (const flag of ["--tmpfs /run/user", '--tmpfs "$HOME/.config/herdr-app"', "--unshare-pid", "--proc /proc", "--unshare-net", "--die-with-parent", "HERDR_APP_HOME=", "HC_SESSION=", "XDG_RUNTIME_DIR=", "XDG_STATE_HOME=", "XDG_CONFIG_HOME="]) {
+    for (const flag of ["--tmpfs /run/user", '--tmpfs "$HOME/.config/herdr-app"', "--unshare-pid", "--proc /proc", "--unshare-net", "--die-with-parent", "$ts_hide", 'PATH="/mnt/r/fakebin:', "HERDR_APP_HOME=", "HC_SESSION=", "XDG_RUNTIME_DIR=", "XDG_STATE_HOME=", "XDG_CONFIG_HOME="]) {
       expect(src).toContain(flag);
     }
   });

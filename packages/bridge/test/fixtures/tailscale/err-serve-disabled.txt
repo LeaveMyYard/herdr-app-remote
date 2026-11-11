@@ -1,0 +1,5 @@
+Serve is not enabled on your tailnet.
+To enable, visit:
+
+         https://login.tailscale.com/f/serve?node=n0001ExAmPlE
+

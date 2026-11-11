@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeClient, type BridgeClientOptions } from "../src/bridge/client";
 import { FakeSocket, FakeTarget } from "./fake-socket";
+import SETUP from "../../../fixtures/bridge-api/setup/ready-to-serve.json";
 
 let sockets: FakeSocket[];
 let me: number | null;
@@ -40,7 +41,9 @@ async function online(epoch = "e1"): Promise<FakeSocket> {
   return s;
 }
 
-const HOST = { n: 1, items: ["a"] };
+/** A valid `setup` payload (the topic is schema-checked), told apart by `step`. */
+const at = (step: number) => ({ ...SETUP, step });
+const HOST = at(1);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -74,8 +77,8 @@ describe("BridgeClient: handshake and topics", () => {
     const s = await online();
     s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 3, data: HOST });
     expect(client.getSnapshot().topics.setup).toEqual({ data: HOST, seq: 3, stale: null });
-    s.recv({ type: "patch", topic: "setup", seq: 4, ops: [{ op: "replace", path: "/n", value: 2 }] });
-    expect(client.getSnapshot().topics.setup!.data).toEqual({ n: 2, items: ["a"] });
+    s.recv({ type: "patch", topic: "setup", seq: 4, ops: [{ op: "replace", path: "/step", value: 2 }] });
+    expect(client.getSnapshot().topics.setup!.data).toEqual(at(2));
   });
 
   it("re-subscribes on a seq gap, a patch before any snap, or a patch that doesn't apply, without applying it", async () => {
@@ -86,7 +89,7 @@ describe("BridgeClient: handshake and topics", () => {
     expect(s.ofType("sub").at(-1)).toEqual({ type: "sub", topics: ["setup"] });
     s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 3, data: HOST });
     const subs = s.ofType("sub").length;
-    s.recv({ type: "patch", topic: "setup", seq: 5, ops: [{ op: "replace", path: "/n", value: 9 }] });
+    s.recv({ type: "patch", topic: "setup", seq: 5, ops: [{ op: "replace", path: "/step", value: 9 }] });
     expect(s.ofType("sub").length).toBe(subs + 1);
     expect(client.getSnapshot().topics.setup!.data).toEqual(HOST);
     // The fresh snap after the gap, then a patch that doesn't apply.
@@ -137,8 +140,8 @@ describe("BridgeClient: reconnecting", () => {
     s2.recv({ type: "welcome", api: 1, bridge: "0.0.0", epoch: "e1" });
     expect(s2.ofType("sub")).toEqual([{ type: "sub", topics: ["setup"] }]);
     // Same epoch: a replayed patch still applies.
-    s2.recv({ type: "patch", topic: "setup", seq: 8, ops: [{ op: "replace", path: "/n", value: 3 }] });
-    expect(client.getSnapshot().topics.setup!.data).toEqual({ n: 3, items: ["a"] });
+    s2.recv({ type: "patch", topic: "setup", seq: 8, ops: [{ op: "replace", path: "/step", value: 3 }] });
+    expect(client.getSnapshot().topics.setup!.data).toEqual(at(3));
   });
 
   it("after a bridge restart (new epoch) takes no patch until the fresh snap", async () => {
@@ -151,10 +154,10 @@ describe("BridgeClient: reconnecting", () => {
     const s2 = last();
     s2.open();
     s2.recv({ type: "welcome", api: 1, bridge: "0.0.0", epoch: "e2" });
-    s2.recv({ type: "patch", topic: "setup", seq: 8, ops: [{ op: "replace", path: "/n", value: 3 }] });
+    s2.recv({ type: "patch", topic: "setup", seq: 8, ops: [{ op: "replace", path: "/step", value: 3 }] });
     expect(client.getSnapshot().topics.setup!.data).toEqual(HOST);
-    s2.recv({ type: "snap", topic: "setup", epoch: "e2", seq: 1, data: { n: 5 } });
-    expect(client.getSnapshot().topics.setup).toEqual({ data: { n: 5 }, seq: 1, stale: null });
+    s2.recv({ type: "snap", topic: "setup", epoch: "e2", seq: 1, data: at(5) });
+    expect(client.getSnapshot().topics.setup).toEqual({ data: at(5), seq: 1, stale: null });
   });
 
   it("backs off from 0.5 s, doubling, up to 10 s, and opens no socket while /me fails", async () => {
@@ -242,15 +245,15 @@ describe("BridgeClient: review fixes", () => {
     make();
     client.want("setup");
     const s = await online();
-    s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 1, data: { n: 1 } });
+    s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 1, data: at(1) });
     const subs = s.ofType("sub").length;
     s.recv({ type: "patch", topic: "setup", seq: 3, ops: [] });
     s.recv({ type: "patch", topic: "setup", seq: 4, ops: [] });
     s.recv({ type: "patch", topic: "setup", seq: 5, ops: [] });
     expect(s.ofType("sub").length).toBe(subs + 1);
-    s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 5, data: { n: 5 } });
-    s.recv({ type: "patch", topic: "setup", seq: 6, ops: [{ op: "replace", path: "/n", value: 6 }] });
-    expect(client.getSnapshot().topics.setup!.data).toEqual({ n: 6 });
+    s.recv({ type: "snap", topic: "setup", epoch: "e1", seq: 5, data: at(5) });
+    s.recv({ type: "patch", topic: "setup", seq: 6, ops: [{ op: "replace", path: "/step", value: 6 }] });
+    expect(client.getSnapshot().topics.setup!.data).toEqual(at(6));
   });
 
   it("replaces the socket quietly once a given-up topic is still subscribed, resubscribing only what is wanted", async () => {

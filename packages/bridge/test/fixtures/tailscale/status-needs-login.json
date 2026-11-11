@@ -1,0 +1,26 @@
+{
+  "Version": "1.76.1-t0123456789-gabcdef012",
+  "TUN": true,
+  "BackendState": "NeedsLogin",
+  "HaveNodeKey": true,
+  "AuthURL": "https://login.tailscale.com/a/0000",
+  "TailscaleIPs": [
+    "100.64.0.10",
+    "fd7a:115c:a1e0::a"
+  ],
+  "Self": {
+    "ID": "",
+    "HostName": "desk-1",
+    "DNSName": "",
+    "UserID": 0
+  },
+  "Health": [],
+  "MagicDNSSuffix": "example-tailnet.ts.net",
+  "CurrentTailnet": {
+    "Name": "example-tailnet",
+    "MagicDNSSuffix": "example-tailnet.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "Peer": {},
+  "ClientVersion": null
+}

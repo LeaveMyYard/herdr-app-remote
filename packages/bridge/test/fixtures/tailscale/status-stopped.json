@@ -1,0 +1,49 @@
+{
+  "Version": "1.76.1-t0123456789-gabcdef012",
+  "TUN": true,
+  "BackendState": "Stopped",
+  "HaveNodeKey": true,
+  "AuthURL": "",
+  "TailscaleIPs": [
+    "100.64.0.10",
+    "fd7a:115c:a1e0::a"
+  ],
+  "Self": {
+    "ID": "n0001",
+    "PublicKey": "nodekey:0000",
+    "HostName": "desk-1",
+    "DNSName": "desk-1.example-tailnet.ts.net.",
+    "OS": "linux",
+    "UserID": 1001,
+    "TailscaleIPs": [
+      "100.64.0.10"
+    ],
+    "Online": true
+  },
+  "Health": [],
+  "MagicDNSSuffix": "example-tailnet.ts.net",
+  "CurrentTailnet": {
+    "Name": "example-tailnet",
+    "MagicDNSSuffix": "example-tailnet.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "CertDomains": [
+    "desk-1.example-tailnet.ts.net"
+  ],
+  "Peer": {},
+  "User": {
+    "1001": {
+      "ID": 1001,
+      "LoginName": "user-1@example",
+      "DisplayName": "User 1",
+      "ProfilePicURL": ""
+    },
+    "1002": {
+      "ID": 1002,
+      "LoginName": "user-2@example",
+      "DisplayName": "User 2",
+      "ProfilePicURL": ""
+    }
+  },
+  "ClientVersion": null
+}

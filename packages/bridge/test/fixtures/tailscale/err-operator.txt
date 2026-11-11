@@ -1,0 +1,4 @@
+Access denied: serve config denied
+
+Use 'sudo tailscale serve --bg --https=8443 http://127.0.0.1:47391'.
+To not require root, use 'sudo tailscale set --operator=$USER' once.
