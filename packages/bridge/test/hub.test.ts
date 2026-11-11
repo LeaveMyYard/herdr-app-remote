@@ -252,3 +252,23 @@ describe("hub robustness", () => {
     expect(client.closed?.code).toBe(1008);
   });
 });
+
+describe("watchSubscribers", () => {
+  it("reports the subscriber count on every change and stops after unwatch", async () => {
+    const hub = newHub();
+    const counts: number[] = [];
+    const off = hub.watchSubscribers("usage", (n) => counts.push(n));
+    const a = await join(hub);
+    const b = await join(hub);
+    await a.send({ type: "sub", topics: ["usage"] });
+    await a.send({ type: "sub", topics: ["usage"] });
+    await b.send({ type: "sub", topics: ["usage"] });
+    hub.disconnect(a.conn);
+    hub.disconnect(b.conn);
+    expect(counts).toEqual([1, 2, 1, 0]);
+    off();
+    const c = await join(hub);
+    await c.send({ type: "sub", topics: ["usage"] });
+    expect(counts).toEqual([1, 2, 1, 0]);
+  });
+});

@@ -15,7 +15,7 @@ describe("App", () => {
   });
 
   it("opens the tab named in the hash and follows hash changes", () => {
-    window.location.hash = "#/usage";
+    window.location.hash = "#/usage/missing";
     render(<App />);
     expect(screen.getByRole("heading")).toHaveTextContent("agent-usage isn't installed");
     act(() => {

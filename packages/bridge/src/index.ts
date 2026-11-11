@@ -8,4 +8,5 @@ export { detectHc, detectHost, detectInbox, detectPanorama, detectUsage, parseVe
 export { loadPinned, parseReceipt, hasImports, type LoadResult } from "./plugins/loader.js";
 export { run, type Runner, type RunResult } from "./plugins/exec.js";
 export * from "./plugins/constants.js";
+export { UsageTopicDriver, USAGE_TOPIC, USAGE_INTERVAL_MS, USAGE_TIMEOUT_MS, panesArg, normalizeReport, tilde, type UsageTopicOptions } from "./usage.js";
 export * from "./link/index.js";

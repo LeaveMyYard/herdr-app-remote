@@ -4,7 +4,8 @@ import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 
 const BOARDS = [
   { ref: "PhoneAgentsBasic", hash: "#/agents" },
-  { ref: "PhoneMissing", hash: "#/usage" },
+  { ref: "PhoneUsage", hash: "#/usage" },
+  { ref: "PhoneMissing", hash: "#/usage/missing" },
 ] as const;
 
 for (const board of BOARDS) {

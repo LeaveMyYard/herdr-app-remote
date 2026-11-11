@@ -76,6 +76,93 @@ export const PluginsTopic = z.object({
 });
 export type PluginsTopic = z.infer<typeof PluginsTopic>;
 
+/**
+ * `usage` topic: a trimmed `usagebar collect --format v1` report (agent-usage docs/collect-json-v1.md).
+ * The bridge keeps only what PhoneUsage draws (no `watchDirs`, no per-pane shares, no `apiUsage`) and
+ * ignores fields it does not know, since the format adds fields compatibly. `status` and `band` stay open
+ * strings for the same reason; the known values are listed below.
+ */
+export const USAGE_STATUSES = ["ok", "stale", "needs-login", "no-data", "unavailable"] as const;
+export const USAGE_BANDS = ["high", "mid", "low"] as const;
+
+export const UsageWindow = z.object({
+  slot: z.string(),
+  /** `5h`, `24h`, `7d`, `30d` or `<n>m`. */
+  tag: z.string().min(1),
+  windowMinutes: z.number(),
+  /** The number to print under `limitPercent`. */
+  displayPercent: z.number(),
+  /** 0 to 1. */
+  barFill: z.number(),
+  /** One of {@link USAGE_BANDS}. */
+  band: z.string(),
+  /** Pre-formatted, "" when unknown. */
+  resetIn: z.string(),
+  runOut: z.object({ text: z.string() }).nullish(),
+});
+export type UsageWindow = z.infer<typeof UsageWindow>;
+
+export const UsageProvider = z.object({
+  providerId: z.string().min(1),
+  family: z.string().min(1),
+  label: z.string(),
+  groupLabel: z.string().nullish(),
+  accountLabel: z.string().nullish(),
+  profileLabel: z.string().nullish(),
+  /** Login email, or the account's config dir (abbreviated with `~` by the bridge). */
+  identity: z.string().nullish(),
+  /** `providerId` of an earlier entry for the same account; the screen shows the account once. */
+  sameAccountAs: z.string().nullish(),
+  planType: z.string().nullish(),
+  /** The account's config/home dir, where its agent writes readings (abbreviated with `~` by the bridge). */
+  home: z.string().nullish(),
+  /** Where the reading came from (a path is abbreviated with `~` by the bridge). */
+  source: z.string().nullish(),
+  fetchedAtMs: z.number().nullish(),
+  note: z.string().nullish(),
+  /** One of {@link USAGE_STATUSES}. */
+  status: z.string(),
+  staleMinutes: z.number().nullish(),
+  /** For example `grok login` with status `needs-login`. */
+  action: z.string().nullish(),
+  /** False: nothing on this machine; hosts hide these. */
+  inUse: z.boolean().nullish(),
+  windows: z.array(UsageWindow),
+});
+export type UsageProvider = z.infer<typeof UsageProvider>;
+
+export const UsageReport = z.object({
+  version: z.literal(1),
+  generatedAtMs: z.number(),
+  filter: z.enum(["open-panes", "all"]),
+  /** Whether `displayPercent` counts what is left or what is used. */
+  limitPercent: z.enum(["remaining", "used"]),
+  emptyMessage: z.string().nullish(),
+  providers: z.array(UsageProvider),
+  lowCachePanes: z.array(z.object({ label: z.string(), hitPercent: z.number() })).nullish(),
+});
+export type UsageReport = z.infer<typeof UsageReport>;
+
+/** Why the last collect produced no new report. Short codes, never CLI output. */
+export const USAGE_ERRORS = ["unavailable", "timeout", "failed", "bad_output", "unsupported"] as const;
+export const UsageError = z.enum(USAGE_ERRORS);
+export type UsageError = z.infer<typeof UsageError>;
+
+export const USAGE_FILTERS = ["open-panes", "all"] as const;
+
+export const UsageTopic = z.object({
+  /** The filter the bridge is collecting with (shared by every client). */
+  filter: z.enum(USAGE_FILTERS),
+  /** The last good report; kept while `error` is set. Null before the first one, and after the filter changes. */
+  report: UsageReport.nullable(),
+  /** When `report` was collected. */
+  updatedAtMs: z.number().nullable(),
+  error: UsageError.optional(),
+});
+export type UsageTopic = z.infer<typeof UsageTopic>;
+
+/** `act` kinds the usage topic handles. `usage.refresh` takes no args; `usage.set_filter` takes `{filter}`. */
+export const USAGE_ACTS = ["usage.refresh", "usage.set_filter"] as const;
 
 export const Welcome = z.object({
   type: z.literal("welcome"),
@@ -89,6 +176,7 @@ export const Welcome = z.object({
 const TOPIC_PAYLOADS: Partial<Record<string, z.ZodTypeAny>> = {
   host: HostState,
   plugins: PluginsTopic,
+  usage: UsageTopic,
 };
 
 export const Snap = z

@@ -1,0 +1,1 @@
+{ "filter": "all", "updatedAtMs": 1, "report": { "version": 1, "generatedAtMs": 1, "filter": "all", "limitPercent": "remaining", "providers": [ { "providerId": "claude-1", "family": "claude", "label": "claude-1", "status": "ok", "windows": [ { "slot": "primary", "windowMinutes": 300, "displayPercent": 62, "barFill": 0.62, "band": "high", "resetIn": "2h" } ] } ] } }

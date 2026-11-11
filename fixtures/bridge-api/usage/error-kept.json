@@ -1,0 +1,22 @@
+{
+  "filter": "open-panes",
+  "updatedAtMs": 1793722431615,
+  "error": "timeout",
+  "report": {
+    "version": 1,
+    "generatedAtMs": 1793722431615,
+    "filter": "open-panes",
+    "limitPercent": "used",
+    "providers": [
+      {
+        "providerId": "claude-1",
+        "family": "claude",
+        "label": "claude-1",
+        "status": "needs-login",
+        "action": "claude login",
+        "note": "Run `claude login` to sign in.",
+        "windows": []
+      }
+    ]
+  }
+}
