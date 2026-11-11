@@ -45,7 +45,7 @@ export type ModToBridge = z.infer<typeof ModToBridge>;
 
 // ---- bridge -> mod ----
 
-/** `name` must be in the allowlist, which the mod checks again itself (defined in S2). */
+/** `name` must be in {@link RUN_ALLOWLIST} with args matching {@link RUN_ARGS}; the mod checks both again itself. */
 export const Run = z.object({
   type: z.literal("run"),
   id: z.string().min(1),
@@ -71,6 +71,75 @@ export type BridgeToMod = z.infer<typeof BridgeToMod>;
 export const RECONNECT_BACKOFF_MS = { min: 500, max: 10_000 } as const;
 /** `state` is deduplicated by content hash and sent at most once per this many ms. */
 export const STATE_MIN_INTERVAL_MS = 100;
+
+// ---- run allowlist ----
+
+/**
+ * Ids as herdr-app reports them (`t3`, `space-1`, remote ones `machine/t3`). Bounded and free of
+ * whitespace and control characters, so nothing odd reaches `run()`.
+ */
+export const RunId = z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/);
+/** A 1-based position in a list. */
+export const RunIndex = z.number().int().min(1).max(10_000);
+
+/**
+ * The only commands the bridge may ask the link mod to run (the `navigate` capability), with
+ * the exact argument shapes each accepts. Extra keys are refused. The mod carries its own copy
+ * (`mod/herdr-app-remote/allowlist.js`); a parity test keeps the two equal.
+ */
+export const RUN_ARGS = {
+  "agent.focus": z.object({ terminal: RunId }).strict(),
+  "pane.focus": z.union([z.object({ pane: RunId }).strict(), z.object({ terminal: RunId }).strict()]),
+  "space.select": z.union([z.object({ id: RunId }).strict(), z.object({ index: RunIndex }).strict()]),
+  "tab.select": z.union([z.object({ id: RunId }).strict(), z.object({ index: RunIndex }).strict()]),
+} as const;
+export type RunName = keyof typeof RUN_ARGS;
+export const RUN_ALLOWLIST = Object.keys(RUN_ARGS).sort() as RunName[];
+
+/** Why a run was refused before anything ran. The mod answers with the same codes. */
+export type RunRefusal = "not_allowed" | "bad_args";
+
+/** Checks a run request against the allowlist. Nothing is run when this fails. */
+export function checkRun(name: unknown, args: unknown): { ok: true; name: RunName } | { ok: false; error: RunRefusal } {
+  if (typeof name !== "string" || !Object.prototype.hasOwnProperty.call(RUN_ARGS, name)) {
+    return { ok: false, error: "not_allowed" };
+  }
+  const schema = RUN_ARGS[name as RunName];
+  return schema.safeParse(args).success ? { ok: true, name: name as RunName } : { ok: false, error: "bad_args" };
+}
+
+// ---- runtime file ----
+
+/** Where the bridge advertises the link port and token, relative to the app home. */
+export const RUNTIME_RELATIVE_PATH = "data/herdr-app-remote/runtime.json";
+
+/** `runtime.json` (0600): written by the bridge, read by the mod before each connect. */
+export const Runtime = z.object({
+  v: z.literal(1),
+  port: z.number().int().min(1).max(65_535),
+  token: z.string().min(32).max(256),
+  pid: z.number().int().positive(),
+  bundle_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+});
+export type Runtime = z.infer<typeof Runtime>;
+
+/** Message limits on the link, in bytes of one NDJSON line. */
+export const LINE_LIMITS = {
+  /** Before a valid `hello` (the bridge drops a peer that sends more without one). */
+  preHello: 16 * 1024,
+  /** Mod to bridge after `hello` (a full `state`). */
+  modToBridge: 8 * 1024 * 1024,
+  /** Bridge to mod. */
+  bridgeToMod: 1024 * 1024,
+} as const;
+
+/**
+ * Serialises one message as an NDJSON line that is pure ASCII (non-ASCII is `\uXXXX`-escaped),
+ * so the mod can split and decode lines byte-wise without a streaming UTF-8 decoder.
+ */
+export function encodeLine(message: unknown): string {
+  return JSON.stringify(message).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`) + "\n";
+}
 
 /**
  * Parse one NDJSON line. Returns the zod result so callers can decide what to do on bad input.
