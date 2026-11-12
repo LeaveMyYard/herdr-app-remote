@@ -120,6 +120,8 @@ describe("install", () => {
     for (const f of readdirSync(join(REPO, "mod/herdr-app-remote"))) {
       expect(t[`mods/herdr-app-remote/${f}`]).toBe(`${sha(readFileSync(join(REPO, "mod/herdr-app-remote", f)))} 644`);
     }
+    // the tab icon is part of the mod, so it is copied and recorded like the rest
+    expect(t["mods/herdr-app-remote/remote.svg"]).toBe(`${sha(readFileSync(join(REPO, "mod/herdr-app-remote/remote.svg")))} 644`);
     expect(t[`${P.PWA_DIR}/index.html`]).toBe(`${sha(readFileSync(join(REPO, "packages/pwa/dist/index.html")))} 644`);
     expect(t[P.BUNDLE_PATH]).toBe(`${sha(readFileSync(join(REPO, "packages/bridge/dist/bridge.mjs")))} 644`);
     expect(t[P.DATA_DIR]).toBe("dir 700");
