@@ -258,9 +258,10 @@ describe("Usage phone layout", () => {
     expect(css).not.toMatch(/\.usage-z\{[^}]*width:\d+px/);
   });
   it("puts the footer status on its own line and hides the key hint without a hover pointer", () => {
-    expect(css).toMatch(/\.ufoot\{[^}]*flex-wrap:wrap/);
-    expect(css).toMatch(/\.ufoot-status\{flex:1 1 100%\}/);
-    expect(css).toMatch(/@media \(hover:none\),\(pointer:coarse\)\{\.ukey\{display:none\}\}/);
+    const touch = css.match(/@media \(hover:none\),\(pointer:coarse\)\{(.*)\}\n?$/)?.[1] ?? "";
+    expect(touch).toMatch(/\.ukey\{display:none\}/);
+    expect(touch).toMatch(/\.ufoot\{[^}]*flex-wrap:wrap/);
+    expect(touch).toMatch(/\.ufoot-status\{flex-basis:100%\}/);
     const { container } = render(<Usage {...base} busy={false} />);
     expect(container.querySelector(".ufoot-status")?.textContent).toMatch(/^Updated \d\d:\d\d · every 15s$/);
   });
