@@ -13,6 +13,7 @@ import { install as P } from "@herdr-remote/protocol";
 import { guardRemoval } from "./guard.js";
 import { digest, Home } from "./home.js";
 import { addBinding, chord, removeBinding, sectionFor } from "./keys.js";
+import { chooseIcons } from "./icons.js";
 import { derive, panoramaLayoutSha } from "./layouts.js";
 
 export const PANORAMA_RECEIPT = "data/panorama/install.json";
@@ -42,6 +43,8 @@ export interface Options {
   /** Absolute herdr-app, asked what the window shows (default: herdr-app on PATH, else none). */
   checker?: string | null;
   log?: (line: string) => void;
+  /** `--icon ABS`: the herdr-app SVG to render the app's icons from (default: found next to the herdr-app binary). */
+  icon?: string | null;
   /** PATH lookup, a test seam. */
   which?: (name: string) => string | null;
 }
@@ -274,6 +277,11 @@ export async function install(o: Options): Promise<void> {
   const old = loadReceipt(home);
   const notes: string[] = [];
 
+  // The herdr-app icon replaces the neutral icons in the payload, so it is recorded and removed like any file.
+  const icons = await chooseIcons({ icon: o.icon, bin: o.checker !== undefined ? o.checker : (o.which ?? which)("herdr-app") });
+  if (icons.files) for (const [p, data] of icons.files) payload.set(p, { data, mode: 0o644 });
+  notes.push(icons.line);
+
   const main = home.read(MAIN_LAYOUT, LIMIT);
   if (!main) throw new Error(`${MAIN_LAYOUT} is missing: start herdr-app once with this home so it writes its layouts. Nothing changed`);
   payload.set(P.LAYOUT_REMOTE, { data: Buffer.from(derive(main.data, MAIN_LAYOUT)), mode: 0o644 });
@@ -407,7 +415,7 @@ export async function uninstall(o: Options): Promise<void> {
 
 // ---- the command ----
 
-export const USAGE = "usage: app-install install|uninstall --app-home ABS [--key KEY] [--node ABS] [--checker ABS]";
+export const USAGE = "usage: app-install install|uninstall --app-home ABS [--key KEY] [--node ABS] [--icon ABS] [--checker ABS]";
 
 export function parseArgs(argv: string[]): ({ action: "install" | "uninstall" } & Options) | null {
   const [action, ...rest] = argv;
@@ -419,6 +427,7 @@ export function parseArgs(argv: string[]): ({ action: "install" | "uninstall" } 
     if (flag === "--app-home") o.appHome = value;
     else if (flag === "--key" && action === "install") o.key = value;
     else if (flag === "--node" && action === "install") o.node = value;
+    else if (flag === "--icon" && action === "install") o.icon = value;
     else if (flag === "--checker") o.checker = value;
     else return null;
   }

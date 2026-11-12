@@ -10,4 +10,4 @@ All assets are bundled into the build and served from our own origin; nothing is
 
 The OFL permits bundling and redistribution with software; the font licence texts are in `licenses/`.
 
-The app mark (`src/assets/remote.svg`, `design/icons/remote.svg`) and the icons in `public/icons/` are original to this project: a phone with signal arcs, drawn for herdr-app-remote, with PNGs exported with `rsvg-convert`. Herdr's own logo is not shipped.
+The app mark (`design/icons/remote.svg`) and the icons in `public/icons/` (including `app-logo.png` and `favicon.png`) are original to this project: a phone with signal arcs, drawn for herdr-app-remote, with PNGs exported with `rsvg-convert`. herdr-app's own logo is not committed or shipped (Apache-2.0 §6 grants no trademark rights): `scripts/app-install` can render the icon from the operator's own herdr-app install into their installed copy, using `@resvg/resvg-wasm` (MPL-2.0, pinned, an installer dependency, not part of the bridge bundle or the PWA).

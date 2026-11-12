@@ -639,6 +639,89 @@ describe("--key", () => {
   });
 });
 
+describe("herdr-app icon", () => {
+  // A made-up tile with a glyph: the tests never carry herdr-app art.
+  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" rx="20" fill="#336699"/><circle cx="50" cy="50" r="20" fill="#ffffff"/></svg>';
+  const PWA = P.PWA_DIR;
+  const ICONS = ["apple-touch-icon", "icon-192", "icon-512", "icon-maskable-512", "favicon", "app-logo"].map((n) => `${PWA}/icons/${n}.png`);
+  const dims = (b: Buffer) => [b.readUInt32BE(16), b.readUInt32BE(20)];
+  const neutral = (p: string) => readFileSync(join(REPO, "packages/pwa/dist", p.slice(PWA.length + 1)));
+  const svgIn = (w: World, rel: string, body = SVG) => {
+    const f = join(w.home, "..", rel);
+    mkdirSync(dirname(f), { recursive: true });
+    writeFileSync(f, body);
+    return f;
+  };
+
+  it("keeps the neutral icons and says so in one line when no herdr-app icon is found", async () => {
+    const w = world();
+    expect(await cli(w, "install")).toBe(0);
+    const lines = out.filter((l) => /icon/i.test(l));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^Kept the neutral icons: no herdr-app icon found/);
+    for (const p of ICONS) expect(readFileSync(join(w.home, p)).equals(neutral(p)), p).toBe(true);
+  });
+
+  it("renders every size from --icon, records the files, and uninstall removes them", async () => {
+    const w = world();
+    const before = tree(w.home);
+    expect(await cli(w, "install", "--icon", svgIn(w, "art/herdr-app.svg"))).toBe(0);
+    expect(out.filter((l) => /icon/i.test(l))).toEqual([expect.stringMatching(/^Used the herdr-app icon from .*herdr-app\.svg/)]);
+    const want: Record<string, number> = { "apple-touch-icon": 180, "icon-192": 192, "icon-512": 512, "icon-maskable-512": 512, favicon: 64, "app-logo": 128 };
+    const record = json(w, P.RECEIPT_PATH);
+    for (const [n, size] of Object.entries(want)) {
+      const p = `${PWA}/icons/${n}.png`;
+      const b = readFileSync(join(w.home, p));
+      expect(dims(b), n).toEqual([size, size]);
+      expect(b.equals(neutral(p)), n).toBe(false);
+      expect(record.files[p].sha256).toBe(sha(b));
+    }
+    w.says(JSON.stringify({ layout: "main" }));
+    expect(await cli(w, "uninstall")).toBe(0);
+    expect(tree(w.home)).toEqual(before);
+  });
+
+  it("keeps an icon that was edited after install, like any other file", async () => {
+    const w = world();
+    expect(await cli(w, "install", "--icon", svgIn(w, "art/herdr-app.svg"))).toBe(0);
+    writeFileSync(join(w.home, `${PWA}/icons/favicon.png`), "mine");
+    w.says(JSON.stringify({ layout: "main" }));
+    expect(await cli(w, "uninstall")).toBe(0);
+    expect(out).toContain(`Kept, not ours: ${PWA}/icons/favicon.png`);
+    expect(existsSync(join(w.home, `${PWA}/icons/icon-192.png`))).toBe(false);
+  });
+
+  it("finds the icon next to the herdr-app binary, following a symlink in PATH, or in ../share/herdr-app", async () => {
+    for (const rel of ["real/herdr-app.svg", "prefix/share/herdr-app/herdr-app.svg"]) {
+      const w = world();
+      svgIn(w, rel);
+      const target = join(w.home, "..", rel.startsWith("real") ? "real/herdr-app" : "prefix/bin/herdr-app");
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, "#!/bin/sh\n", { mode: 0o755 });
+      const link = join(w.bin, "herdr-app-link");
+      symlinkSync(target, link);
+      expect(await run(["install", "--app-home", w.home], { source: DEFAULT_SOURCE, log: (l) => out.push(l), which: () => link })).toBe(0);
+      expect(dims(readFileSync(join(w.home, `${PWA}/icons/icon-192.png`)))).toEqual([192, 192]);
+    }
+  });
+
+  it("keeps the neutral icons when the SVG cannot be rendered or --icon is not absolute", async () => {
+    const w = world();
+    expect(await cli(w, "install", "--icon", svgIn(w, "art/bad.svg", "<svg>not an icon"))).toBe(0);
+    expect(out.filter((l) => /icon/i.test(l))).toEqual([expect.stringMatching(/^Kept the neutral icons: could not render/)]);
+    for (const p of ICONS) expect(readFileSync(join(w.home, p)).equals(neutral(p)), p).toBe(true);
+    expect(await cli(w, "install", "--icon", "relative.svg")).toBe(0);
+    expect(out.find((l) => /icon/i.test(l))).toMatch(/^Kept the neutral icons: --icon needs an absolute path/);
+  });
+
+  it("an upgrade without the icon puts the neutral icons back", async () => {
+    const w = world();
+    expect(await cli(w, "install", "--icon", svgIn(w, "art/herdr-app.svg"))).toBe(0);
+    expect(await cli(w, "install")).toBe(0);
+    for (const p of ICONS) expect(readFileSync(join(w.home, p)).equals(neutral(p)), p).toBe(true);
+  });
+});
+
 describe("scripts/app-install", () => {
   const script = join(REPO, "scripts/app-install");
   const built = existsSync(join(REPO, "installer/dist/index.js"));

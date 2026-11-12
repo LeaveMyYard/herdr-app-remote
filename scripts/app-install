@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Install, upgrade or uninstall herdr-app-remote in a herdr-app home. Never selects a layout,
 // edits settings or touches tailscale serve. Build first: pnpm install && pnpm build.
-//   scripts/app-install install --app-home ~/.config/herdr-app [--key ctrl-alt-r] [--node /abs/node]
+//   scripts/app-install install --app-home ~/.config/herdr-app [--key ctrl-alt-r] [--node /abs/node] [--icon /abs/herdr-app.svg]
 //   scripts/app-install uninstall --app-home ~/.config/herdr-app [--checker /abs/herdr-app]
 const major = Number(process.versions.node.split(".")[0]);
 if (major < 22) {

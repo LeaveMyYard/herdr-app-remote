@@ -2,7 +2,7 @@
 // asks to add Herdr to the Home Screen, where Web Push works and the app opens already set up. The bell in the header
 // opens it again. Shown in the browser only, never in the installed app.
 import { createContext, useContext } from "react";
-import appIcon from "../assets/remote.svg";
+import appIcon from "../app-logo";
 import { Icon } from "../components/Icon";
 import { Steps } from "./PairScreen";
 

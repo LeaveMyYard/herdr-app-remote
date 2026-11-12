@@ -1,6 +1,6 @@
 // The pairing screen (board PhonePair: check, wait, ok, bad, first). Copy follows design/COPY.md and the board.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import appIcon from "../assets/remote.svg";
+import appIcon from "../app-logo";
 import { Tile } from "../components/StateMarks";
 import { fetchApi, isStandalone, parseFragment, runPairing, setPromptWanted, type PairApi, type PairView } from "./flow";
 
