@@ -10,7 +10,10 @@ terminals running a synthetic script (no real agent output):
 | read-not-found-0.1.20.json | stderr of `hc read no-such-terminal --lines 200` (exit 3) |
 
 `ls.json` and `ls-without-t3.json` are hand-written in the recorded shape (`{"hidden_finished":N,"terminals":[{"address":…}]}`)
-so the tests can name `t3`, `t4` and a remote `vps/t7`. Before fix/chat-loading-forever they used a guessed shape
+so the tests can name `t3`, `t4` and a remote `vps/t7`. **The remote entry is unverified**: the rig has no second
+machine, so nothing shows that `hc ls --json` lists `--on` terminals or spells them `machine/t7` (that form comes from
+`hc read --help`: "`t7`, a name, or `machine/t7`"). If it doesn't list them, a remote chat shows "This terminal has
+closed" until it does. Before fix/chat-loading-forever they used a guessed shape
 (`[{"id":…}]`), which is why the bridge never matched hc 0.1.20's `address` and every chat said `terminal_not_found`.
 
 `read-agent.ansi` and `read-hostile.ansi` are synthetic ANSI for the parser. The `keys-*` and `send-*` files belong to

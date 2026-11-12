@@ -94,8 +94,11 @@ const STALE_ERROR: Record<string, { title: string; body: (host: string) => strin
   bad_data: { title: "Can't show this terminal", body: (h) => `${h} sent text this version of the app can't read. Updating Remote may help.` },
 };
 
-/** With no text and no reason from the bridge, the screen stops saying "Waiting" after this long. */
-export const CHAT_WAIT_MS = 8_000;
+/**
+ * With no text and no reason from the bridge, the screen stops saying "Waiting" after this long. Above the bridge's
+ * worst first answer (`hc ls` then `hc read`, 4 s timeout each), so a hung hc shows its own reason first.
+ */
+export const CHAT_WAIT_MS = 10_000;
 
 /** True once `ms` has passed since `key` last changed. */
 function useElapsed(key: string | undefined, ms: number): boolean {

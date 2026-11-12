@@ -176,6 +176,15 @@ async function seeState(role, text, ms = 8000) {
   }
 }
 // A fresh page load each time (a hash-only goto would keep the page and its cached topics).
+/** Samples every 500 ms for `ms`: how many samples failed `pred` (0 means it held throughout). */
+async function holds(pred, ms = 6000) {
+  let misses = 0;
+  for (let t = 0; t < ms; t += 500) {
+    await sleep(500);
+    if (!(await pred())) misses += 1;
+  }
+  return misses;
+}
 const open = async (hash, agent) => {
   await page.goto('about:blank');
   await page.goto(`${ORIGIN}/${hash}`);
@@ -204,6 +213,9 @@ try {
   await snap('closed-before-open');
   check('a closed terminal shows "This terminal has closed" within 5 s', ms >= 0, { ms });
   check('...and not "Waiting for the terminal"', (await page.getByText('Waiting for the terminal').count()) === 0);
+  // hc read of a finished terminal still answers: the alert must not give way to its last screen.
+  let misses = await holds(async () => (await page.getByRole('alert').filter({ hasText: 'This terminal has closed' }).count()) === 1 && !((await log$().textContent()) ?? '').includes('agent-three says'));
+  check('...and it stays closed for 6 s (no last screen shown as live)', misses === 0, { misses });
 
   // A terminal that closes while its chat is open: the last text stays under a notice.
   await open('#/chat', 'Agent Two');
@@ -213,6 +225,8 @@ try {
   await snap('closed-while-open');
   check('a terminal closing under an open chat says so', ms >= 0, { ms });
   check('...and keeps its last text', (await log$().textContent())?.includes('agent-two says: tests pass'));
+  misses = await holds(async () => (await page.getByRole('status').filter({ hasText: 'This terminal has closed.' }).count()) === 1);
+  check('...and the notice stays for 6 s (no flapping)', misses === 0, { misses });
 
   // hc gone: the chat says so within a few seconds.
   rmSync(linkHc);

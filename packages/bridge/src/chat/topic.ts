@@ -32,8 +32,8 @@ export interface ChatTopicOptions {
 
 /**
  * Ids in `hc ls --json`. hc 0.1.20 prints `{"hidden_finished":0,"terminals":[{"address":"t1",...}]}` (recorded in the
- * rig: test/fixtures/hc/ls-0.1.20.json); `address` is the id `hc read` takes. A bare list and the other id keys are read
- * too, tolerantly. Anything else yields `null` (unknown), and the read goes ahead and decides.
+ * rig: test/fixtures/hc/ls-0.1.20.json); `address` is the id `hc read` takes, and the only one read from a record that
+ * has it. A bare list, and `id`/`terminal`/`name` of records without an address, are read too, tolerantly. Anything else yields `null` (unknown), and the read goes ahead and decides.
  */
 export function terminalIds(stdout: string): Set<string> | null {
   let doc: unknown;
@@ -49,7 +49,9 @@ export function terminalIds(stdout: string): Set<string> | null {
     if (typeof e === "string") ids.add(e);
     else if (e && typeof e === "object") {
       const r = e as Record<string, unknown>;
-      for (const k of ["address", "id", "terminal", "name"]) if (typeof r[k] === "string") ids.add(r[k] as string);
+      // The address when there is one: a terminal's user-chosen `name` (say `t3`) must not stand in for another's address.
+      if (typeof r.address === "string") ids.add(r.address);
+      else for (const k of ["id", "terminal", "name"]) if (typeof r[k] === "string") ids.add(r[k] as string);
     }
   }
   return ids;
@@ -87,6 +89,12 @@ interface Poll {
   ticks: number;
   failures: number;
   stopped: boolean;
+  /**
+   * hc said the terminal is gone (`hc ls` lacks it, or `hc read` answered `not_found`). Sticky until `hc ls` lists it
+   * again: `hc read` of a finished terminal still answers with its last screen, and publishing that would clear the
+   * `terminal_not_found` stale and make a dead terminal look live. While gone, only `hc ls` runs, every tick.
+   */
+  gone: boolean;
 }
 
 /**
@@ -129,7 +137,7 @@ export class ChatTopicDriver {
       return void this.o.hub.setStale(topic, "too_many_chats");
     }
     this.waiting.delete(topic);
-    const poll: Poll = { timer: undefined, ticks: 0, failures: 0, stopped: false };
+    const poll: Poll = { timer: undefined, ticks: 0, failures: 0, stopped: false, gone: false };
     this.polls.set(topic, poll);
     void this.tick(topic, id, poll);
   }
@@ -157,7 +165,7 @@ export class ChatTopicDriver {
     const bin = (this.o.binaries ?? DEFAULT_BINARIES).hc;
     const { hub } = this.o;
     const timeoutMs = this.o.readTimeoutMs ?? CHAT_READ_TIMEOUT_MS;
-    const lsNow = poll.ticks % LS_EVERY === 0;
+    const lsNow = poll.gone || poll.ticks % LS_EVERY === 0;
     poll.ticks += 1;
     let ok = false;
     try {
@@ -165,9 +173,11 @@ export class ChatTopicDriver {
         const ls = await this.o.run(bin, ["ls", "--json"], { timeoutMs });
         if (poll.stopped) return;
         if (ls.error || ls.code !== 0) return this.fail(topic, id, poll, failureReason(ls));
-        // Output it does not understand is not a failure: the read decides.
+        // Output it does not understand is not a failure: the read decides (but never revives a gone terminal).
         const ids = terminalIds(ls.stdout);
-        if (ids && !ids.has(id)) return this.fail(topic, id, poll, "terminal_not_found");
+        if (ids && !ids.has(id)) poll.gone = true;
+        else if (ids) poll.gone = false;
+        if (poll.gone) return this.fail(topic, id, poll, "terminal_not_found");
       }
       const r = await this.o.run(bin, ["read", id, "--lines", String(this.o.lines ?? CHAT_LINES)], { timeoutMs });
       if (poll.stopped) return;
@@ -177,7 +187,9 @@ export class ChatTopicDriver {
         hub.publish(topic, value as unknown as Json);
         ok = true;
       } else {
-        hub.setStale(topic, failureReason(r));
+        const reason = failureReason(r);
+        if (reason === "terminal_not_found") poll.gone = true;
+        hub.setStale(topic, reason);
       }
     } catch {
       if (poll.stopped) return;

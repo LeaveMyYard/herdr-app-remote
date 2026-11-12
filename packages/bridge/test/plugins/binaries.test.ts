@@ -108,19 +108,13 @@ describe("startApp", () => {
       calls.push(`${cmd} ${args[0]}`);
       return { code: 1, stdout: "", stderr: "" };
     };
-    const oldPath = process.env.PATH;
-    process.env.PATH = "/usr/bin:/bin";
-    try {
-      link = new LinkServer({ token: "t".repeat(32) });
-      await link.listen();
-      app = await startApp({ appHome: tmp("bin-app-"), link, port: 0, serve: { host: "desk-1.example-tailnet.ts.net", login: "user-1@example" }, home, run: recording, tailscale: "/nonexistent/tailscale" });
-      const c = app.hub.connect({ send: () => {}, close: () => {} });
-      await app.hub.handleRaw(c, JSON.stringify({ type: "hello", api: 1 }));
-      await app.hub.handleRaw(c, JSON.stringify({ type: "sub", topics: ["chat:t1"] }));
-      await vi.waitFor(() => expect(calls).toContain(`${hc} ls`));
-      expect(calls).toContain(`${hc} --version`);
-    } finally {
-      process.env.PATH = oldPath;
-    }
+    link = new LinkServer({ token: "t".repeat(32) });
+    await link.listen();
+    app = await startApp({ appHome: tmp("bin-app-"), link, port: 0, serve: { host: "desk-1.example-tailnet.ts.net", login: "user-1@example" }, home, binPath: "/usr/bin:/bin", run: recording, tailscale: "/nonexistent/tailscale" });
+    const c = app.hub.connect({ send: () => {}, close: () => {} });
+    await app.hub.handleRaw(c, JSON.stringify({ type: "hello", api: 1 }));
+    await app.hub.handleRaw(c, JSON.stringify({ type: "sub", topics: ["chat:t1"] }));
+    await vi.waitFor(() => expect(calls).toContain(`${hc} ls`));
+    expect(calls).toContain(`${hc} --version`);
   });
 });

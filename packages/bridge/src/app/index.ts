@@ -69,8 +69,10 @@ export interface AppOptions {
   tailscale?: string;
   /** Test seam: how long setup's `tailscale serve` commands may run (default `SERVE_TIMEOUT_MS`). */
   serveTimeoutMs?: number;
-  /** For the usage topic's `~` abbreviation. */
+  /** For the usage topic's `~` abbreviation, and the fallback dirs binaries are looked for in (`~/.local/bin`). */
   home?: string;
+  /** The PATH binaries are looked up on; default the bridge's own (tests). */
+  binPath?: string;
   funnelCheckMs?: number;
   /** Extra `act` handlers (later slices: inbox, chat, terminal, push), tried before the built-in ones. */
   actors?: readonly Actor[];
@@ -121,7 +123,7 @@ export async function startApp(o: AppOptions): Promise<App> {
   const run = o.run ?? defaultRun;
   // Resolved to absolute paths (PATH, then ~/.local/bin and the like), and shared: the hc that `plugins` detects is the
   // one chat and the terminal actors run, also when herdr-app was started with a PATH that lacks ~/.local/bin.
-  const binaries = o.binaries ?? resolvedBinaries(o.home !== undefined ? { home: o.home } : {});
+  const binaries = o.binaries ?? resolvedBinaries({ ...(o.home !== undefined ? { home: o.home } : {}), ...(o.binPath !== undefined ? { path: o.binPath } : {}) });
   const log = o.log ?? (() => {});
   const invalid = (topic: string) => (error: string) => log({ event: "invalid_topic", topic, error });
 

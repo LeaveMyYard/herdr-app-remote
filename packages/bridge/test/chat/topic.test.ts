@@ -57,16 +57,18 @@ const sub = async (hub: ReturnType<typeof newHub>, ...topics: string[]) => {
 describe("terminalIds", () => {
   it("reads the addresses hc 0.1.20 prints (recorded in the rig)", () => {
     // The regression: these were read as no ids at all, so every chat was "terminal_not_found" and never read.
-    expect(terminalIds(fx("ls-0.1.20.json"))).toEqual(new Set(["t1", "t2", "t3", "agent-one", "agent-two", "agent-three"]));
+    expect(terminalIds(fx("ls-0.1.20.json"))).toEqual(new Set(["t1", "t2", "t3"]));
   });
 
   it("reads a list or a wrapped list, and gives null for anything else", () => {
-    expect([...(terminalIds(fx("ls.json")) ?? [])]).toEqual(["t3", "agent-one", "t4", "vps/t7"]);
+    expect([...(terminalIds(fx("ls.json")) ?? [])]).toEqual(["t3", "t4", "vps/t7"]);
     expect([...(terminalIds(fx("ls-without-t3.json")) ?? [])]).toEqual(["t4"]);
     expect(terminalIds("not json")).toBeNull();
     expect(terminalIds('{"x":1}')).toBeNull();
     expect(terminalIds('["t1"]')).toEqual(new Set(["t1"]));
     expect(terminalIds('[{"id":"t1"}]')).toEqual(new Set(["t1"]));
+    // A live terminal named after a closed one's address does not keep that address "present".
+    expect(terminalIds('{"terminals":[{"address":"t9","name":"t3"}]}')).toEqual(new Set(["t9"]));
   });
 });
 
@@ -222,6 +224,47 @@ describe("ChatTopicDriver", () => {
     expect(hub.isStale("chat:t3")).toBe("terminal_not_found");
     // The last text stays for the phone to show under the notice.
     expect(hub.get("chat:t3")).toBeDefined();
+  });
+
+  it("a terminal gone from hc ls stays terminal_not_found while hc read still answers (no flapping)", async () => {
+    vi.useFakeTimers();
+    let listed = true;
+    // hc read of a finished terminal keeps answering with its last screen.
+    const { calls, runner } = stub((c) => ok(c.args[0] === "ls" ? fx(listed ? "ls.json" : "ls-without-t3.json") : fx("read-agent.ansi")));
+    const hub = setup(runner);
+    const c = await sub(hub, "chat:t3");
+    listed = false;
+    const seen: (string | null)[] = [];
+    for (let i = 0; i < 40; i++) {
+      await settle(500);
+      seen.push(hub.isStale("chat:t3"));
+    }
+    const first = seen.indexOf("terminal_not_found");
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(first).toBeLessThanOrEqual(6); // within 3 s
+    // From then on (well over 6 ticks, back-off included) it never goes fresh again, and no read runs.
+    expect(seen.slice(first).every((r) => r === "terminal_not_found")).toBe(true);
+    const n = calls.filter((x) => x.args[0] === "read").length;
+    await settle(CHAT_INTERVAL_MS * 10);
+    expect(calls.filter((x) => x.args[0] === "read").length).toBe(n);
+    expect(c.client.ofType("stale").map((m) => m.reason)).toEqual(["terminal_not_found"]);
+    // Listed again: read and fresh.
+    listed = true;
+    await settle(CHAT_INTERVAL_MS * 6);
+    expect(hub.isStale("chat:t3")).toBeNull();
+  });
+
+  it("a read answering not_found is sticky too, until hc ls lists the terminal", async () => {
+    vi.useFakeTimers();
+    let gone = true;
+    // ls output it can't read: the read decides, and its not_found must stick.
+    const { runner } = stub((c) => (c.args[0] === "ls" ? ok("garbage") : c.args[0] === "read" && gone ? { code: 3, stdout: "", stderr: fx("read-not-found-0.1.20.json") } : ok(fx("read-agent.ansi"))));
+    const hub = setup(runner);
+    await sub(hub, "chat:t3");
+    expect(hub.isStale("chat:t3")).toBe("terminal_not_found");
+    gone = false; // read would answer now, but ls never says the terminal is back
+    await settle(CHAT_INTERVAL_MS * 10);
+    expect(hub.isStale("chat:t3")).toBe("terminal_not_found");
   });
 
   it("runs the hc it was given (the resolved absolute path)", async () => {
