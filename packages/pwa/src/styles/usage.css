@@ -1,7 +1,7 @@
 /* Usage screen. Values follow design/PhoneUsage: desktop.py usage_panel, zoomed 1.2, with the phone
    overrides of build_rest.py PH_CSS (bigger touch targets, no panel border). Colours come from the tokens. */
 .usage-main{min-height:0}
-.hd .usage-z{width:325px;height:100%}
+.hd .usage-z{width:100%;height:100%}
 .upanel{height:100%;overflow:hidden;background:var(--t-chrome);color:var(--t-foreground);font-size:13px}
 .uhead{height:50px;padding:0 14px;gap:8px;border-bottom:1px solid var(--t-border)}
 .uhead *{white-space:nowrap;flex-shrink:0}
@@ -52,10 +52,13 @@
 .uempty{min-height:0;align-items:center;justify-content:center;gap:6px;padding:0 24px;text-align:center}
 .uempty-title{font-size:14px;font-weight:600}
 .uempty-body{font-size:12.5px;color:var(--t-dim)}
-.ufoot{height:50px;padding:0 14px;gap:8px;border-top:1px solid var(--t-border);font-size:11.5px;color:var(--t-dim)}
-.ufsegs{gap:1px}
+.ufoot{min-height:50px;padding:6px 14px;gap:4px 8px;flex-wrap:wrap;border-top:1px solid var(--t-border);font-size:11.5px;color:var(--t-dim)}
+.ufoot-status{flex:1 1 100%}
+.ufsegs{gap:1px;margin-right:auto}
 .hd .ufseg{height:30px;padding:0 9px;border-radius:5px;font-size:11px;color:var(--t-dim)}
 .hd .ufseg[aria-pressed=true]{color:var(--t-foreground);background:var(--t-raised)}
 .hd .ubtn{height:37px;padding:0 10px;gap:6px;border-radius:7px;background:var(--t-raised);font-size:12px;color:var(--t-foreground)}
 .hd .ubtn[aria-busy=true]{color:var(--t-dim)}
 .ukey{font-size:11px;color:var(--t-dim)}
+/* Key hints mean nothing without a keyboard. */
+@media (hover:none),(pointer:coarse){.ukey{display:none}}
