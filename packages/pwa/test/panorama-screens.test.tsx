@@ -24,7 +24,7 @@ describe("AgentsRich", () => {
     expect(first).toHaveTextContent("Agent 1 · Parser rewrite");
     expect(first).toHaveTextContent("Running");
     expect(first).toHaveTextContent("Project Alpha · tab 2 · 2 active · 3 agents");
-    expect(first).toHaveAttribute("href", "#/swarm/sp-1");
+    expect(first).toHaveAttribute("href", "#/chat/a-1");
   });
   it("shows the open question total in the header and on the card", () => {
     render(<AgentsRich view={view} />);
