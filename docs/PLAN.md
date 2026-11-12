@@ -285,7 +285,7 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
 - Goal:
   - Vite + React, with tokens and glyphs from `common.py` and self-hosted fonts;
   - the manifest and icons, with safe-area handling;
-  - icon policy: the repository and the release bundle ship only the neutral icons, at fixed paths (`icons/favicon.png`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `app-logo.png`). The installer renders the herdr-app icon from the local herdr-app install (PR #32: the operator's own `herdr-app.svg` next to the `herdr-app` binary, or `--icon`), replaces those files in the installed PWA, records it in the install record, and says so in one line when it keeps the neutral ones. herdr-app is Apache-2.0 and §6 grants no trademark rights. Older commits (14961b0, ee8c8c0; removed in 896b8f8) still contain herdr art. The operator decided on 2026-11-12 (Q472) to leave that history unchanged;
+  - icon policy: the app source and the release bundle ship only the neutral icons, at fixed paths (`icons/favicon.png`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `app-logo.png`). The installer renders the herdr-app icon from the local herdr-app install (PR #32: the operator's own `herdr-app.svg` next to the `herdr-app` binary, or `--icon`), replaces those files in the installed PWA, records it in the install record, and says so in one line when it keeps the neutral ones. herdr-app is Apache-2.0 and §6 grants no trademark rights. Commits from ee8c8c0 (#1) up to 896b8f8 (#13, which removed it; includes 14961b0) still contain herdr art, and the design reference screenshots in `design/refs/` (14 PNGs, last changed in ee8c8c0) still show the herdr logo until they are re-rendered. The operator decided on 2026-11-12 (Q472) to leave the git history unchanged;
   - the 5-tab bar with badges;
   - connection and stale banners;
   - the PhoneAgentsBasic and PhoneMissing screens;
@@ -413,7 +413,7 @@ Defaults taken until the operator says otherwise:
 
 ## 8. Unverified risks
 
-- **Deferred (tech debt, #33 follow-up):** the bridge's `--panes` label, empty-key handling and cwd differ from the desktop agent-usage panel, so per-pane shares can differ. The operator chose "defer as tech debt" (Q473); creating a GitHub issue was denied, so it is recorded here.
+- **Deferred (known tech debt, not a risk; #33 follow-up):** the bridge's `--panes` label, empty-key handling and cwd differ from the desktop agent-usage panel, so per-pane shares can differ. The operator chose "defer as tech debt" (Q473); it is recorded here instead of a GitHub issue.
 - **hc:** `hc events` hasn't been tested against a live core. `hc send` was checked in the rig (S16, hc 0.1.19): it pastes text and presses Enter, and has no special keys, so the key bar's own keys are text-only: ⏎ and `/`. Special keys are `hc keys` (S16b, also checked in the rig): it accepts single printable characters too, so the bridge allows only a strict subset of key tokens, from the desktop's key menu, each sending a control byte or an ESC-prefixed sequence (an `alt` letter is ESC then the letter). Refusals come as JSON on stderr.
 - **Tailscale serve:**
   - Identity headers: the exact set, their absence for tagged nodes, and local forgery (hence the cookie).
