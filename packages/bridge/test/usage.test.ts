@@ -52,6 +52,12 @@ describe("panesArg", () => {
     const aliased = { ...host, agents: [{ ...host.agents[0]!, harness: "antigravity" }, { ...host.agents[0]!, id: "x2", harness: "cursor-agent" }] };
     expect((JSON.parse(panesArg(aliased)) as { agent: string }[]).map((p) => p.agent)).toEqual(["agy", "cursor"]);
   });
+  it("uses the program key, and maps an older mod's app name (claude-code) when there is none", () => {
+    const host = fixture("typical") as { agents: Record<string, unknown>[] };
+    const a = host.agents[0]!;
+    const agents = [{ ...a, harness: "claude-code", program: "claude" }, { ...a, id: "x2", harness: "claude-code" }, { ...a, id: "x3", harness: "x", program: "cursor-agent" }];
+    expect((JSON.parse(panesArg({ ...host, agents })) as { agent: string }[]).map((p) => p.agent)).toEqual(["claude", "claude", "cursor"]);
+  });
   it("is an empty array before there is a host state", () => {
     expect(panesArg(undefined)).toBe("[]");
     expect(panesArg({ nope: 1 })).toBe("[]");

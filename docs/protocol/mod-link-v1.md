@@ -58,7 +58,7 @@ There is no reply to `hello`; the first `ping` (or `run`/`notify`) is the first 
 `HostState` (shared with the bridge-api `host` topic):
 
 - `spaces[]`: `{id, name, focused}`
-- `agents[]`: `{id, name, harness, state, space_id, terminal_id?}`, `state` in `idle|working|waiting|done|error|unknown`
+- `agents[]`: `{id, name, harness, state, space_id, terminal_id?, program?}` (`program` is the herdr-app program key; `harness` is the app name when there is one), `state` in `idle|working|waiting|done|error|unknown`
 - `terminals[]`: `{id, title, space_id, cols, rows}`
 - `panes[]`: `{id, space_id, terminal_id?, kind}`
 - `focused`: `{space_id, pane_id, agent_id}`, each nullable

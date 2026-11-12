@@ -172,7 +172,7 @@ Payload schemas defined so far: `host` is `HostState` (see mod-link v1), `plugin
 Source: `usagebar collect --format v1 [--all] --panes <JSON>` (agent-usage `docs/collect-json-v1.md`). Schema: `UsageTopic` in `packages/protocol/src/bridge-api.ts`; fixtures in `fixtures/bridge-api/usage/`.
 
 - The bridge runs it only while at least one client is subscribed: at once for the first subscriber, then every 15 s, with a 10 s timeout, never two at a time. When the last client leaves, it stops.
-- `--panes` is built from the `host` topic's agents (`paneId` is the terminal id, `agent` the harness, `label` the agent name; `antigravity` and `cursor-agent` become usagebar's `agy` and `cursor`). Without a host state it is `[]`.
+- `--panes` is built from the `host` topic's agents (`paneId` is the terminal id, `agent` the program key (`claude`, `codex`; older link mods send only `harness`, whose `claude-code` is mapped to `claude`), `label` the agent name; `antigravity` and `cursor-agent` become usagebar's `agy` and `cursor`). Without a host state it is `[]`.
 - With an app home configured, collect runs like agent-usage's own panel: `/usr/bin/env HERDR_PLUGIN_CONFIG_DIR=<configDir> <binary> collect ...`, where `binary` and `configDir` come from `<app home>/mods/agent-usage/local.json` (read-only; defaults `~/.local/bin/usagebar` and `~/.config/agent-usage`), so the phone shows the same accounts as the desktop panel.
 - `--panes` carries no `cwd` (the host state has none; the Grok provider uses it): a follow-up needs the mod link to send it.
 - The bridge never runs `usagebar notify`: a second consumer of toasts would split them with the desktop mod (PLAN section 7).

@@ -361,6 +361,40 @@ describe("startApp: topics over the link", () => {
     expect(calls.find((c) => c.cmd === "/usr/bin/env")!.args[1]).toBe(`${home}/.local/bin/usagebar`);
   });
 
+  it("builds --panes from the mod's agents the way the desktop panel does (program key, not the app name), for both filters", async () => {
+    await start();
+    const mod = await linkMod();
+    const host = hostFixture() as { agents: Record<string, unknown>[] };
+    host.agents = [
+      { ...host.agents[0], harness: "claude-code", program: "claude" },
+      { ...host.agents[1], harness: "codex", program: "codex" },
+      { ...host.agents[1], id: "agent-3", name: "Agent 3", terminal_id: "term-3", harness: "antigravity-cli", program: "antigravity" },
+      { id: "agent-4", name: "Agent 4", harness: "claude-code", state: "idle", space_id: "space-1", terminal_id: "term-4" },
+    ];
+    const got = new Promise((r) => link.once("host", r));
+    mod.send({ type: "state", seq: 1, host });
+    await got;
+    const p = await phone(await paired());
+    send(p, { type: "hello", api: 1 });
+    send(p, { type: "sub", topics: ["usage"] });
+    await p.until((m): m is bridgeApi.Snap => m.type === "snap" && m.topic === "usage" && (m.data as { report: unknown }).report !== null);
+    const panes = (args: string[]) => JSON.parse(args[args.indexOf("--panes") + 1]!) as { paneId: string; agent: string; label: string }[];
+    const want = [
+      { paneId: "term-1", agent: "claude", label: "Agent 1" },
+      { paneId: "term-2", agent: "codex", label: "Agent 2" },
+      { paneId: "term-3", agent: "agy", label: "Agent 3" },
+      // An older link mod sends no program: the app name is mapped.
+      { paneId: "term-4", agent: "claude", label: "Agent 4" },
+    ];
+    const open = calls.find((c) => c.cmd === "/usr/bin/env" && c.args.includes("collect"))!;
+    expect(open.args).not.toContain("--all");
+    expect(panes(open.args)).toEqual(want);
+    send(p, { type: "act", id: "u1", kind: "usage.set_filter", args: { filter: "all" } });
+    expect(await p.until(resOf("u1"))).toMatchObject({ ok: true });
+    const all = calls.filter((c) => c.cmd === "/usr/bin/env" && c.args.includes("--all")).at(-1)!;
+    expect(panes(all.args)).toEqual(want);
+  });
+
   it("sends navigate acts to the link copy as an allowlisted run, only with the navigate capability", async () => {
     await start();
     const mod = await linkMod();

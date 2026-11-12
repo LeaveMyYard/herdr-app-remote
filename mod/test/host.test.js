@@ -18,8 +18,8 @@ describe('buildHost', () => {
         { id: 'space-2', name: 'Project Beta', focused: false },
       ],
       agents: [
-        { id: 't1', name: 'Agent 1', harness: 'claude-code', state: 'working', space_id: 'space-1', terminal_id: 't1' },
-        { id: 't2', name: 'Codex', harness: 'codex', state: 'waiting', space_id: 'space-2', terminal_id: 't2' },
+        { id: 't1', name: 'Agent 1', harness: 'claude-code', state: 'working', space_id: 'space-1', terminal_id: 't1', program: 'claude' },
+        { id: 't2', name: 'Codex', harness: 'codex', state: 'waiting', space_id: 'space-2', terminal_id: 't2', program: 'codex' },
       ],
       terminals: [
         { id: 't1', title: 'Agent 1', space_id: 'space-1', cols: 120, rows: 40 },
