@@ -18,6 +18,8 @@ export const Agent = z.object({
   state: AgentState,
   space_id: z.string().min(1),
   terminal_id: z.string().min(1).optional(),
+  /** The herdr-app program key (`claude`, `codex`, ...). `harness` is the app name first, which is not always the key. */
+  program: z.string().min(1).optional(),
 });
 export type Agent = z.infer<typeof Agent>;
 

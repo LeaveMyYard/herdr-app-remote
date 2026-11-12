@@ -76,6 +76,7 @@ export function buildHost(src) {
     const space = str(a?.space);
     if (!id || !space || !known.has(space)) continue;
     if (!terminalSpace.has(id)) terminalSpace.set(id, space);
+    const program = str(a.program?.key);
     agents.push({
       id,
       name: str(a.title) ?? str(a.program?.name) ?? id,
@@ -83,6 +84,7 @@ export function buildHost(src) {
       state: agentState(a.status),
       space_id: space,
       terminal_id: id,
+      ...(program ? { program } : {}),
     });
   }
 

@@ -15,13 +15,18 @@ export const USAGE_TIMEOUT_MS = 10_000;
 /** herdr-app program keys that differ from usagebar's agent ids (agent-usage `mods/agent-usage/main.js`). */
 const AGENT_IDS: Record<string, string> = { antigravity: "agy", "cursor-agent": "cursor" };
 
+/** App names an older link mod put in `harness` (it prefers `app` over the program key) that are not usagebar's ids. */
+const APP_IDS: Record<string, string> = { "claude-code": "claude" };
+
+const agentId = (key: string): string => AGENT_IDS[key] ?? key;
+
 /** The `--panes` argument: the open agent panes, in the shape agent-usage's collect-json-v1 takes. */
 export function panesArg(host: unknown): string {
   const parsed = HostState.safeParse(host);
   if (!parsed.success) return "[]";
   const panes = parsed.data.agents.map((a) => ({
     paneId: a.terminal_id ?? a.id,
-    agent: AGENT_IDS[a.harness] ?? a.harness,
+    agent: agentId(a.program ?? APP_IDS[a.harness] ?? a.harness),
     label: a.name,
   }));
   return JSON.stringify(panes);
