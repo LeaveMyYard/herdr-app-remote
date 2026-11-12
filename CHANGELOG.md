@@ -10,6 +10,7 @@ First release candidate: phone access to herdr-app over Tailscale. Nothing here 
 
 - Bridge (Node >= 22, one bundled file) with the snapshot/patch hub, the `host`, `plugins`, `panorama`, `inbox`, `usage`, `chat:<t>` and `setup` topics, and loopback-only listeners.
 - Mod `herdr-app-remote` for herdr-app: the 1 px link block that mirrors host state and starts the bridge, and the desktop Remote panel (Status, Devices, Plugins, Activity, Setup).
+- Tab icon `mods/herdr-app-remote/remote.svg` (24 px grid, `currentColor` stroke, like the files and changes mods), installed and recorded with the mod.
 - Installer `scripts/app-install` (install, upgrade, uninstall) with an install record of sha256 hashes, two derived layouts (`herdr-remote`, `panorama-remote`), and an optional panel key.
 - Security layer: Host, Origin and identity guards, Funnel refusal, pairing with approval, a `__Host-` cookie, per-device capabilities (`view`, `inbox.answer`, `navigate`, `terminal.input`, `push`), rate limits, pause, and an audit log without free text.
 - Phone app (PWA): Agents (Basic, and Swarm and Peek with panorama), Inbox with answering, Usage, read-only Chat, banners, Missing screens for absent plugins.
