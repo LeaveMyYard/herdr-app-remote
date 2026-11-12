@@ -39,11 +39,11 @@ describe("manifest and icons", () => {
 
 describe("safe areas", () => {
   const css = read("src/styles/app.css");
-  it("uses the device insets when installed, and the design's insets otherwise", () => {
-    expect(css).toMatch(/display-mode: standalone[\s\S]*env\(safe-area-inset-top\)/);
-    expect(css).toMatch(/display-mode: standalone[\s\S]*env\(safe-area-inset-bottom\)/);
-    expect(css).toMatch(/--sat:50px/);
-    expect(css).toMatch(/--sab:30px/);
+  it("uses the device insets in every mode, with no floor, and a harness-only override", () => {
+    expect(css).toMatch(/--sat:var\(--inset-top,env\(safe-area-inset-top,0px\)\)/);
+    expect(css).toMatch(/--sab:var\(--inset-bottom,env\(safe-area-inset-bottom,0px\)\)/);
+    expect(css).not.toMatch(/max\(env\(/);
+    expect(css).not.toMatch(/--sa[tb]:\d+px/);
     expect(css).toMatch(/\.app-header\{[^}]*var\(--sat\)/);
     expect(css).toMatch(/\.status-spacer\{[^}]*var\(--sat\)/);
     expect(css).toMatch(/\.tabbar\{[^}]*var\(--sab\)/);

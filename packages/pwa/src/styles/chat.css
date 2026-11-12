@@ -31,11 +31,11 @@
 .abs{position:absolute}
 /* The read-only footer keeps the board's 139px slot; the composer (S16) fills it and grows for a note or the
    first-send confirmation. Masked in the visual check: the board draws keys hc send can't press (see ChatComposer). */
-.chat-foot{height:139px;padding:14px 16px 0;justify-content:flex-start}
-.chat-foot-on{height:auto;min-height:139px;padding:0}
+.chat-foot{height:calc(var(--sab) + 109px);padding:14px 16px 0;justify-content:flex-start}
+.chat-foot-on{height:auto;min-height:calc(var(--sab) + 109px);padding:0}
 .chat-keys{gap:6px;padding:8px 12px;overflow:hidden}
 .hd .chat-key{min-width:44px;height:40px;padding:0 10px;border-radius:7px;border:1px solid var(--t-border);background:var(--t-raised);font-size:12.5px;color:var(--t-foreground)}
-.chat-form{align-items:flex-end;gap:8px;padding:4px 12px 34px}
+.chat-form{align-items:flex-end;gap:8px;padding:4px 12px calc(var(--sab) + 4px)}
 .chat-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .hd .chat-text{min-height:44px;resize:none;padding:11px 14px;border-radius:10px;border:1px solid var(--t-input);background:var(--t-background);color:var(--t-foreground);font:inherit;font-size:15px}
 .hd .chat-send{width:44px;height:44px;justify-content:center;border-radius:10px;background:var(--t-foreground);color:var(--t-background)}
@@ -56,11 +56,11 @@
 .chat-keys-word{font-family:Inter,system-ui,sans-serif}
 .chat-keys-caret{color:var(--t-muted)}
 .hd .chat-keys-off{color:var(--t-dim)}
-.chat-foot-out{height:auto;gap:4px;padding:14px 16px 38px;border-top:1px solid var(--t-border)}
+.chat-foot-out{height:auto;gap:4px;padding:14px 16px calc(var(--sab) + 8px);border-top:1px solid var(--t-border)}
 .chat-out{margin:0;font-size:14px;color:var(--t-foreground)}
 .chat-out-how{margin:0;font-size:13px;color:var(--t-muted)}
 .keys-scrim{position:fixed;inset:0;z-index:3;background:#00000080}
-.keys-sheet{font-family:Inter,system-ui,sans-serif;position:fixed;left:0;right:0;bottom:0;z-index:4;padding:8px 16px 34px;gap:12px;border-radius:16px 16px 0 0;background:var(--t-popover);border-top:1px solid #ffffff1f;box-shadow:0 -12px 32px #00000080}
+.keys-sheet{font-family:Inter,system-ui,sans-serif;position:fixed;left:0;right:0;bottom:0;z-index:4;padding:8px 16px calc(var(--sab) + 4px);gap:12px;border-radius:16px 16px 0 0;background:var(--t-popover);border-top:1px solid #ffffff1f;box-shadow:0 -12px 32px #00000080}
 .keys-grip{align-self:center;width:36px;height:5px;border-radius:3px;background:var(--t-input)}
 .keys-head{gap:8px}
 .keys-titles{gap:2px}
@@ -83,7 +83,7 @@
 .keys-off-dot{width:7px;height:7px;margin-top:6px;border-radius:4px;background:var(--dock-need)}
 .keys-sheet:focus{outline:none}
 /* Special keys without typing: the read-only line, then a bar with only the Keys button. */
-.chat-foot-keys{height:auto;min-height:139px;padding:14px 0 26px;gap:6px}
+.chat-foot-keys{height:auto;min-height:calc(var(--sab) + 109px);padding:14px 0 max(0px,calc(var(--sab) - 4px));gap:6px}
 .chat-foot-keys .chat-ro{padding:0 16px}
-.chat-foot-keys.chat-foot-out{padding:14px 0 30px}
+.chat-foot-keys.chat-foot-out{padding:14px 0 var(--sab)}
 .chat-foot-keys.chat-foot-out .chat-out,.chat-foot-keys.chat-foot-out .chat-out-how{padding:0 16px}

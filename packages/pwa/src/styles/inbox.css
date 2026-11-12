@@ -1,5 +1,5 @@
 /* PhoneInbox (design/PhoneInbox). Colours come from the generated tokens. */
-.ib-head{padding:56px 16px 8px;gap:2px}
+.ib-head{padding:calc(var(--sat) + 6px) 16px 8px;gap:2px}
 .hd .ib-h1{margin:0;font-size:26px;font-weight:600;line-height:1.4}
 .ib-headsub{font-size:13px;color:var(--t-muted)}
 .ib-main{min-height:0;overflow:hidden auto;background:var(--t-popover);border-top:1px solid var(--t-border)}
