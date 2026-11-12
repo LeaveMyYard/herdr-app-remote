@@ -1,21 +1,30 @@
+import { useState } from "react";
 import appIcon from "../app-logo";
 import type { Space } from "../model";
 import { BellButton, useHomePromptBell } from "../pair/HomePrompt";
+import { DiagnosticsOverlay, useTapGesture } from "./Diagnostics";
 import { Icon } from "./Icon";
 import { Tile } from "./StateMarks";
 
 export function AppHeader() {
   // In Safari only: the bell opens the Home Screen prompt again (S5b).
   const bell = useHomePromptBell();
+  const [diag, setDiag] = useState(false);
+  const tap = useTapGesture(() => setDiag(true));
   return (
-    <header className="row nf app-header">
-      <img src={appIcon} alt="" className="app-logo" />
-      <span className="f1 app-title">Herdr</span>
-      {bell ? <BellButton onClick={bell} /> : null}
-      <button type="button" aria-label="Search" className="row icon-btn">
-        <Icon name="search" size={19} />
-      </button>
-    </header>
+    <>
+      <header className="row nf app-header">
+        <img src={appIcon} alt="" className="app-logo" />
+        <span className="f1 app-title" onClick={tap}>
+          Herdr
+        </span>
+        {bell ? <BellButton onClick={bell} /> : null}
+        <button type="button" aria-label="Search" className="row icon-btn">
+          <Icon name="search" size={19} />
+        </button>
+      </header>
+      {diag ? <DiagnosticsOverlay onClose={() => setDiag(false)} /> : null}
+    </>
   );
 }
 
