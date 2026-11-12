@@ -204,7 +204,7 @@ export function Usage({ topic, now, view, busy, onView, onFilter, onRefresh }: U
               </div>
             )}
             <div className="row nf ufoot">
-              <span className="f1 tr">{topic?.updatedAtMs != null ? `Updated ${clock(topic.updatedAtMs)} · every 15s` : busy ? "Loading…" : ""}</span>
+              <span className="tr ufoot-status">{topic?.updatedAtMs != null ? `Updated ${clock(topic.updatedAtMs)} · every 15s` : busy ? "Loading…" : ""}</span>
               <span className="row ufsegs" role="group" aria-label="View">
                 <Seg label="Full" on={view === "full"} onClick={() => onView("full")} cls="ufseg" />
                 <Seg label="Compact" on={view === "compact"} onClick={() => onView("compact")} cls="ufseg" />

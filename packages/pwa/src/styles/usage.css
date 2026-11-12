@@ -1,7 +1,7 @@
 /* Usage screen. Values follow design/PhoneUsage: desktop.py usage_panel, zoomed 1.2, with the phone
    overrides of build_rest.py PH_CSS (bigger touch targets, no panel border). Colours come from the tokens. */
 .usage-main{min-height:0}
-.hd .usage-z{width:325px;height:100%}
+.hd .usage-z{width:100%;height:100%}
 .upanel{height:100%;overflow:hidden;background:var(--t-chrome);color:var(--t-foreground);font-size:13px}
 .uhead{height:50px;padding:0 14px;gap:8px;border-bottom:1px solid var(--t-border)}
 .uhead *{white-space:nowrap;flex-shrink:0}
@@ -53,9 +53,13 @@
 .uempty-title{font-size:14px;font-weight:600}
 .uempty-body{font-size:12.5px;color:var(--t-dim)}
 .ufoot{height:50px;padding:0 14px;gap:8px;border-top:1px solid var(--t-border);font-size:11.5px;color:var(--t-dim)}
+.ufoot-status{flex:1;min-width:0}
 .ufsegs{gap:1px}
 .hd .ufseg{height:30px;padding:0 9px;border-radius:5px;font-size:11px;color:var(--t-dim)}
 .hd .ufseg[aria-pressed=true]{color:var(--t-foreground);background:var(--t-raised)}
 .hd .ubtn{height:37px;padding:0 10px;gap:6px;border-radius:7px;background:var(--t-raised);font-size:12px;color:var(--t-foreground)}
 .hd .ubtn[aria-busy=true]{color:var(--t-dim)}
 .ukey{font-size:11px;color:var(--t-dim)}
+/* On a phone (no hover pointer): key hints mean nothing, and the 325px-wide footer cannot hold the status beside the controls,
+   so the status gets its own row. The design board is drawn with a fine pointer and keeps the one-row footer. */
+@media (hover:none),(pointer:coarse){.ukey{display:none}.ufoot{height:auto;min-height:50px;padding:6px 14px;gap:4px 8px;flex-wrap:wrap}.ufoot-status{flex-basis:100%}.ufsegs{margin-right:auto}}

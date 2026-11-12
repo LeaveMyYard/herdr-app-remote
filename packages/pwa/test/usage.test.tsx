@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { bridgeApi } from "@herdr-remote/protocol";
@@ -246,5 +248,21 @@ describe("App usage tab", () => {
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: "Open panes" }));
     expect(screen.getByRole("button", { name: "Open panes" })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("Usage phone layout", () => {
+  const css = readFileSync(resolve(process.cwd(), "src/styles/usage.css"), "utf8");
+  it("takes the phone's width: the panel carries no fixed width (it is zoomed 1.2, so 325px fell short of any phone wider than 390)", () => {
+    expect(css).toMatch(/\.usage-z\{width:100%/);
+    expect(css).not.toMatch(/\.usage-z\{[^}]*width:\d+px/);
+  });
+  it("puts the footer status on its own line and hides the key hint without a hover pointer", () => {
+    const touch = css.match(/@media \(hover:none\),\(pointer:coarse\)\{(.*)\}\n?$/)?.[1] ?? "";
+    expect(touch).toMatch(/\.ukey\{display:none\}/);
+    expect(touch).toMatch(/\.ufoot\{[^}]*flex-wrap:wrap/);
+    expect(touch).toMatch(/\.ufoot-status\{flex-basis:100%\}/);
+    const { container } = render(<Usage {...base} busy={false} />);
+    expect(container.querySelector(".ufoot-status")?.textContent).toMatch(/^Updated \d\d:\d\d · every 15s$/);
   });
 });
