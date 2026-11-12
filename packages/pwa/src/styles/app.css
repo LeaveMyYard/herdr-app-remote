@@ -9,7 +9,7 @@
   --sat:var(--inset-top,env(safe-area-inset-top,0px));
   --sab:var(--inset-bottom,env(safe-area-inset-bottom,0px));
 }
-html,body{margin:0;height:100%;background:var(--t-chrome);overscroll-behavior:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);overscroll-behavior:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 #root{height:100%}
 .hd{font-family:Inter,system-ui,sans-serif;font-optical-sizing:none /* the boards use the text cut at every size */;color:var(--t-foreground);-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01" 0;-webkit-tap-highlight-color:transparent}
 .hd a{color:inherit;text-decoration:none}
@@ -24,7 +24,11 @@ html,body{margin:0;height:100%;background:var(--t-chrome);overscroll-behavior:no
 .spin{animation:hd-spin .9s linear infinite}
 @media (prefers-reduced-motion: reduce){.spin{animation-duration:3s}}
 
-.ph{position:relative;width:100%;height:100dvh;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
+/* The app frame is pinned to the window, never sized in viewport units: an installed (Home Screen) PWA with
+   viewport-fit=cover and a translucent status bar reports 100vh/100dvh as the screen less the top inset, which left an
+   empty band under the tab bar. position:fixed + inset:0 follows the real window. The body never scrolls; only .screen
+   and the other inner lists do (overflow:hidden + overscroll-behavior:none above stop the iOS rubber band). */
+.ph{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
 .screen{min-height:0;overflow:hidden auto}
 .app-header{padding:var(--sat) 8px 0 16px;gap:8px;height:calc(var(--sat) + 44px)}
 .app-logo{width:24px;height:24px;border-radius:6px}
