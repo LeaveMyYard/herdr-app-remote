@@ -78,7 +78,7 @@ export function collect(): Row[] {
 
 export function DiagnosticsOverlay({ onClose }: { onClose: () => void }) {
   const [rows, setRows] = useState<Row[]>(collect);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"" | "done" | "failed">("");
   useEffect(() => {
     const update = () => setRows(collect());
     window.addEventListener("resize", update);
@@ -92,16 +92,17 @@ export function DiagnosticsOverlay({ onClose }: { onClose: () => void }) {
   }, []);
   const text = rows.map(([k, v]) => `${k}: ${v}`).join("\n");
   const copy = () => {
-    void navigator.clipboard?.writeText(text).then(
-      () => setCopied(true),
-      () => setCopied(false),
+    if (!navigator.clipboard) return setCopied("failed");
+    navigator.clipboard.writeText(text).then(
+      () => setCopied("done"),
+      () => setCopied("failed"),
     );
   };
   return (
     <div className="diag" role="dialog" aria-label="Diagnostics">
       <div className="diag-bar">
         <button type="button" onClick={copy}>
-          {copied ? "Copied" : "Copy"}
+          {copied === "done" ? "Copied" : copied === "failed" ? "Copy failed" : "Copy"}
         </button>
         <button type="button" onClick={onClose}>
           Close
