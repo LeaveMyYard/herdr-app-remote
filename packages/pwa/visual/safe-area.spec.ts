@@ -34,7 +34,7 @@ test.describe("tabbed screens", () => {
       expect(m.top).toBe(0);
       if (top === ".status-spacer") expect(m.height).toBe(TOP - 6);
       else if (top === ".app-header") expect([px(m.pad), m.height]).toEqual([TOP, TOP + 44]);
-      else expect(px(m.pad)).toBeGreaterThanOrEqual(TOP);
+      else expect(px(m.pad)).toBe(top === ".ib-head" ? TOP + 6 : TOP);
       expect(m.barBottom).toBe(m.h);
       expect(m.tabBottom).toBe(m.h - BOTTOM);
     });
@@ -45,8 +45,7 @@ test.describe("tabbed screens", () => {
       await page.goto(q(url));
       await page.waitForSelector(sel);
       const gap = await page.evaluate((s) => document.querySelector(".tabbar")!.getBoundingClientRect().top - document.querySelector(s)!.getBoundingClientRect().bottom, sel);
-      expect(gap).toBeGreaterThanOrEqual(0);
-      expect(gap).toBeLessThanOrEqual(10);
+      expect(gap).toBe(7);
     }
   });
 });
@@ -69,7 +68,7 @@ test.describe("full-screen views", () => {
       expect(m.lastBottom).toBe(m.h);
       // Chat's footer is a slot of (inset + 109) px; a question's footers pad by the inset.
       if (name === "Chat") expect(m.slot).toBe(BOTTOM + 109);
-      else expect(px(m.lastPad)).toBeGreaterThanOrEqual(BOTTOM);
+      else expect(px(m.lastPad)).toBe(BOTTOM + 4);
     });
   }
 
@@ -92,3 +91,41 @@ test.describe("full-screen views", () => {
     expect(px(m.pad)).toBe(BOTTOM + 4);
   });
 });
+
+test("chat footer variants and Peek use the inset exactly", async ({ page }) => {
+  // Composer: the form pads by inset + 4; ran out: the footer by inset + 8; read-only: a slot of inset + 109.
+  await page.goto(q("/?fixture=chat&typing=bar#/chat/a-1"));
+  await page.waitForSelector(".chat-form");
+  expect(px(await page.$eval(".chat-form", (e) => getComputedStyle(e).paddingBottom))).toBe(BOTTOM + 4);
+  await page.goto(q("/?fixture=chat&typing=gone#/chat/a-1"));
+  await page.waitForSelector(".chat-foot-out");
+  expect(px(await page.$eval(".chat-foot-out", (e) => getComputedStyle(e).paddingBottom))).toBe(BOTTOM + 8);
+  await page.goto(q("/?fixture=peek#/swarm/peek/t2%00a9f8e7d6"));
+  await page.waitForSelector("[aria-label=Peek]");
+  const p = await page.evaluate(() => {
+    const box = (c: string) => document.querySelector(c)!;
+    return { back: getComputedStyle(box(".pk-back")).paddingTop, sheetTop: box(".pk-sheet").getBoundingClientRect().top, bodyPad: getComputedStyle(box(".pk-body")).paddingBottom, sheetBottom: box(".pk-sheet").getBoundingClientRect().bottom, h: window.innerHeight };
+  });
+  expect(px(p.back)).toBe(TOP + 6);
+  expect(p.sheetTop).toBe(TOP + 60);
+  expect(px(p.bodyPad)).toBe(BOTTOM - 2);
+  expect(p.sheetBottom).toBe(p.h);
+});
+
+test("zero insets (a Safari tab): nothing is added", async ({ page }) => {
+  const at = (url: string) => url.replace(/(#|$)/, (m) => `${url.includes("?") ? "&" : "?"}inset-top=0&inset-bottom=0${m}`);
+  await page.goto(at("/?fixture=agents#/agents"));
+  await page.waitForSelector(".tabbar");
+  const a = await page.evaluate(() => ({ pad: getComputedStyle(document.querySelector(".app-header")!).paddingTop, h: document.querySelector(".app-header")!.getBoundingClientRect().height, tab: [...document.querySelectorAll(".tabbar .tab")].pop()!.getBoundingClientRect().bottom, bar: document.querySelector(".tabbar")!.getBoundingClientRect().bottom, inner: window.innerHeight }));
+  expect([px(a.pad), a.h]).toEqual([0, 44]);
+  expect(a.bar).toBe(a.inner);
+  expect(a.inner - a.tab).toBe(0);
+  await page.goto(at("/?fixture=usage#/usage"));
+  await page.waitForSelector(".status-spacer", { state: "attached" });
+  expect(await page.$eval(".status-spacer", (e) => e.getBoundingClientRect().height)).toBe(0);
+  await page.goto(at("/?fixture=pair&state=check"));
+  await page.waitForSelector(".pair-main", { state: "attached" });
+  expect(await page.$eval(".pair-top", (e) => e.getBoundingClientRect().height)).toBe(0);
+  expect(px(await page.$eval(".pair-main", (e) => getComputedStyle(e).paddingBottom))).toBe(24);
+});
+
