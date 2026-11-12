@@ -273,6 +273,7 @@ export async function install(o: Options): Promise<void> {
   const home = new Home(o.appHome);
   const node = checkNode(o.node ?? process.execPath);
   if (o.key != null && (!P.KEY_PATTERN.test(o.key) || chord(o.key).split("-").length !== o.key.split("-").length)) throw new Error(`--key ${o.key} is not a key like ctrl-alt-r; nothing changed`);
+  if (o.icon != null && !o.icon.startsWith("/")) throw new Error("--icon must be an absolute path; nothing changed");
   const payload = loadPayload(o.source ?? DEFAULT_SOURCE);
   const old = loadReceipt(home);
   const notes: string[] = [];

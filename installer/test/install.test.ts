@@ -667,7 +667,7 @@ describe("herdr-app icon", () => {
     const before = tree(w.home);
     expect(await cli(w, "install", "--icon", svgIn(w, "art/herdr-app.svg"))).toBe(0);
     expect(out.filter((l) => /icon/i.test(l))).toEqual([expect.stringMatching(/^Used the herdr-app icon from .*herdr-app\.svg/)]);
-    const want: Record<string, number> = { "apple-touch-icon": 180, "icon-192": 192, "icon-512": 512, "icon-maskable-512": 512, favicon: 64, "app-logo": 128 };
+    const want: Record<string, number> = { "apple-touch-icon": 180, "icon-192": 192, "icon-512": 512, "icon-maskable-512": 512, favicon: 64, "app-logo": 192 };
     const record = json(w, P.RECEIPT_PATH);
     for (const [n, size] of Object.entries(want)) {
       const p = `${PWA}/icons/${n}.png`;
@@ -710,8 +710,17 @@ describe("herdr-app icon", () => {
     expect(await cli(w, "install", "--icon", svgIn(w, "art/bad.svg", "<svg>not an icon"))).toBe(0);
     expect(out.filter((l) => /icon/i.test(l))).toEqual([expect.stringMatching(/^Kept the neutral icons: could not render/)]);
     for (const p of ICONS) expect(readFileSync(join(w.home, p)).equals(neutral(p)), p).toBe(true);
-    expect(await cli(w, "install", "--icon", "relative.svg")).toBe(0);
-    expect(out.find((l) => /icon/i.test(l))).toMatch(/^Kept the neutral icons: --icon needs an absolute path/);
+    const before = tree(w.home);
+    expect(await cli(w, "install", "--icon", "relative.svg")).toBe(1);
+    expect(err).toMatch(/--icon must be an absolute path; nothing changed/);
+    expect(tree(w.home)).toEqual(before);
+  });
+
+  it("keeps the neutral icons for an SVG over 1 MiB", async () => {
+    const w = world();
+    expect(await cli(w, "install", "--icon", svgIn(w, "art/big.svg", SVG + " ".repeat(1024 * 1024)))).toBe(0);
+    expect(out.filter((l) => /icon/i.test(l))).toEqual([expect.stringMatching(/^Kept the neutral icons: could not render .*larger than 1 MiB/)]);
+    for (const p of ICONS) expect(readFileSync(join(w.home, p)).equals(neutral(p)), p).toBe(true);
   });
 
   it("an upgrade without the icon puts the neutral icons back", async () => {

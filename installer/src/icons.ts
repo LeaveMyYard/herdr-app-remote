@@ -18,7 +18,7 @@ export const ICON_FILES: { path: string; size: number; kind: "tile" | "flat" | "
   { path: `${P.PWA_DIR}/icons/icon-512.png`, size: 512, kind: "tile" },
   { path: `${P.PWA_DIR}/icons/icon-maskable-512.png`, size: 512, kind: "maskable" },
   { path: `${P.PWA_DIR}/icons/favicon.png`, size: 64, kind: "tile" },
-  { path: `${P.PWA_DIR}/icons/app-logo.png`, size: 128, kind: "tile" },
+  { path: `${P.PWA_DIR}/icons/app-logo.png`, size: 192, kind: "tile" },
 ];
 
 /** Where herdr-app keeps its icon, from the `herdr-app` binary (a symlink in PATH is followed): beside it, or in ../share/herdr-app. */
@@ -97,9 +97,11 @@ export async function renderIcons(svgBytes: Buffer): Promise<Map<string, Buffer>
     const box: [number, number, number, number] = [x - w * pad, y - h * pad, w * (1 + 2 * pad), h * (1 + 2 * pad)];
     const background = f.kind === "tile" ? undefined : (tile?.fill ?? "#101114");
     const r = new Resvg(withViewBox(svg, box), { fitTo: { mode: "width", value: f.size }, ...(background ? { background } : {}) });
-    const png = Buffer.from(r.render().asPng());
-    r.free();
-    out.set(f.path, png);
+    try {
+      out.set(f.path, Buffer.from(r.render().asPng()));
+    } finally {
+      r.free();
+    }
   }
   return out;
 }
@@ -113,7 +115,6 @@ export interface IconChoice {
 /** Finds (or takes `--icon`) and renders the herdr-app icon. Never throws: any failure keeps the neutral icons. */
 export async function chooseIcons(o: { icon?: string | null | undefined; bin: string | null }): Promise<IconChoice> {
   const neutral = (why: string): IconChoice => ({ files: null, line: `Kept the neutral icons: ${why}.` });
-  if (o.icon != null && !o.icon.startsWith("/")) return neutral("--icon needs an absolute path");
   const path = o.icon ?? findIcon(o.bin);
   if (!path) return neutral(`no herdr-app icon found next to the herdr-app binary (pass --icon /abs/path/${ICON_NAME})`);
   try {
