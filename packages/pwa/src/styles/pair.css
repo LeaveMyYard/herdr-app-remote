@@ -1,5 +1,9 @@
 /* Pairing screen and Home Screen prompt (S5b). Values follow design/PhonePair; colours come from the generated tokens. */
-.pair-top{height:44px}
+/* Safe areas: the top spacer is the inset less the 6 px the board's switcher strip leaves (44 at 50). The footer takes
+   the bottom inset; with no footer the centred column's own padding does (at least 24 px, the inset less 6 once it is
+   larger), so the column stays centred as on the board without ever reaching the home indicator. */
+.pair-top{height:max(0px,calc(var(--sat) - 6px))}
+.pair-main:last-child{padding-bottom:max(24px,calc(var(--sab) - 6px))}
 .pair-main{min-height:0;padding:24px;align-items:center;justify-content:center;gap:14px;text-align:center}
 .pair-mark{position:relative}
 .pair-icon{width:64px;height:64px;border-radius:14px}
@@ -15,7 +19,7 @@
 .pair-v{font-weight:500}
 .pair-waiting{gap:8px;padding-top:10px;border-top:1px solid var(--t-border);font-size:13px;color:var(--hue)}
 .pair-note{margin:0;font-size:12.5px;color:var(--t-dim)}
-.pair-foot{gap:8px;padding:12px 16px 34px;border-top:1px solid var(--t-border)}
+.pair-foot{gap:8px;padding:12px 16px calc(var(--sab) + 4px);border-top:1px solid var(--t-border)}
 .hd .pair-solid{height:48px;width:100%;justify-content:center;border-radius:7px;border:1px solid var(--t-solid);background:var(--t-solid);color:var(--t-solid-fg);font-size:15px;font-weight:500}
 .pair-steps{width:100%;margin:0;padding:14px;gap:12px;list-style:none;text-align:left;border-radius:10px;background:var(--t-background);border:1px solid var(--t-border)}
 .pair-step{align-items:flex-start;gap:10px;font-size:13.5px;line-height:1.45}

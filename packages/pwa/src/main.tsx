@@ -46,6 +46,16 @@ if (!root) throw new Error("missing #root");
 const params = new URLSearchParams(window.location.search);
 const fixture = params.get("fixture");
 const host = hostNameFrom(window.location.hostname);
+// Test hook: the boards draw a 50 px status bar and 30 px home indicator, so the harness stands them in for the
+// device's safe areas; `&inset-top=` and `&inset-bottom=` (px) override them (the WebKit safe-area test).
+const inset = (key: string, fallback: number) => {
+  const n = Number(params.get(key));
+  return params.get(key) !== null && Number.isFinite(n) ? n : fallback;
+};
+if (fixture !== null) {
+  document.documentElement.style.setProperty("--inset-top", `${inset("inset-top", 50)}px`);
+  document.documentElement.style.setProperty("--inset-bottom", `${inset("inset-bottom", 30)}px`);
+}
 let app;
 if (fixture === "pair") {
   app = <PairPage view={pairFixture(params.get("state"))} host="desk-1" />;
