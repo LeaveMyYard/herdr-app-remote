@@ -5,7 +5,8 @@
 // decides when the bridge exits.
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
-import { DEFAULT_BINARIES, type Binaries } from "../plugins/detect.js";
+import { type Binaries } from "../plugins/detect.js";
+import { resolvedBinaries } from "../plugins/binaries.js";
 import { run as defaultRun, type Runner } from "../plugins/exec.js";
 import { ChatTopicDriver } from "../chat/topic.js";
 import { HostTopic } from "../host.js";
@@ -118,7 +119,9 @@ export interface App {
  */
 export async function startApp(o: AppOptions): Promise<App> {
   const run = o.run ?? defaultRun;
-  const binaries = o.binaries ?? DEFAULT_BINARIES;
+  // Resolved to absolute paths (PATH, then ~/.local/bin and the like), and shared: the hc that `plugins` detects is the
+  // one chat and the terminal actors run, also when herdr-app was started with a PATH that lacks ~/.local/bin.
+  const binaries = o.binaries ?? resolvedBinaries(o.home !== undefined ? { home: o.home } : {});
   const log = o.log ?? (() => {});
   const invalid = (topic: string) => (error: string) => log({ event: "invalid_topic", topic, error });
 

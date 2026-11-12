@@ -171,7 +171,8 @@ export function LiveApp({
   // `#/chat/<agent id>`: the agent's terminal is read through `chat:<terminal>` only while the chat is open.
   const parts = route(hash);
   const chatAgentId = parts[0] === "chat" ? decode(parts[1]) : null;
-  const terminal = chatAgentId !== null ? host?.agents.find((a) => a.id === chatAgentId)?.terminal_id : undefined;
+  const chatAgent = chatAgentId !== null ? host?.agents.find((a) => a.id === chatAgentId) : undefined;
+  const terminal = chatAgent?.terminal_id;
   const chatName = terminal !== undefined ? `chat:${terminal}` : null;
   useTopics(client, chatName ? [chatName] : [], chatName !== null);
   // The desktop's key menu (S16b), read only while a chat is open (the Keys sheet is there).
@@ -217,7 +218,13 @@ export function LiveApp({
     plugins,
     inbox,
     usage,
-    chat: chatName && terminal !== undefined ? { topic: chatTopic, stale: chatView?.stale ?? null, terminal, input } : undefined,
+    // An agent with no terminal has nothing to subscribe: say so rather than wait for a topic that never comes.
+    chat:
+      chatName && terminal !== undefined
+        ? { topic: chatTopic, stale: chatView?.stale ?? (chatView?.data !== undefined && chatTopic === undefined ? "bad_data" : null), terminal, input }
+        : chatAgent
+          ? { topic: undefined, stale: "no_terminal" }
+          : undefined,
     onUsageFilter: (filter) => {
       void client.act("usage.set_filter", { filter }).then((r) => {
         if (r.unknown_effect) client.refresh("usage");

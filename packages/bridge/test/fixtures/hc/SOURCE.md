@@ -1,0 +1,17 @@
+# hc fixtures
+
+Recorded in the rig (`rig/scenarios/chat.sh`, which writes them to `$RIG/rec`) with the real **hc 0.1.20**, against
+terminals running a synthetic script (no real agent output):
+
+| file | command |
+|---|---|
+| ls-0.1.20.json | `hc ls --json` |
+| read-0.1.20.txt | `hc read <t> --lines 200` (stdout is not a TTY: plain text, no ANSI) |
+| read-not-found-0.1.20.json | stderr of `hc read no-such-terminal --lines 200` (exit 3) |
+
+`ls.json` and `ls-without-t3.json` are hand-written in the recorded shape (`{"hidden_finished":N,"terminals":[{"address":…}]}`)
+so the tests can name `t3`, `t4` and a remote `vps/t7`. Before fix/chat-loading-forever they used a guessed shape
+(`[{"id":…}]`), which is why the bridge never matched hc 0.1.20's `address` and every chat said `terminal_not_found`.
+
+`read-agent.ansi` and `read-hostile.ansi` are synthetic ANSI for the parser. The `keys-*` and `send-*` files belong to
+the terminal input tests (S16, S16b) and are not part of this note.

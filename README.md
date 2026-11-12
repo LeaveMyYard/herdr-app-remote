@@ -19,7 +19,7 @@ Nothing is exposed to the internet. Only devices on your own tailnet that sign i
 On the computer that runs herdr-app (Linux or macOS):
 
 - **Node >= 22** (the bridge is one bundled file and needs no `node_modules` at run time; building needs **pnpm 10** as well).
-- **herdr-app**, with its `hc` command (version 0.1.19 or newer) on the PATH.
+- **herdr-app**, with its `hc` command (version 0.1.19 or newer; checked with 0.1.20) on the PATH or in `~/.local/bin`.
 - **Tailscale** 1.52 or newer, signed in as a normal (untagged) node, with MagicDNS and HTTPS certificates turned on for your tailnet, and "serve" enabled. On Linux, run `sudo tailscale set --operator=$USER` once so the bridge may set up its serve entry.
 - Optional plugins for more phone tabs: herdr-panorama (Agents and Swarm detail), herdr-inbox (Inbox) and agent-usage (Usage). A missing plugin shows a "Missing" screen on its tab; the rest keeps working.
 

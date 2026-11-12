@@ -1,12 +1,15 @@
 // A stand-in for `tailscale serve` inside the rig: plain HTTP on 127.0.0.1:<listen>, forwarded to the bridge's
 // API on 127.0.0.1:<target>. Like serve, it drops any Tailscale-* header the client sent and adds
 // `Tailscale-User-Login` for the (fake) tailnet user; the client's Host is passed through, so a spoofed Host
-// reaches the bridge as sent. WebSocket upgrades are forwarded the same way.
-//   node serve-standin.mjs <listen port> <target port> <login>
+// reaches the bridge as sent. WebSocket upgrades are forwarded the same way. With a cert and key it speaks TLS
+// (a self-signed rig cert), so a real browser gets a secure origin and keeps the `__Host-` cookie.
+//   node serve-standin.mjs <listen port> <target port> <login> [cert.pem key.pem]
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 
-const [, , listen, target, login] = process.argv;
+const [, , listen, target, login, cert, key] = process.argv;
 
 function forwardHeaders(req) {
   const h = {};
@@ -16,14 +19,15 @@ function forwardHeaders(req) {
   return h;
 }
 
-const server = http.createServer((req, res) => {
+const handler = (req, res) => {
   const up = http.request({ host: '127.0.0.1', port: Number(target), method: req.method, path: req.url, headers: forwardHeaders(req), setHost: false }, (r) => {
     res.writeHead(r.statusCode ?? 502, r.headers);
     r.pipe(res);
   });
   up.on('error', () => { res.writeHead(502); res.end('bad gateway'); });
   req.pipe(up);
-});
+};
+const server = cert && key ? https.createServer({ cert: readFileSync(cert), key: readFileSync(key) }, handler) : http.createServer(handler);
 
 server.on('upgrade', (req, socket, head) => {
   const up = net.connect(Number(target), '127.0.0.1', () => {

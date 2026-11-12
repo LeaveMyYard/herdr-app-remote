@@ -75,7 +75,38 @@ const STALE_TEXT: Record<string, string> = {
   terminal_not_found: "This terminal has closed.",
   too_many_chats: "Too many chats are open. Close one to read this.",
   bad_terminal: "This isn't a terminal herdr knows.",
+  hc_missing: "The computer can't find herdr's hc command. Showing the last text.",
+  no_terminal: "This agent has no terminal to read.",
 };
+
+/**
+ * The same reasons when there is no text at all yet: the screen says what went wrong instead of waiting. Every
+ * reason the bridge can give before a first read lands here, so no failure leaves the screen waiting.
+ */
+const STALE_ERROR: Record<string, { title: string; body: (host: string) => string }> = {
+  source_unavailable: { title: "Can't read this terminal", body: (h) => `herdr on ${h} didn't answer. It tries again by itself.` },
+  terminal_not_found: { title: "This terminal has closed", body: () => "herdr doesn't list it any more." },
+  too_many_chats: { title: "Too many chats are open", body: () => "Close another chat to read this one." },
+  bad_terminal: { title: "This isn't a terminal herdr knows", body: () => "Go back and pick the agent again." },
+  hc_missing: { title: "hc isn't found", body: (h) => `Remote on ${h} can't find herdr's hc command (looked on PATH and in ~/.local/bin). Remote's Setup on ${h} shows it too.` },
+  no_terminal: { title: "No terminal to read", body: () => "This agent has no terminal herdr can read." },
+  // Set by the app, not the bridge: a value arrived that this version can't read.
+  bad_data: { title: "Can't show this terminal", body: (h) => `${h} sent text this version of the app can't read. Updating Remote may help.` },
+};
+
+/** With no text and no reason from the bridge, the screen stops saying "Waiting" after this long. */
+export const CHAT_WAIT_MS = 8_000;
+
+/** True once `ms` has passed since `key` last changed. */
+function useElapsed(key: string | undefined, ms: number): boolean {
+  const [done, setDone] = useState<string | undefined | null>(null);
+  useEffect(() => {
+    setDone(null);
+    const t = setTimeout(() => setDone(key), ms);
+    return () => clearTimeout(t);
+  }, [key, ms]);
+  return done === key;
+}
 
 const FIT_KEY = "chat.fit";
 
@@ -139,7 +170,10 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [topic]);
 
-  const notice = stale === undefined ? undefined : (STALE_TEXT[stale] ?? "Showing older text.");
+  // With text on screen a reason is a notice above it; with none yet it is the screen's whole message.
+  const notice = stale === undefined || !topic ? undefined : (STALE_TEXT[stale] ?? "Showing older text.");
+  const error = topic ? undefined : stale !== undefined ? (STALE_ERROR[stale] ?? { title: "Can't read this terminal", body: () => STALE_TEXT[stale] ?? `The computer said: ${stale}.` }) : undefined;
+  const waitedOut = useElapsed(terminal ?? agent.name, CHAT_WAIT_MS);
   return (
     <>
       <header className="row nf chat-head">
@@ -172,6 +206,16 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
             ) : (
               <div className="chat-empty">Nothing on screen yet.</div>
             )
+          ) : error ? (
+            <div role="alert" className="chat-error">
+              <p className="chat-error-title">{error.title}</p>
+              <p className="chat-error-body">{error.body(host)}</p>
+            </div>
+          ) : waitedOut ? (
+            <div role="alert" className="chat-error">
+              <p className="chat-error-title">No answer yet</p>
+              <p className="chat-error-body">{`${host} hasn't sent this terminal. Check that Remote is running there, or go back and try again.`}</p>
+            </div>
           ) : (
             <div className="chat-empty">Waiting for the terminal…</div>
           )}

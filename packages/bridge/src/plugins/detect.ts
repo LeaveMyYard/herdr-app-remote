@@ -26,6 +26,9 @@ export interface Binaries {
 }
 export const DEFAULT_BINARIES: Binaries = { hc: "hc", inbox: "herdr-inbox", usagebar: "usagebar" };
 
+/** The `hc` plugin's detail when hc is found neither on the bridge's PATH nor in the fallback dirs (`binaries.ts`). */
+export const HC_NOT_FOUND = "hc not found on PATH or in ~/.local/bin";
+
 export interface DetectEnv {
   appHome: string;
   run: Runner;
@@ -59,6 +62,8 @@ function compare(a: readonly number[], b: readonly number[]): number {
 export async function detectHc(env: DetectEnv): Promise<PluginStatus> {
   const bin = (env.binaries ?? DEFAULT_BINARIES).hc;
   const r = await env.run(bin, ["--version"], { timeoutMs: PROBE_TIMEOUT_MS });
+  // The panel's Setup and the phone's Chat both say this: chat needs hc, and the bridge looked in both places.
+  if (r.error === "ENOENT") return st("missing", HC_NOT_FOUND);
   const bad = unrunnable(r, "hc");
   if (bad) return bad;
   if (r.code !== 0) return st("broken", "hc --version failed");

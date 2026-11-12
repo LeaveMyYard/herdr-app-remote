@@ -16,8 +16,8 @@ describe("hc (fake CLI)", () => {
     const d = tmp();
     expect((await detectHc(env("/none", bins(d, { hc: fakeCli(d, "hc", body) })))).state).toBe(state);
   });
-  it("missing when not installed", async () => {
-    expect((await detectHc(env("/none"))).state).toBe("missing");
+  it("missing when not installed, saying where it looked", async () => {
+    expect(await detectHc(env("/none"))).toEqual({ state: "missing", detail: "hc not found on PATH or in ~/.local/bin" });
   });
   it("reports a timeout even when the CLI ignores SIGTERM, and does not wait for it", async () => {
     const d = tmp();
