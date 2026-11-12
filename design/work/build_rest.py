@@ -279,7 +279,7 @@ def ph_brand():
 
 def phone_agents():
     sp = D.spaces_block(D.SPACES).replace('class="col nf" style="height:143px', 'class="col nf sblock" style="height:143px')
-    ag = '<a href="PhoneSwarm.dc.html" class="col f1" style="min-height:0">' + D.agents_panel(D.groups(), totals='<span>?1</span>') + '</a>'
+    ag = '<a href="PhoneChat.dc.html" class="col f1" style="min-height:0" title="A card with a live agent opens its Chat; a feed-only root opens the Swarm (PhoneSwarm.dc.html)">' + D.agents_panel(D.groups(), totals='<span>?1</span>') + '</a>'
     inner = ph_brand() + f'<main class="col f1" style="min-height:0;overflow:hidden"><div class="z col" style="width:325px">{sp}{ag}</div></main>' + nav('Agents')
     return ph_page('Phone agents', inner)
 
@@ -682,7 +682,7 @@ def phone_banners():
     data = json.dumps({k: dict(cls=c, title=t, sub=s, action=a) for k, (c, t, s, a) in BANNERS.items()})
     script = switch_script(BANNER_STATES, 'unavailable', f'b: {data}[cur]')
     sp = D.spaces_block(D.SPACES).replace('class="col nf" style="height:143px', 'class="col nf sblock" style="height:143px')
-    ag = '<a href="PhoneSwarm.dc.html" class="col f1" style="min-height:0">' + D.agents_panel(D.groups(), totals='<span>?1</span>') + '</a>'
+    ag = '<a href="PhoneChat.dc.html" class="col f1" style="min-height:0" title="A card with a live agent opens its Chat; a feed-only root opens the Swarm (PhoneSwarm.dc.html)">' + D.agents_panel(D.groups(), totals='<span>?1</span>') + '</a>'
     brand = ph_brand().replace('icons/remote.png', 'icons/remote.svg')
     inner = (SWITCH + brand + f'<main class="col f1" style="min-height:0;overflow:hidden"><div class="z col" style="width:325px">{sp}{ag}</div></main>'
              + BANNER + nav('Agents'))
