@@ -38,6 +38,8 @@ The installer records every file it writes (with its sha256) in `data/herdr-app-
 - the bridge bundle and the built PWA under `data/herdr-app-remote`,
 - two layouts, described below.
 
+**App icon.** If the installer finds your herdr-app icon (`herdr-app.svg` next to the `herdr-app` binary, following a symlink on your PATH, or the path you give with `--icon /abs/path/herdr-app.svg`), it renders the phone app's icons from it into the installed copy. Otherwise it keeps the neutral icons and prints one line saying so. herdr-app's logo is never part of this repository or its releases. iOS caches the Home Screen icon when the app is added: to see a new icon, remove the Home Screen app and add it again. Safari's tab icon updates on a reload.
+
 `--key` binds a key (for example `ctrl-alt-r`) that opens the Remote panel, in those two layouts only. That makes `keys.json` your own file from then on: herdr-app stops adding new default shortcuts to an edited one.
 
 After a herdr-app or panorama upgrade, run `install` again to refresh the layouts (they are copies taken at install time). Installing again with a newer checkout upgrades in place.

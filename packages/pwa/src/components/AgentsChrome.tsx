@@ -1,4 +1,4 @@
-import appIcon from "../assets/remote.svg";
+import appIcon from "../app-logo";
 import type { Space } from "../model";
 import { BellButton, useHomePromptBell } from "../pair/HomePrompt";
 import { Icon } from "./Icon";

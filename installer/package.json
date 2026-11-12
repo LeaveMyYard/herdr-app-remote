@@ -12,7 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@herdr-remote/protocol": "workspace:*"
+    "@herdr-remote/protocol": "workspace:*",
+    "@resvg/resvg-wasm": "2.6.2"
   },
   "devDependencies": {
     "@herdr-remote/bridge": "workspace:*"

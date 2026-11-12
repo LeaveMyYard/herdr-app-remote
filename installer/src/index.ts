@@ -3,3 +3,4 @@ export { derive, usesMod, panoramaLayoutSha, LINK_BLOCK, PANEL_BLOCK } from "./l
 export { addBinding, chord, removeBinding, sectionFor } from "./keys.js";
 export { guardRemoval, shownLayout, windowRuns, NO_WINDOW } from "./guard.js";
 export { Home, digest, parts } from "./home.js";
+export { chooseIcons, findIcon, renderIcons, ICON_FILES, ICON_NAME } from "./icons.js";

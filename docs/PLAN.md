@@ -285,6 +285,7 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
 - Goal:
   - Vite + React, with tokens and glyphs from `common.py` and self-hosted fonts;
   - the manifest and icons, with safe-area handling;
+  - icon policy: the repository and the release bundle never contain herdr-app's logo (the earlier decision not to ship `herdr.png` stands, and now covers every herdr-app art file). herdr-app is Apache-2.0 and §6 grants no trademark rights. The build ships neutral icons at fixed paths (`icons/favicon.png`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `app-logo.png`); `scripts/app-install` may replace those files in the installed PWA with renders of the operator's own `herdr-app.svg` (next to the `herdr-app` binary, or `--icon`), recorded in the install record, and says so in one line when it keeps the neutral ones;
   - the 5-tab bar with badges;
   - connection and stale banners;
   - the PhoneAgentsBasic and PhoneMissing screens;
