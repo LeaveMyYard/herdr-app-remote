@@ -143,7 +143,8 @@ export function selectAgents(host: HostState, topic: bridgeApi.PanoramaTopic, ex
     const meta = [spaceName, r.tab_no !== null ? `tab ${r.tab_no}` : "", `${active} active`, `${r.agents.length} agents`].filter(Boolean).join(" · ");
     return {
       key: r.key,
-      href: `#/swarm/${r.space_id !== null ? encodeURIComponent(r.space_id) : "all"}`,
+      // A root with a live host agent opens that agent's Chat; a feed-only root has nothing to chat with, so it opens the Swarm.
+      href: r.agent_id !== null ? `#/chat/${r.agent_id}` : `#/swarm/${r.space_id !== null ? encodeURIComponent(r.space_id) : "all"}`,
       n: r.tab_no,
       harness: r.harness,
       title: r.title,
