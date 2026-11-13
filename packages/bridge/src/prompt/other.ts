@@ -53,8 +53,9 @@ export function confirmOtherField(
   let k: number;
   const question = expected.question ?? null;
   if (question === null) {
-    // A multi-select never gets here: its card has no Other row (`otherRow` null), pinned in match.test.ts.
-    if (m.several !== null || m.otherRow === null) return null;
+    // A multi-select never gets here: its card has no Other row (`otherRow` null), pinned in match.test.ts; nor a card
+    // with several questions (`otherRow` null too, pinned in several.test.ts and force.test.ts).
+    if (m.otherRow === null) return null;
     k = m.buttons.length;
     if (m.otherRow !== k) return null;
   } else {

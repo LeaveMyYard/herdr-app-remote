@@ -104,7 +104,8 @@ describe("matching (T + S + V)", () => {
       ["another call", [{ ...ASKR }], q1],
       ["a one-question call", [ASK1], q1],
       ["the headers in another order", [{ ...ASKQ, input: { questions: [...(ASKQ.input as { questions: unknown[] }).questions].reverse() } }], q1],
-      ["two questions with the same text", [{ ...ASKQ, input: { questions: (ASKQ.input as { questions: Record<string, unknown>[] }).questions.map((q) => ({ ...q, question: "Same?" })) } }], q1],
+      ["two questions with the same text", [{ ...ASKQ, input: { questions: (ASKQ.input as { questions: Record<string, unknown>[] }).questions.map((q, i, all) => (i === 2 ? { ...q, question: all[0]!.question } : q)) } }], q1],
+      ["a multi-select's Other ticked (desk text the card can't show)", [ASKQ], screen("askq-q2").replace("4. [ ] Type something", "4. [✔] Type something")],
       ["a tab line without the Submit tab", [ASKQ], q1.replace("  ✔ Submit  →", "  →")],
       ["a tab line with an extra header", [ASKQ], q1.replace("☐ Target", "☐ Target  ☐ Extra")],
       ["an option renamed", [ASKQ], q1.replace("2. Option B", "2. Option Z")],
@@ -132,6 +133,10 @@ describe("matching (T + S + V)", () => {
     expect(isSeveralReviewOf(p.prompt, m.several, ["Option A", "Lint, Unit tests", "Project Alpha answer 3"])).toBe(false);
     expect(isSeveralReviewOf(p.prompt, m.several, ["Option B", "Lint", "Project Alpha answer 3"])).toBe(false);
     expect(isSeveralReviewOf(p.prompt, m.several, ["Option B", "Lint, Unit tests"])).toBe(false);
+    // Every tab must read answered.
+    const half = parseScreen(screen("askq-review").replace("☒ Target", "☐ Target"));
+    if (!half.ok) throw new Error("no review");
+    expect(isSeveralReviewOf(half.prompt, m.several, ["Option B", "Lint, Unit tests", "Project Alpha answer 3"])).toBe(false);
     const u = parseScreen(screen("askq-review-unanswered"));
     if (!u.ok) throw new Error("no review");
     expect(isSeveralReviewOf(u.prompt, m.several, ["", "", ""])).toBe(false);
@@ -342,6 +347,68 @@ describe("answering a card with several questions", () => {
     expect(f.keys).toEqual([["down", "down", "down"]]);
   });
 
+  it("an Enter that shows the next tab without marking the question answered: never followed", async () => {
+    const { f, answer } = rig();
+    f.reply = (a) => {
+      if (a[0] === "keys" && a.includes("enter") && f.tab === 0) {
+        f.tab = 1;
+        f.cursor = 0;
+        return { code: 0, stdout: "{}", stderr: "" };
+      }
+      return undefined;
+    };
+    const r = await answer({ answers: [{ option: 0 }, { picks: [0] }, { option: 0 }] });
+    expect(r.ok).toBe(false);
+    expect(f.keys).toEqual([["enter"]]);
+  });
+
+  it("a tick whose re-read shows the cursor elsewhere: nothing more is ticked", async () => {
+    const { f, answer } = rig(ASKQ, { prep: (x) => ["enter"].forEach((k) => x.press(k)) });
+    let ticks = 0;
+    f.reply = (a) => {
+      if (a[0] === "keys" && a.includes("space") && ++ticks === 1) {
+        f.press("space");
+        f.press("down"); // the desk moves the cursor right after
+        return { code: 0, stdout: "{}", stderr: "" };
+      }
+      return undefined;
+    };
+    expect((await answer({ answers: [{ option: 0 }, { picks: [0, 2] }, { option: 0 }] })).code).toBe("prompt_moved");
+    expect(f.keys.filter((k) => k.includes("space")).length).toBe(1);
+  });
+
+  it("a box the desk unticks while the bridge ticks another: refused before Enter on Next", async () => {
+    const { f, answer } = rig(ASKQ, { prep: (x) => ["enter"].forEach((k) => x.press(k)) });
+    let ticks = 0;
+    f.reply = (a) => {
+      if (a[0] === "keys" && a.includes("space") && ++ticks === 2) {
+        for (const k of a.slice(a.indexOf("--") + 2)) f.press(k);
+        f.ticks[1]![0] = false; // the desk unticks Lint
+        return { code: 0, stdout: "{}", stderr: "" };
+      }
+      return undefined;
+    };
+    expect((await answer({ answers: [{ option: 0 }, { picks: [0, 2] }, { option: 0 }] })).code).toBe("prompt_moved");
+    expect(f.keys.filter((k) => k[0] === "enter").length).toBe(1);
+  });
+
+  it("the review with the cursor on Cancel: Enter never pressed there", async () => {
+    const { f, answer } = rig();
+    f.beforeRead = () => {
+      if (f.tab === 3) f.cursor = 1;
+    };
+    expect((await answer({ answers: [{ option: 0 }, { picks: [0] }, { option: 0 }] })).code).toBe("prompt_moved");
+    expect(f.answered).toBeNull();
+    expect(f.keys.filter((k) => k[0] === "enter").length).toBe(3);
+  });
+
+  it("a left that doesn't move the tab: prompt_moved, no second left", async () => {
+    const { f, answer } = rig(ASKQ, { prep: (x) => x.press("right") });
+    f.reply = (a) => (a[0] === "keys" && a.includes("left") ? { code: 0, stdout: "{}", stderr: "" } : undefined);
+    expect((await answer({ answers: [{ option: 0 }, { picks: [0] }, { option: 0 }] })).code).toBe("prompt_moved");
+    expect(f.keys).toEqual([["left"]]);
+  });
+
   it("an Enter that leaves the prompt (the desk answered it): unknown_effect", async () => {
     const { f, answer } = rig();
     f.reply = (a) => {
@@ -379,6 +446,19 @@ describe("the Other confirmation names its question", () => {
     const f = new FakeSeveral(ASKQ);
     ["right", "down", "down", "down"].forEach((k) => f.press(k));
     expect(confirmOtherField(T, f.screen, { ...exp, question: 1 }, 1000)).toBeNull(); // a multi-select's Other row
+  });
+
+  it("never confirms another question's field because its row number matches (the tab must be that question's)", () => {
+    const qs = (ASKQ.input as { questions: Record<string, unknown>[] }).questions;
+    // Question 3 with three options too: its Other row is row 4, as question 1's.
+    const call: PendingTool = { ...ASKQ, input: { questions: [qs[0], qs[1], { ...qs[2], options: [...(qs[2]!.options as unknown[]), { label: "Production", description: "The Project Alpha production box" }] }] } };
+    const f = new FakeSeveral(call);
+    ["down", "down", "down"].forEach((k) => f.press(k));
+    const m = matchPrompt([call], f.screen);
+    expect(m.several?.tab).toBe(0);
+    const e = { promptId: m.promptId, toolUseId: call.id, pending: [call] };
+    expect(confirmOtherField(T, f.screen, { ...e, question: 0 }, 1000)).not.toBeNull();
+    expect(confirmOtherField(T, f.screen, { ...e, question: 2 }, 1000)).toBeNull();
   });
 
   it("a confirmation for one question can't send for another", () => {

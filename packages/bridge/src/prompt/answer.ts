@@ -368,7 +368,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     for (let k = 0; k < qs.length; k++) {
       const q = qs[k]!;
       const x = answers[k]!;
-      if (!onTab(v, id, k)) return refuse();
+      // `v` shows tab k here: the loop above stops on tab 0, and nextTab returns only tab k + 1.
       const p = v.m.prompt!;
       let pressed: { r: RunResult; held: boolean; ms: number };
       let refusedBy: Readonly<Record<string, string>> = KEYS_REFUSED;
@@ -392,13 +392,13 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
           cur = i;
           rows = w.m.prompt!.rows;
         }
-        // Then to "Next" ("Submit" on the last question): every box as wanted, the Other box empty.
+        // Then to "Next" ("Submit" on the last question): every box as wanted (the matcher requires the Other box empty).
         const next = q.options.length + 1;
         const w = await moveA(t, arrows(cur, next), pending, label, signal);
         if (isResult(w)) return w;
         if (!onTab(w, id, k) || w.m.prompt!.cursor !== next) return refuse();
         const r = w.m.prompt!.rows;
-        if (!q.options.every((_, i) => r[i]!.check === want.has(i)) || r[q.options.length]!.check !== false) return refuse();
+        if (!q.options.every((_, i) => r[i]!.check === want.has(i))) return refuse();
         shown.push(q.options.filter((_, i) => want.has(i)).join(", "));
         pressed = await timed(() => keys(t, ["enter"], "B", signal));
       } else {
