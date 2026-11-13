@@ -31,8 +31,8 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "install/receipt": install.InstallReceipt,
 };
 
-/** Fake app-home files for the installer tests: not protocol messages, so no schema. */
-const NOT_PROTOCOL = join(ROOT, "app-home");
+/** Fake app-home files for the installer tests, and the Claude reader's rig fixtures: not protocol messages, so no schema. */
+const NOT_PROTOCOL = [join(ROOT, "app-home"), join(ROOT, "claude")];
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
@@ -43,7 +43,7 @@ function walk(dir: string): string[] {
 
 function collect(base: string, skip?: string) {
   return walk(base)
-    .filter((f) => f.endsWith(".json") && !(skip && f.startsWith(skip)) && !f.startsWith(NOT_PROTOCOL + "/"))
+    .filter((f) => f.endsWith(".json") && !(skip && f.startsWith(skip)) && !NOT_PROTOCOL.some((d) => f.startsWith(d + "/")))
     .map((f) => {
       const dir = relative(base, dirname(f));
       const schema = SCHEMAS[dir];

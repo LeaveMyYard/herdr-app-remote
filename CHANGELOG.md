@@ -22,6 +22,7 @@ First release candidate: phone access to herdr-app over Tailscale. Nothing here 
 - Web Push for new inbox questions, alerts and blocked agents, with generic payloads.
 - Isolated rig (`rig/`) with scenarios for isolation, install, link, host, panel, setup, pairing, inbox answers, terminal input and chat (the real PWA in headless Chromium against the rig's own hc).
 - Protocol docs (`docs/protocol/`), SECURITY.md, RECIPE.md and the release script `scripts/release.sh`.
+- Chat view groundwork (CV2): the Claude history reader. Config roots come only from herdr-agent-usage's `[[claude.profiles]]`, one reader child per distinct `projects` dir runs the pinned Claude Agent SDK 0.3.312 (session readers only, no native binary) with a clean env under Node's permission model, and a rig test pins the SDK's output for fake fixture transcripts. Nothing reaches the phone yet.
 
 ### Fixed
 
