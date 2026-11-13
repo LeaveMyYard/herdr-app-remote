@@ -46,6 +46,31 @@ function insets(): Row[] {
   return rows;
 }
 
+/** The chat screens' own boxes (empty elsewhere): where the footer and composer sit against the frame and the window. */
+function chatRows(): Row[] {
+  const foot = document.querySelector(".chat-foot");
+  if (!foot) return [];
+  const q = (s: string) => document.querySelector(s);
+  const hit = (el: Element | null, fy: number): Row[] => {
+    if (!el || typeof document.elementFromPoint !== "function") return [];
+    const r = el.getBoundingClientRect();
+    const y = r.top + r.height * fy;
+    const x = r.left + r.width / 2;
+    const at = document.elementFromPoint(x, y);
+    return [[`hit at ${fy === 1 ? "footer bottom" : "footer middle"} (y ${n(y)})`, at ? `${at.tagName.toLowerCase()}.${String(at.className).slice(0, 30)}` : "nothing (outside the layout viewport)"]];
+  };
+  return [
+    rect(".ph > :last-child", q(".ph")?.lastElementChild ?? null),
+    rect(".chat-main / .cv-main", q(".cv-main") ?? q(".chat-main")),
+    rect(".chat-foot", foot),
+    rect(".chat-form", q(".chat-form")),
+    rect(".chat-text", q(".chat-text")),
+    rect(".chat-send", q(".chat-send")),
+    ...hit(foot, 0.5),
+    ...hit(foot, 0.999),
+  ];
+}
+
 export function collect(): Row[] {
   const q = (s: string) => document.querySelector(s);
   const vv = window.visualViewport;
@@ -74,6 +99,7 @@ export function collect(): Row[] {
     rect(".screen", q(".screen")),
     rect(".tabbar", tabbar),
     [".tabbar padding-bottom", tabbar ? getComputedStyle(tabbar).paddingBottom : "not found"],
+    ...chatRows(),
     ["userAgent", navigator.userAgent],
   ];
 }
