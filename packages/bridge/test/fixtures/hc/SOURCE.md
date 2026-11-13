@@ -7,6 +7,7 @@ terminals running a synthetic script (no real agent output):
 |---|---|
 | ls-0.1.20.json | `hc ls --json` |
 | read-0.1.20.txt | `hc read <t> --lines 200` (stdout is not a TTY: plain text, no ANSI) |
+| read-working-0.1.20.txt | `hc read <t> --lines 200` of a working agent: the screen, then hc's own `[hc] only its screen: ...` notice as the last line of stdout (appended by hand: the rig's synthetic terminals are not agents, so hc never prints it there; the text is hc 0.1.20's own, in its binary) |
 | read-not-found-0.1.20.json | stderr of `hc read no-such-terminal --lines 200` (exit 3) |
 
 `ls.json` and `ls-without-t3.json` are hand-written in the recorded shape (`{"hidden_finished":N,"terminals":[{"address":…}]}`)

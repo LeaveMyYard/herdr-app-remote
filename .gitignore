@@ -5,3 +5,4 @@ __pycache__/
 .env
 test-results/
 release/
+packages/protocol/dist

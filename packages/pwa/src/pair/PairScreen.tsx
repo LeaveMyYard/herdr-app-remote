@@ -1,5 +1,6 @@
 // The pairing screen (board PhonePair: check, wait, ok, bad, first). Copy follows design/COPY.md and the board.
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AppFrame } from "../components/AppFrame";
 import appIcon from "../app-logo";
 import { Tile } from "../components/StateMarks";
 import { fetchApi, isStandalone, parseFragment, runPairing, setPromptWanted, type PairApi, type PairView } from "./flow";
@@ -124,9 +125,9 @@ export function PairPage({ view, host, onContinue }: { view: PairView; host: str
       break;
   }
   return (
-    <div className="hd ph pair" data-state={view.state}>
+    <AppFrame className="pair" data-state={view.state}>
       {inner}
-    </div>
+    </AppFrame>
   );
 }
 

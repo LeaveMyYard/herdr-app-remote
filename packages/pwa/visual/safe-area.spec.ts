@@ -72,6 +72,19 @@ test.describe("full-screen views", () => {
     });
   }
 
+  // What a phone gets: no board slot, the read-only footer is its text plus the inset (no empty band under it).
+  test("Chat read-only footer (no board slot) ends at the window bottom with one inset", async ({ page }) => {
+    await page.goto(q("/?fixture=chat&slot=0#/chat/a-1"));
+    await page.waitForSelector(".chat-head");
+    const m = await page.evaluate(() => {
+      const f = document.querySelector(".chat-foot")!;
+      return { bottom: f.getBoundingClientRect().bottom, h: window.innerHeight, pad: getComputedStyle(f).paddingBottom, height: f.getBoundingClientRect().height };
+    });
+    expect(m.bottom).toBe(m.h);
+    expect(px(m.pad)).toBe(BOTTOM + 8);
+    expect(m.height).toBeLessThan(BOTTOM + 109);
+  });
+
   test("pair: insets top and bottom", async ({ page }) => {
     await page.goto(q("/?fixture=pair&state=ok"));
     await page.waitForSelector(".pair");
