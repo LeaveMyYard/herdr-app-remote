@@ -258,7 +258,7 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
           question={typed ? undefined : demo?.question}
           input={typed ? typed.input : live?.chat?.input}
           terminal={typed ? demo?.topic.terminal : live?.chat?.terminal}
-          boardSlot={demo !== undefined}
+          boardSlot={demo !== undefined && new URLSearchParams(window.location.search).get("slot") !== "0"}
           {...(typed ? { now: typed.now, demoSheet: { open: typed.sheet, pressed: typed.pressed } } : {})}
         />
     );

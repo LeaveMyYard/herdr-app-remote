@@ -64,18 +64,16 @@ function firstArray(o: Record<string, unknown>): unknown[] | undefined {
 
 /**
  * hc 0.1.20 ends `hc read` of a working agent with its own notice on stdout, after the screen (`[hc] only its screen: it is
- * working; read again once it stops for its history`). That is hc talking, not the terminal: drop trailing `[hc] ` lines.
+ * working; read again once it stops for its history`). That is hc talking, not the terminal: drop that one last line (only that notice, so an agent's own `[hc] ` output stays).
  * The agent being busy is already on the header (the host topic's status), so nothing replaces it.
  */
 export function withoutHcNotice(stdout: string): string {
   const lines = stdout.split("\n");
   let end = lines.length;
-  for (;;) {
-    while (end > 0 && (lines[end - 1] ?? "").trim() === "") end -= 1;
-    if (end > 0 && /^\[hc\] /.test(lines[end - 1] ?? "")) end -= 1;
-    else break;
-  }
-  return end === lines.length || end === 0 && !stdout.startsWith("[hc] ") ? stdout : `${lines.slice(0, end).join("\n")}\n`;
+  while (end > 0 && (lines[end - 1] ?? "").trim() === "") end -= 1;
+  if (end === 0 || !/^\[hc\] only its screen:/.test(lines[end - 1] ?? "")) return stdout;
+  const kept = lines.slice(0, end - 1);
+  return kept.every((l) => l.trim() === "") ? "" : `${kept.join("\n")}\n`;
 }
 
 /** hc's error kind from a failed command's JSON (`{"error":{"kind":"not_found",...}}` on stderr), or undefined. */

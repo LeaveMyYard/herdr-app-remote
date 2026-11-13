@@ -133,10 +133,14 @@ describe("ChatTopicDriver", () => {
     const notice = "[hc] only its screen: it is working; read again once it stops";
     expect(withoutHcNotice(`a\nb\n${notice}\n`)).toBe("a\nb\n");
     expect(withoutHcNotice(`a\nb\n${notice}`)).toBe("a\nb\n");
-    expect(withoutHcNotice(`a\n\n${notice}\n\n`)).toBe("a\n");
+    expect(withoutHcNotice(`a\n\n${notice}\n\n`)).toBe("a\n\n");
+    expect(withoutHcNotice(`\n\n${notice}\n`)).toBe("");
+    expect(withoutHcNotice(`a\n[hc] mine\n${notice}\n`)).toBe("a\n[hc] mine\n");
+    expect(withoutHcNotice(`a\n[hc] mine\n`)).toBe("a\n[hc] mine\n");
+    expect(withoutHcNotice("a\n\n\n")).toBe("a\n\n\n");
     expect(withoutHcNotice(`a\n${notice}\nb\n`)).toBe(`a\n${notice}\nb\n`);
     expect(withoutHcNotice("a\nb\n")).toBe("a\nb\n");
-    expect(withoutHcNotice(`${notice}\n`)).toBe("\n");
+    expect(withoutHcNotice(`${notice}\n`)).toBe("");
   });
 
   it("polls once a second, patches only on change, and checks hc ls every third tick", async () => {
