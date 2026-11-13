@@ -158,7 +158,7 @@ describe("agent.stop", () => {
     expect(await act()).toEqual({ ok: false, code: "cooldown" });
     expect(term.calls.length).toBe(n);
     // Another terminal is not cooled.
-    expect((await act({ terminal: "t4" })).code).not.toBe("cooldown");
+    expect((await act({ terminal: "t4" }))!.code).not.toBe("cooldown");
     clock.now = ends[0]! + STOP_COOLDOWN_MS;
     term.screen = screen("stop-working-stream");
     expect(await act()).toEqual({ ok: true });
@@ -245,7 +245,7 @@ describe("the per-terminal lock shared with prompt.answer", () => {
     expect(await st.act()).toEqual({ ok: false, code: "busy" });
     expect(st.term.calls).toEqual([]);
     // Another terminal is free.
-    expect((await st.act({ terminal: "t4" })).code).not.toBe("busy");
+    expect((await st.act({ terminal: "t4" }))!.code).not.toBe("busy");
     while (releaseEnter === undefined) await new Promise((r) => setTimeout(r, 0));
     releaseEnter();
     expect((await pa)!.ok).toBe(true);

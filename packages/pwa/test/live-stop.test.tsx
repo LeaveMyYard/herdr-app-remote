@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BridgeClient } from "../src/bridge/client";
 import { LiveApp } from "../src/LiveApp";
 import { FakeSocket } from "./fake-socket";
@@ -19,7 +19,6 @@ const flush = () => act(async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 });
 const recv = (s: FakeSocket, m: unknown) => act(async () => s.recv(m));
-const subs = (s: FakeSocket) => s.ofType("sub").flatMap((m) => m.topics as string[]);
 
 async function open(agent: string, prompts: boolean, pruneMs = 10_000) {
   window.location.hash = "#/agents";
