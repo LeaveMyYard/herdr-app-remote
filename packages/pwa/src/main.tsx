@@ -17,6 +17,7 @@ import type { PairView as PairViewState } from "./pair/flow";
 import { HostNameProvider } from "./bridge/host-name";
 import { boardData, host as demoHost } from "./fixtures";
 import { registerServiceWorker } from "./sw-register";
+import { installIosVpFix } from "./ios-vp-fix";
 
 const STATUSES: readonly ConnectionStatus[] = ["online", "connecting", "offline", "stale", "unpaired", "refused", "paused", "unavailable"];
 const isStatus = (s: string): s is ConnectionStatus => (STATUSES as readonly string[]).includes(s);
@@ -77,4 +78,5 @@ if (fixture === "pair") {
   app = <LiveApp client={client} hostName={host} />;
 }
 createRoot(root).render(<StrictMode>{app}</StrictMode>);
+installIosVpFix();
 registerServiceWorker();

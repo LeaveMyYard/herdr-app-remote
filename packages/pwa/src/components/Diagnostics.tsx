@@ -67,6 +67,7 @@ export function collect(): Row[] {
     rect("html", document.documentElement),
     rect("body", document.body),
     rect("#root", q("#root")),
+    ["--ios-vp-fix", document.documentElement.style.getPropertyValue("--ios-vp-fix") || "unset"],
     rect(".ph", q(".ph")),
     rect(".app-header", q(".app-header")),
     rect(".screen", q(".screen")),
