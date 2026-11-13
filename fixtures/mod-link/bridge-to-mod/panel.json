@@ -14,7 +14,7 @@
         "name": "Phone 1",
         "login": "user-1@example",
         "state": "pending",
-        "caps": { "view": true, "inbox.answer": true, "navigate": false, "terminal.input": false, "push": false },
+        "caps": { "view": true, "inbox.answer": true, "navigate": false, "terminal.input": false, "push": false, "transcript.read": false },
         "terminal_input_until": null,
         "created_at": 1700000000000,
         "last_seen": null,

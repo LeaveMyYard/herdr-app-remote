@@ -1,0 +1,1 @@
+{ "type": "panel_act", "id": "p-2", "kind": "device.cap", "args": { "id": "d-0000000000000001", "cap": "transcript.read", "on": true } }

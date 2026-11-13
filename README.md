@@ -85,6 +85,7 @@ An approved phone can read. Everything else is a per-phone switch you turn on fr
 | `terminal.input` | **off**; desktop only, can expire | typing text into a terminal (`hc send`) |
 | `terminal.keys` | **off**; desktop only, can expire | pressing special keys (Esc, Ctrl-C, arrows) from a configurable menu (`hc keys`) |
 | `push` | off | web push notifications |
+| `transcript.read` | **off**; desktop only | chat history: reading agents' conversations, not just the screen (the "Chat history" switch) |
 
 Capabilities are switched in the Remote panel, per phone. A phone can never grant itself one. You can pause remote access, rename or revoke a phone at any time in the same panel; a revoked phone is cut off at once.
 

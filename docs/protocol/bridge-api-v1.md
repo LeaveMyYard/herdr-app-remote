@@ -91,12 +91,20 @@ Checked by the bridge for every `act`:
 | `terminal.input` | off; turned on from the desktop only, can expire | `terminal.send` |
 | `terminal.keys` | off; turned on from the desktop only, can expire (S16b) | `terminal.keys` |
 | `push` | off | `push.subscribe`, `push.unsubscribe` |
+| `transcript.read` | off; turned on from the desktop only, no expiry (CV1) | no `act`; the transcript topics `chatview:<t>` and `timeline:<t>` and `GET /api/v1/chatview/<t>` (below) |
 
 There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other kind is refused and logged.
 
 `terminal.input` is turned on from the desktop's Remote panel, with no limit or for a chosen time. When the time is up the bridge turns it off by itself: in `devices.json`, in Activity ("Phone 1: terminal.input expired") and in the panel. A grant that ran out while the bridge was down is turned off when it starts. Every check also compares the time, so an expired grant is refused even before that happens.
 
 `terminal.keys` (S16b) works the same way, with its own expiry (`terminal.keys.until` in `devices.json`, `terminal_keys_until` in `/api/v1/me`; "Phone 1: terminal.keys expired"). The two are independent: typing text never implies pressing Ctrl-C, and the reverse. Losing one kills only that one's work in flight; losing the device, `view`, the serve identity or serving (pause, Funnel) kills both. A `devices.json` written before S16b has no `terminal.keys` and reads as off. The reverse does not hold: a bridge from before S16b refuses to start on a `devices.json` written by this one (its schema is strict), so there is no downgrade. The desktop Remote panel turns it on with a "Special keys" switch ("Lets this phone press Esc, Ctrl-C and the arrow keys in a terminal.") that works like the terminal input one: it asks 1 hour, 8 hours or No limit first (`device.cap {cap: "terminal.keys", minutes?}` on the mod link) and shows "until 21:40" while a limit runs.
+
+`transcript.read` (CV1, "chat history"; `docs/chatview.md` §5.1) is separate from `view`: `view` shows a terminal's screen (`chat:<t>`, the last 200 lines), a transcript is an agent's whole conversation. It is off for every device after approval and has no expiry. The desktop Remote panel turns it on and off with a "Chat history" switch ("Lets this phone read agents' conversations, not just the screen.") that flips at once (`device.cap {cap: "transcript.read", on}` on the mod link; `minutes` is refused). Activity: "Phone 1: transcript.read on" / "off". It is checked, together with everything holding the socket needs (approved, current login, `view`, not paused), at every `sub` to a topic that starts with `chatview:` or `timeline:` (`TRANSCRIPT_TOPIC_PREFIXES` in the protocol package):
+- without it the topic is not subscribed and the server answers `stale {topic, reason: "forbidden"}`, with no `snap`; the source is never told of the subscriber. Activity: "Phone 1 opened the chat of t3: refused, chat history is off" (or "the timeline of t3"; a topic name that isn't an id reads "a terminal"), at most 4 lines a minute per device. One `sub` frame draws at most 64 refusals (the per-connection topic limit); one more closes the socket (1008);
+- turning it off ends the device's open transcript subscriptions at once with the same `stale forbidden`, without closing its socket, also when `devices.json` can't be written; nothing more is sent on them until a new `sub` is allowed;
+- with no gate configured the hub serves no transcript topic at all (fails closed).
+
+`GET /api/v1/chatview/<t>` (CV3) passes the same capabilities to the cookie check (`Security.requestDevice(req, topicCaps(topic))`). A `devices.json` written before CV1 has no `transcript.read` and reads as off; a bridge from before CV1 refuses to start on a file written by this one (strict schema), so there is no downgrade.
 
 ### Rate limits
 
@@ -156,14 +164,14 @@ One JSON object per text frame, each with a `type`.
 | `welcome` | `api`, `bridge`, `epoch` | `epoch` is random per bridge start. |
 | `snap` | `topic`, `epoch`, `seq`, `data` | Full state of a topic. |
 | `patch` | `topic`, `seq`, `ops` | RFC 6902 operations (`add remove replace move copy test`); paths are RFC 6901 JSON Pointers. |
-| `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`, and for `chat:<t>` `terminal_not_found`, `bad_terminal`, `too_many_chats`, `hc_missing`. The field is open. A `stale` can come before any `snap` (a chat whose first read failed): the client shows the reason, it does not wait for a value. |
+| `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`, for `chat:<t>` `terminal_not_found`, `bad_terminal`, `too_many_chats`, `hc_missing`, and `forbidden` (CV1: the device lacks a capability the topic needs; it is not subscribed, or no longer, and gets nothing more on it). The field is open. A `stale` can come before any `snap` (a chat whose first read failed): the client shows the reason, it does not wait for a value. |
 | `res` | `id`, `ok`, `code?`, `unknown_effect?`, `message?`, `closed?` | Result of an `act`. `code` is required when `ok` is false; `unknown_effect` is only valid when `ok` is false. `message` is plain text the PWA may show, in the plugin's own words (never answer text). `closed` (inbox acts) says the row is closed now, and why. |
 | `event` | `topic`, `name`, `data` | Fire-and-forget notification. |
 | `pong` | | Reply to `ping` (not in the plan's list; added so clients can detect dead sockets). |
 
 ### Topics
 
-`host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`, `keys` (S16b).
+`host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`, `keys` (S16b), and the chat view topics `chatview:<t>` and `timeline:<t>` (`docs/chatview.md` §4, §7; payloads defined by CV3 and CV5), which need `transcript.read` (see Capabilities).
 
 Payload schemas defined so far: `host` is `HostState` (see mod-link v1), `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`, `usage` is `UsageTopic` (below), `panorama` and `setup` are described below. The other payloads are defined by their slices; until then `snap.data` is open.
 

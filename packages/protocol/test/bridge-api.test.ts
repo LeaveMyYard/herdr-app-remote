@@ -7,6 +7,16 @@ describe("bridge-api", () => {
     expect(bridgeApi.Topic.safeParse("chat:").success).toBe(false);
   });
 
+  it("accepts the chat view topics (CV1) and marks exactly them as transcript topics", () => {
+    for (const t of ["chatview:t3", "timeline:t3", "chatview:vps/t7"]) expect(bridgeApi.Topic.safeParse(t).success, t).toBe(true);
+    for (const t of ["chatview:", "timeline:", "chatview:t3\n", "Chatview:t3", "chatviews:t3"]) expect(bridgeApi.Topic.safeParse(t).success, t).toBe(false);
+    expect([...bridgeApi.TRANSCRIPT_TOPIC_PREFIXES]).toEqual(["chatview:", "timeline:"]);
+    expect(bridgeApi.isTranscriptTopic("chatview:t3")).toBe(true);
+    expect(bridgeApi.isTranscriptTopic("timeline:t3")).toBe(true);
+    for (const t of ["chat:t3", "host", "inbox", "panorama", "usage", "keys", "setup", "plugins", "chat:chatview:t3"]) expect(bridgeApi.isTranscriptTopic(t), t).toBe(false);
+    expect(bridgeApi.STALE_REASONS).toContain("forbidden");
+  });
+
   it("lists exactly the six documented plugin states", () => {
     expect([...bridgeApi.PLUGIN_STATES]).toEqual(["ready", "missing", "too_old", "broken", "stale", "not_running"]);
   });

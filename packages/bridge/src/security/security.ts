@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { bridgeApi } from "@herdr-remote/protocol";
 import type { ActHandler, ActResult, HubClient } from "../hub.js";
 import type { GuardVerdict } from "../server.js";
-import { AuditLog, cleanLabel, describeAct, type AuditEntry, type AuditOptions } from "./audit.js";
-import { ACTION_CAPS, CAPABILITIES, defaultCaps, EXPIRING, hasCap, isExpiring, untilKey, type Capability, type ExpiringCapability } from "./caps.js";
+import { AuditLog, cleanLabel, describeAct, safeId, type AuditEntry, type AuditOptions } from "./audit.js";
+import { ACTION_CAPS, CAPABILITIES, defaultCaps, EXPIRING, hasCap, isExpiring, topicCaps, untilKey, type Capability, type ExpiringCapability } from "./caps.js";
 import { DeviceStore, newDeviceId, type Device } from "./devices.js";
 import { headerValues, readCookie, singleHeader } from "./headers.js";
 import { qrSvg } from "./qr.js";
@@ -39,6 +39,12 @@ export interface SecurityOptions {
   onCut?: (deviceId: string | null, cap?: ExpiringCapability) => void;
   /** An Activity line could not be written (`ok: false`), or could again after failing (`ok: true`). */
   onAuditHealth?: (h: AuditHealth) => void;
+  /**
+   * A device just lost a capability some topics need (`transcript.read`, CV1) while keeping its socket. The app
+   * calls `Hub.recheck(deviceId)`, which ends those subscriptions now. (Losing the device, `view`, serving or the
+   * serve identity closes the socket instead, which ends every subscription.)
+   */
+  onTopicsCut?: (deviceId: string) => void;
 }
 
 /** Whether the Activity log is being written. A failed write is flagged here and in the desktop panel. */
@@ -100,6 +106,11 @@ export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([
   // A menu press is one tap, but arrows get tapped a few times in a row.
   ["terminal.keys", { max: 10, windowMs: 10_000 }],
 ]);
+/**
+ * Refused transcript subscriptions written to Activity per device per window (CV1). A phone with chat history off
+ * subscribes `chatview:<t>` and `timeline:<t>` each time a chat opens; past this the refusals are not logged again.
+ */
+export const TOPIC_REFUSAL_LOG_LIMIT: Limit = { max: 4, windowMs: 60_000 };
 /** Kinds that must not run while the Activity log can't be written: their whole safeguard is the audit line. */
 const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send", "terminal.keys"]);
 /** Kinds the security layer answers itself, never handed to the inner handler. */
@@ -171,6 +182,9 @@ export class Security {
   private readonly kindLimits = new Map<string, RateLimiter>();
   private readonly onAuditHealth: ((h: AuditHealth) => void) | undefined;
   private readonly onCut: ((deviceId: string | null, cap?: ExpiringCapability) => void) | undefined;
+  private readonly onTopicsCut: ((deviceId: string) => void) | undefined;
+  /** Throttles the Activity lines of refused transcript subscriptions, per device. */
+  private readonly topicRefusals: RateLimiter;
   private health: AuditHealth = { ok: true, since: null, failures: 0 };
   private expiryTimer: NodeJS.Timeout | null = null;
 
@@ -183,6 +197,8 @@ export class Security {
     this.onChange = opts.onChange;
     this.onAuditHealth = opts.onAuditHealth;
     this.onCut = opts.onCut;
+    this.onTopicsCut = opts.onTopicsCut;
+    this.topicRefusals = new RateLimiter(TOPIC_REFUSAL_LOG_LIMIT, this.now);
     this.connectLimit = new RateLimiter(CONNECT_LIMIT, this.now);
     this.actLimit = new RateLimiter(ACT_LIMIT, this.now);
     for (const [kind, limit] of KIND_LIMITS) this.kindLimits.set(kind, new RateLimiter(limit, this.now));
@@ -625,10 +641,16 @@ export class Security {
     }
     if (!on && cap === "view") this.cut(id);
     else if (!on && isExpiring(cap)) this.cut(id, cap);
-    this.store.update(id, (x) => {
-      x.caps[cap] = on;
-      if (isExpiring(cap)) x.caps[untilKey(cap)] = on ? until : null;
-    });
+    try {
+      this.store.update(id, (x) => {
+        x.caps[cap] = on;
+        if (isExpiring(cap)) x.caps[untilKey(cap)] = on ? until : null;
+      });
+    } finally {
+      // After the store holds "off" in memory (it changes memory before it writes), so the gate the hub asks again
+      // already refuses; in a finally, so a failed write (full disk) can't leave open chat history streaming.
+      if (!on && cap === "transcript.read") this.onTopicsCut?.(id);
+    }
     this.scheduleExpiry();
     const limit = isExpiring(cap) && on && until !== null ? ` until ${new Date(until).toISOString().slice(0, 16)}Z` : "";
     this.audit({ event: "device.cap", device: d.name, text: `${d.name}: ${cap} ${on ? "on" : "off"}${limit}` });
@@ -778,11 +800,44 @@ export class Security {
     return this.mayView(d) && hasCap(d.caps, "push", this.now());
   }
 
-  /** The device a request's cookie names, when it may hold a socket (approved, current, `view`, not paused). */
-  requestDevice(req: IncomingMessage): { id: string } | undefined {
+  /**
+   * The device a request's cookie names, when it may hold a socket (approved, current, `view`, not paused) and, with
+   * `needs`, also has those capabilities in effect now. `GET /api/v1/chatview/<t>` (CV3) passes
+   * `topicCaps("chatview:<t>")`, so the chat history pages need exactly what the topic needs.
+   */
+  requestDevice(req: IncomingMessage, needs: readonly Capability[] = []): { id: string } | undefined {
     const d = this.deviceFor(req);
-    return this.mayView(d) ? { id: d.id } : undefined;
+    if (!this.mayView(d)) return undefined;
+    const now = this.now();
+    return needs.every((c) => hasCap(d.caps, c, now)) ? { id: d.id } : undefined;
   }
+
+  // ---- topics (CV1) ----
+
+  /**
+   * The Hub's topic gate. A transcript topic (`chatview:<t>`, `timeline:<t>`) needs, checked again here, what holding
+   * the socket needs (approved, current login, `view`, not paused, not dropped), and `transcript.read`. Any other
+   * topic needs only the socket. A
+   * refused `sub` is written to Activity (identifiers only, throttled per device); the hub answers it `stale forbidden`.
+   */
+  readonly mayRead = (client: HubClient, topic: string, recheck = false): boolean => {
+    const needs = topicCaps(topic);
+    // Every other topic: holding the socket is the check (the guard at upgrade, `onConnect`, and the drops), as before.
+    if (needs.length === 0) return true;
+    const id = client.principal?.deviceId;
+    const d = id !== undefined ? this.store.get(id) : undefined;
+    if (this.dropped.has(client) || !this.mayView(d)) return false;
+    const now = this.now();
+    if (needs.every((c) => hasCap(d.caps, c, now))) return true;
+    // A recheck follows a switch the desktop just turned off, which Activity already says ("Phone 1: transcript.read off").
+    if (!recheck && this.topicRefusals.take(d.id).ok) {
+      const sep = topic.indexOf(":");
+      const what = topic.slice(0, sep) === "timeline" ? "the timeline" : "the chat";
+      const term = safeId(topic.slice(sep + 1)) ?? "a terminal";
+      this.bestEffort(() => this.audit({ event: "topic", device: d.name, text: `${d.name} opened ${what} of ${term}: refused, chat history is off`, ok: false, code: "forbidden" }));
+    }
+    return false;
+  };
 
   /** A known device's name, and whether it is approved with `push` on as stored. */
   pushDevice(id: string): { name: string; push: boolean } | undefined {
