@@ -39,15 +39,90 @@ const WRAPPERS: ReadonlySet<string> = new Set([
  * Whether a tag is one the harness injects into the user's turn (fail closed: every `ide_*`/`ide-*` tag, every
  * `system-*`, `local-command-*`, `bash-*`, `command-*` tag, and any `*hook*` tag, besides the list above).
  */
-export function isWrapperTag(tag: string): boolean {
+export function isWrapperTag(name: string): boolean {
+  const tag = name.toLowerCase();
   return WRAPPERS.has(tag) || /^(?:ide|system|local-command|bash|command)[-_]/.test(tag) || tag.includes("hook");
 }
-/** A tagged section; tag names may hold `_` (`ide_opened_file`) and the open tag may carry attributes. */
-const TAG = /<([a-z][a-z0-9_-]{0,40})(?:\s[^<>]*)?>([\s\S]*?)<\/\1\s*>/g;
-/** Text that is nothing but tagged sections, whatever their names. */
-const ONLY_TAGS = /^\s*(?:<([a-z][a-z0-9_-]{0,40})(?:\s[^<>]*)?>[\s\S]*?<\/\1\s*>\s*)+$/;
-/** An opening wrapper tag with no closing one: everything from it on is treated as injected. */
-const OPEN_TAG = /<([a-z][a-z0-9_-]{0,40})(?:\s[^<>]*)?>/g;
+/**
+ * One tag token, open or close, of any name (case-insensitive, `_` allowed), with optional attributes. Linear:
+ * the name is bounded, and `[^<>]*` can't run past the next `<`, so scans from different starts never overlap.
+ * There is no body pattern and no backreference: sections are paired by the scanner below, never by a regex.
+ */
+const TAG_TOKEN = /<(\/?)([A-Za-z][A-Za-z0-9_-]{0,63})(?:\s[^<>]*)?>/g;
+/** A user block longer than this is cut before any tag scan (the text is cut at 16 KB later anyway). */
+export const USER_BLOCK_SCAN_MAX = 256 * 1024;
+
+/** Sorted, merged [start, end) intervals. */
+function merge(iv: [number, number][]): [number, number][] {
+  iv.sort((x, y) => x[0] - y[0]);
+  const out: [number, number][] = [];
+  for (const [a, b] of iv) {
+    const last = out[out.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else out.push([a, b]);
+  }
+  return out;
+}
+
+/** `s` without the merged intervals `cut`, from 0 to `end`. */
+function without(s: string, cut: readonly [number, number][], end: number): string {
+  let out = "";
+  let at = 0;
+  for (const [a, b] of cut) {
+    if (a >= end) break;
+    out += s.slice(at, a);
+    at = Math.max(at, b);
+  }
+  if (at < end) out += s.slice(at, end);
+  return out;
+}
+
+/**
+ * One user block with the harness's sections taken out, in linear time. Tag tokens are paired per name with a
+ * stack (a nested same-name section is covered by its outer one). Returns the text left, whether that is nothing
+ * but tagged sections of any name (then the block is dropped: fail closed), and a `<command-name>`'s text. An open
+ * wrapper with no close, or a wrapper close with no open, hides the rest of the block from there.
+ */
+export function stripBlock(block: string): { text: string; onlyTags: boolean; command?: string } {
+  const b = block.length > USER_BLOCK_SCAN_MAX ? block.slice(0, USER_BLOCK_SCAN_MAX) : block;
+  const open = new Map<string, number[][]>();
+  const wrap: [number, number][] = [];
+  const any: [number, number][] = [];
+  let end = b.length;
+  let command: string | undefined;
+  let commandAt = Infinity;
+  for (const m of b.matchAll(TAG_TOKEN)) {
+    const at = m.index;
+    if (at >= end) break;
+    const name = m[2]!.toLowerCase();
+    if (m[1] === "") {
+      let st = open.get(name);
+      if (!st) open.set(name, (st = []));
+      st.push([at, at + m[0].length]);
+      continue;
+    }
+    const o = open.get(name)?.pop();
+    if (!o) {
+      // A stray wrapper close: what came before it is not trustworthy either.
+      if (isWrapperTag(name)) end = 0;
+      continue;
+    }
+    const sec: [number, number] = [o[0]!, at + m[0].length];
+    any.push(sec);
+    if (isWrapperTag(name)) {
+      wrap.push(sec);
+      if (name === "command-name" && o[0]! < commandAt) {
+        commandAt = o[0]!;
+        command = b.slice(o[1]!, at).trim();
+      }
+    }
+  }
+  for (const [name, st] of open) if (isWrapperTag(name)) for (const [a] of st) end = Math.min(end, a!);
+  const text = without(b, merge(wrap), end);
+  const rest = without(b, merge(any), end);
+  return { text, onlyTags: rest.trim() === "", ...(command !== undefined && commandAt < end ? { command } : {}) };
+}
+
 /** What a command chip may show: a slash command's name, nothing typed after it. */
 const COMMAND = /^\/[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}$/;
 
@@ -65,8 +140,16 @@ const KINDS: ReadonlyMap<string, ToolKind> = new Map([
   ["Task", "subagent"],
   ["Agent", "subagent"],
 ]);
-/** herdr-inbox's question tool, under any MCP server or plugin prefix it is installed with. */
-const INBOX_ASK = /^mcp__[A-Za-z0-9_-]*herdr[-_]inbox[A-Za-z0-9_-]*__ask_operator$/;
+/**
+ * herdr-inbox's question tool, under any MCP server or plugin prefix it is installed with. Plain string tests, no
+ * regex with two open-ended runs around a literal (that one was quadratic on a long name).
+ */
+const isInboxAsk = (name: string): boolean =>
+  name.length <= 256 &&
+  name.startsWith("mcp__") &&
+  name.endsWith("__ask_operator") &&
+  (name.includes("herdr-inbox") || name.includes("herdr_inbox")) &&
+  /^[A-Za-z0-9_-]+$/.test(name);
 const ASK_USER = "AskUserQuestion";
 const NAME_MAX = 64;
 const BASE_MAX = 120;
@@ -125,19 +208,10 @@ export function userText(blocks: readonly string[]): { kept: string[] } | { comm
   let command: string | undefined;
   const kept: string[] = [];
   for (const b of blocks) {
-    let rest = b.replace(TAG, (all: string, tag: string, inner: string) => {
-      if (!isWrapperTag(tag)) return all;
-      if (tag === "command-name") command ??= inner.trim();
-      return "";
-    });
-    for (const m of rest.matchAll(OPEN_TAG)) {
-      if (isWrapperTag(m[1]!)) {
-        rest = rest.slice(0, m.index);
-        break;
-      }
-    }
-    if (rest.trim() === "" || ONLY_TAGS.test(rest)) continue;
-    kept.push(rest.trim());
+    const r = stripBlock(b);
+    if (r.command !== undefined) command ??= r.command;
+    if (r.text.trim() === "" || r.onlyTags) continue;
+    kept.push(r.text.trim());
   }
   if (kept.length > 0) return { kept };
   if (command === undefined) return "hidden";
@@ -192,6 +266,15 @@ export function fitAsks(asks: bridgeApi.ChatAsk[], budget: number): { asks: brid
       options: q.options.map((o) => ({ label: at(o.label, lim), description: o.description === null ? null : at(o.description, lim) })),
     }));
     if (askBytes(out) <= budget) break;
+  }
+  // Still over (the text took nearly all of it): options go from the end, then the questions are cut to share
+  // what is left, so the message never goes over its 32 KB.
+  while (askBytes(out) > budget && out.some((q) => q.options.length > 0)) {
+    out = out.map((q) => ({ ...q, options: q.options.slice(0, -1) }));
+  }
+  if (askBytes(out) > budget) {
+    const each = Math.floor(Math.max(0, budget) / out.length);
+    out = out.map((q) => ({ ...q, header: null, question: q.question === null ? null : at(q.question, each) }));
   }
   return { asks: out, cut: true };
 }
@@ -316,7 +399,7 @@ export function mapMessages(messages: readonly ClaudeMessage[], o: MapOptions = 
           continue;
         }
       }
-      if (INBOX_ASK.test(b.name)) {
+      if (isInboxAsk(b.name)) {
         run = null;
         push({ id: nextId(), role: "ask", at: m.at, ask: { via: "inbox", question: null, header: null, multi: false, options: [] } });
         continue;

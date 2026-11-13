@@ -95,6 +95,14 @@ describe("chat items (§3)", () => {
     const bytes = 20_000 + asks.reduce((n, a) => n + Buffer.byteLength((a.ask.question ?? "") + (a.ask.header ?? "") + a.ask.options.map((o) => o.label + (o.description ?? "")).join("")), 0);
     expect(bytes).toBeLessThanOrEqual(bridgeApi.CHATVIEW_MESSAGE_MAX_BYTES);
     for (const a of asks) expect(bridgeApi.ChatItem.safeParse(a).success).toBe(true);
+    // Text that already took (nearly) all of it: the asks still fit, with options dropped and questions cut (L10).
+    const full = map([agent(1, [text("t".repeat(16_000)), text("u".repeat(16_000)), tool("q", "AskUserQuestion", { questions })])]);
+    const fasks = full.filter((i) => i.role === "ask") as Extract<bridgeApi.ChatItem, { role: "ask" }>[];
+    const ftext = Buffer.byteLength((full[0] as { text: string }).text);
+    expect(ftext).toBeGreaterThan(32_000);
+    const fbytes = ftext + fasks.reduce((n, a) => n + Buffer.byteLength((a.ask.question ?? "") + (a.ask.header ?? "") + a.ask.options.map((o) => o.label + (o.description ?? "")).join("")), 0);
+    expect(fbytes).toBeLessThanOrEqual(bridgeApi.CHATVIEW_MESSAGE_MAX_BYTES);
+    expect(fasks.every((a) => a.cut === true && bridgeApi.ChatItem.safeParse(a).success)).toBe(true);
     // A small one is untouched.
     expect(map([agent(1, [tool("q", "AskUserQuestion", { questions: [{ question: "Q?", options: [{ label: "A" }] }] })])])[0]).not.toHaveProperty("cut");
   });
