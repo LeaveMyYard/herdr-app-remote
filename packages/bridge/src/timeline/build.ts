@@ -152,11 +152,13 @@ const KIND_ORDER: Record<string, number> = { "inbox.question": 0, "inbox.failed"
 export function buildTimeline(inp: TimelineInput): bridgeApi.TimelineTopic {
   const hostParsed = bridgeApi.HostTopic.safeParse(inp.host);
   const host = hostParsed.success ? hostParsed.data : null;
-  let items = inboxItems(inp, host);
+  // A row that would not pass the topic's schema (a time past year 9999, a key over 200 characters) is dropped on its
+  // own: one bad row never takes the whole topic down.
+  let items = inboxItems(inp, host).filter((i) => bridgeApi.TimelineItem.safeParse(i).success);
   if (items.length > bridgeApi.TIMELINE_ITEMS_MAX) {
     items = [...items].sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9)).slice(0, bridgeApi.TIMELINE_ITEMS_MAX);
   }
   const ms = (i: Item): number => (i.at === null ? Infinity : Date.parse(i.at));
   items = items.map((i, n) => ({ i, n })).sort((a, b) => ms(a.i) - ms(b.i) || a.n - b.n).map((x) => x.i);
-  return { terminal: inp.terminal, items, strip: swarmStrip(inp, host) };
+  return { terminal: inp.terminal, items, strip: swarmStrip(inp, host).filter((s) => bridgeApi.StripItem.safeParse(s).success) };
 }

@@ -2,7 +2,7 @@
 // states "Typing off" and "History"; docs/chatview.md §4). Every act is the inbox's own (`inbox.answer`,
 // `inbox.dismiss`, `inbox.ack`, `inbox.retry`), sent for the row as the bridge published it (`key` + `rev`), with
 // the inbox's arm delays: a row takes no tap for a second after it arrives or changes, and a refusal re-arms it.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import { offlineAct, resultWords, type ActFn, type ActResult } from "../inbox/act";
 import { GRACE_MS, ROW_ARM_MS, useArmed, VIEW_ARM_MS } from "../inbox/arm";
@@ -252,6 +252,8 @@ function StripEntry({ item }: { item: bridgeApi.StripItem }) {
   const href = safeHref(item.href);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const long = useRef(false);
+  // A long-press still pending when the strip goes away must not open Peek afterwards.
+  useEffect(() => () => clearTimeout(timer.current), []);
   if (!data) {
     return href ? (
       <a href={href} className="row f1 tl-strip-link">

@@ -1,6 +1,7 @@
 // The visual harness's stand-in for the timeline parts of design/PhoneChatView (`?fixture=timeline&state=...`).
 // Fake data only. Each part sits where the board draws it, so the harness compares that part of the render; the
 // chat around it is CV4's screen and is not drawn here.
+import type { ReactNode } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import { TimelineRow, TimelineStrip } from "./Timeline";
 
@@ -121,7 +122,7 @@ export const BOARD_PLACES = {
 } as const;
 
 export function TimelineBoard({ state }: { state: string | null }) {
-  const at = (top: number, child: React.ReactNode, key: string) => (
+  const at = (top: number, child: ReactNode, key: string) => (
     <div key={key} style={{ position: "absolute", top, left: 16, right: 16 }}>
       {child}
     </div>

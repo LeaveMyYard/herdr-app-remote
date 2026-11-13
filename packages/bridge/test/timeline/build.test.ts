@@ -21,6 +21,14 @@ const build = (over: Partial<TimelineInput> = {}) => {
 };
 
 describe("inbox items (§4)", () => {
+  it("drops only a row the topic can't carry: a time past year 9999, a key over 200 characters", () => {
+    const late = group(123, core(T), { created_at: "+012000-01-01T00:00:00Z" });
+    const long = alert(456, core(T));
+    long.key = `alert:${"x".repeat(200)}`;
+    const v = build({ inbox: inbox([late, long, failed(119, core(T)), group(124, core(T))]) });
+    expect(v.items.map((i) => i.key)).toEqual(["failed:119", "group:124"]);
+  });
+
   it("passes on the terminal's group, alert and failed rows as they are, and nothing of another terminal", () => {
     const rows = [group(123, core(T)), group(124, core("term-2")), alert(456, core(T)), alert(457, core("term-2")), failed(119, core(T)), failed(120, core("term-2"))];
     const v = build({ inbox: inbox(rows) });

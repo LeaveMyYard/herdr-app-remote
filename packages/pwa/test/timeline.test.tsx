@@ -268,6 +268,19 @@ describe("the strip", () => {
     }
   });
 
+  it("a long-press still pending when the strip goes away opens nothing", () => {
+    vi.useFakeTimers();
+    try {
+      const { container, unmount } = render(<TimelineStrip strip={[boardStrip]} />);
+      fireEvent.pointerDown(container.querySelector("a.tl-strip-link")!);
+      unmount();
+      vi.advanceTimersByTime(600);
+      expect(window.location.hash).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("draws nothing without strip items", () => {
     const { container } = render(<TimelineStrip strip={[]} />);
     expect(container.innerHTML).toBe("");
