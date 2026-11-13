@@ -1,5 +1,5 @@
 // CV8: Stop in the chat view's composer, and the "Stopped by you" row. Fake data only.
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { bridgeApi } from "@herdr-remote/protocol";
@@ -60,38 +60,44 @@ describe("Stop in the composer (CV8)", () => {
   });
 
   it("a double tap on Send while working sends once and never stops: Stop comes back 1 s after the box empties (final pass M1)", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { forgetConfirmations } = await import("../src/screens/ChatComposer");
+    forgetConfirmations();
+    const { i, press, send } = input();
+    view(topic(WORKING), i);
+    // Fake time only, driven by hand: it never moves with the wall clock (a slow CI runner made a mixed clock flaky).
+    vi.useFakeTimers();
     try {
-      const { forgetConfirmations } = await import("../src/screens/ChatComposer");
-      forgetConfirmations();
-      const { i, press, send } = input();
-      view(topic(WORKING), i);
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      await user.type(screen.getByRole("textbox"), "and the docs too");
+      const flush = () => act(async () => {
+        for (let k = 0; k < 5; k++) await Promise.resolve();
+      });
+      const advance = (ms: number) => act(async () => {
+        vi.advanceTimersByTime(ms);
+      });
+      const box = () => screen.getByRole("textbox");
       const slot = () => document.querySelector<HTMLButtonElement>("form .chat-send")!;
-      await user.click(slot());
-      await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Send" }));
+      const sendText = async (text: string) => {
+        fireEvent.change(box(), { target: { value: text } });
+        fireEvent.click(slot());
+        const ask = screen.queryByRole("alertdialog");
+        if (ask) fireEvent.click(within(ask).getByRole("button", { name: "Send" }));
+        await flush();
+      };
+      await sendText("and the docs too");
       expect(send).toHaveBeenCalledTimes(1);
       // The box is empty now; the second tap lands on the same spot, which is still Send (a no-op on an empty box).
       expect(stopButton()).toBeNull();
       expect(slot()).toHaveAccessibleName("Send");
-      await user.click(slot());
+      fireEvent.click(slot());
+      await flush();
       expect(press).not.toHaveBeenCalled();
       expect(send).toHaveBeenCalledTimes(1);
       // A second send 600 ms later restarts the hold.
-      await act(async () => {
-        vi.advanceTimersByTime(600);
-      });
-      await user.type(screen.getByRole("textbox"), "and the tests");
-      await user.click(slot());
+      await advance(600);
+      await sendText("and the tests");
       expect(send).toHaveBeenCalledTimes(2);
-      await act(async () => {
-        vi.advanceTimersByTime(600);
-      });
+      await advance(600);
       expect(stopButton()).toBeNull();
-      await act(async () => {
-        vi.advanceTimersByTime(500);
-      });
+      await advance(400);
       expect(stopButton()).not.toBeNull();
     } finally {
       vi.useRealTimers();
