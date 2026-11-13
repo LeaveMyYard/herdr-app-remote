@@ -21,7 +21,7 @@ export interface ChatRouteProps {
   /** Extension points of the chat view (CV5, CV7). */
   /** What is on screen now (null while pending), so the text topics stay subscribed while a held text view shows. */
   onShown?: ((view: "chat" | "text" | null) => void) | undefined;
-  slots?: Pick<ChatViewProps, "strip" | "tail" | "renderItem" | "locked"> | undefined;
+  slots?: Pick<ChatViewProps, "strip" | "tail" | "renderItem" | "locked" | "timeline"> | undefined;
 }
 
 /**

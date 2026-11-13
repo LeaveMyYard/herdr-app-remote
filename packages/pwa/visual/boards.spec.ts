@@ -27,9 +27,10 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[];
   { ref: "PhoneChat", url: "/?fixture=chat#/chat/a-1", nav: false },
   // PhoneKeys (S16b): the key bar, Keys sheet, typing-time line and ran-out footer are compared; the text stays masked.
   ...(["bar", "menu", "off", "soon", "gone"] as const).map((s) => ({ ref: `PhoneKeys-${s}`, url: `/?fixture=chat&typing=${s}#/chat/a-1`, nav: false, skip: [SWITCHER], compare: ".chat-foot" })),
-  // CV4: the chat view. The strip row (CV5) is an empty masked slot. The working state's composer has Stop (CV8). The
-  // other board states (history, off) have items from CV5/CV7 or a different scroll position and are checked by eye
-  // (screenshots in the PR); Codex's notice card is compared.
+  // CV4: the chat view, with the timeline strip (CV5b) drawn and compared under the header ("new": account chip only).
+  // The working state's composer has Stop (CV8). The other board states (history, off) have items from CV7 and I1 (the
+  // answered row) or a different scroll position and are checked by eye (screenshots in the PRs); Codex's notice card
+  // is compared.
   { ref: "PhoneChatView-chat", url: "/?fixture=chatview&view=chat#/chat/a-1", nav: false, skip: [SWITCHER] },
   // CV8: stopped from the phone: "Stopped by you · 21:14" and Send back in the composer.
   { ref: "PhoneChatView-stop", url: "/?fixture=chatview&view=stop#/chat/a-1", nav: false, skip: [SWITCHER] },

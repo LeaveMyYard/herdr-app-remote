@@ -4,6 +4,7 @@ import type { ChatAgent, ChatQuestion } from "./screens/Chat";
 import type { ChatInput } from "./screens/ChatComposer";
 import type { OlderResult } from "./bridge/chatview";
 import type { ViewMode } from "./chatview/mode";
+import { boardAccount, boardAlert, boardQuestion, boardStrip } from "./timeline/TimelineBoard";
 import { PROMPT_FIXTURES } from "./chatview/prompt/fixtures";
 import { seedPromptTail, type PromptAct } from "./chatview/prompt/PromptCard";
 
@@ -129,6 +130,25 @@ export interface ChatviewDemo {
   loadOlder?: (before: string, rev: string) => Promise<OlderResult>;
   /** CV7: what a prompt card's press answers in the demo. */
   promptAct?: PromptAct;
+  /** The `timeline:<t>` value: the strip and the inline items (CV5). */
+  timeline?: bridgeApi.TimelineTopic;
+}
+
+/**
+ * The board's timeline (PhoneChatView, every state: the strip, account only in "New"; "Typing off": the question after the last reply;
+ * "History": the alert after yesterday's last reply). Placed by `at` among the demo items, as the live ones are.
+ */
+function demoTimeline(state: "chat" | "off" | "history" | "new"): bridgeApi.TimelineTopic {
+  // "New": a fresh session with no panorama root has only the account chip.
+  if (state === "new") return { terminal: "t2", strip: [boardAccount], items: [] };
+  const strip = [boardStrip, boardAccount];
+  if (state === "off") {
+    const asked = iso(today(21, 12, 12));
+    const data = { ...(boardQuestion.data as Record<string, unknown>), created_at: asked };
+    return { terminal: "t2", strip, items: [{ ...boardQuestion, at: asked, anchor: null, data }] };
+  }
+  if (state === "history") return { terminal: "t2", strip, items: [{ ...boardAlert, at: iso(today(18, 46, 0, -1)) }] };
+  return { terminal: "t2", strip, items: [] };
 }
 
 export function chatviewDemo(state: string | null): ChatviewDemo | null {
@@ -142,7 +162,7 @@ export function chatviewDemo(state: string | null): ChatviewDemo | null {
   const working = { state: "working" as const, since: iso(today(21, 13, 0)) };
   switch (state) {
     case "chat":
-      return { mode: { kind: "chat" }, topic: { ...base, items: todayItems, status: working }, input: input(true), now: () => clock, agent };
+      return { mode: { kind: "chat" }, topic: { ...base, items: todayItems, status: working }, input: input(true), now: () => clock, agent, timeline: demoTimeline("chat") };
     case "history":
       return {
         mode: { kind: "chat" },
@@ -151,11 +171,12 @@ export function chatviewDemo(state: string | null): ChatviewDemo | null {
         now: () => clock,
         agent,
         loadOlder: () => new Promise(() => undefined),
+        timeline: demoTimeline("history"),
       };
     case "new":
-      return { mode: { kind: "chat" }, topic: { ...base, items: [], status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent: { name: "Agent 5", folder: "~/code/alpha", harness: "claude", status: "idle" } };
+      return { mode: { kind: "chat" }, topic: { ...base, items: [], status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent: { name: "Agent 5", folder: "~/code/alpha", harness: "claude", status: "idle" }, timeline: demoTimeline("new") };
     case "off":
-      return { mode: { kind: "chat" }, topic: { ...base, items: todayItems.slice(2, 5), status: working }, input: input(false), now: () => clock, agent };
+      return { mode: { kind: "chat" }, topic: { ...base, items: todayItems.slice(2, 5), status: working }, input: input(false), now: () => clock, agent, timeline: demoTimeline("off") };
     // CV7: a native prompt card inside the chat view (board state perm; `changed` after a refused press).
     case "perm":
     case "changed": {
@@ -175,7 +196,7 @@ export function chatviewDemo(state: string | null): ChatviewDemo | null {
     // CV8: stopped from the phone. The transcript's interrupt marker is the status row; the agent is idle again.
     case "stop": {
       const items: Item[] = [...todayItems.slice(0, -1), tools("m-6", "read", 2, ["Read · README.md", "Read · parse.md"], today(21, 10)), { id: "m-7", role: "status", at: iso(today(21, 14)), status: "stopped" }];
-      return { mode: { kind: "chat" }, topic: { ...base, items, status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent: { ...agent, status: "idle" } };
+      return { mode: { kind: "chat" }, topic: { ...base, items, status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent: { ...agent, status: "idle" }, timeline: demoTimeline("chat") };
     }
     case "codex":
       return { mode: { kind: "text", notice: "codex" }, text: chatTopic, input: { ...input(true), keys: { enabled: true, menu: demoKeysMenu, press: ok } }, now: () => clock, agent: { name: "Agent 3", folder: "~/code/alpha", harness: "codex", status: "working" } };
