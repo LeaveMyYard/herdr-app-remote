@@ -1,0 +1,58 @@
+/* Native prompt cards (CV7): design/PhoneChatView.dc.html states perm, ask1, askm, plan, changed
+   (design/work/build_chatview.py card(), choice(), radio(), check(), other_field(), plan_card(), refusal()).
+   The tones are the board's mix() of the state colour over the card surface: amber #ffb547, accent #96b2d7. */
+.pc-card{padding:12px 12px 12px 14px;gap:10px;border-radius:10px;background:#24221f;border:1px solid #4a3b26}
+.pc-card[data-tone=accent]{background:#1e2127;border-color:#333b46}
+.pc-edge{position:absolute;left:0;top:0;bottom:0;width:2px;border-radius:9px 0 0 9px;background:#ffb547}
+.pc-card[data-tone=accent] .pc-edge{background:var(--t-accent)}
+.pc-card[data-dim]{background:var(--t-background);border-color:var(--t-border);opacity:.55}
+.pc-card[data-dim] .pc-edge{background:var(--t-dim)}
+.rel{position:relative}
+.pc-chip{font-size:11px;padding:1px 6px;border-radius:4px;background:var(--t-raised);color:var(--t-muted)}
+.pc-title{font-size:15px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.pc-options{gap:6px}
+.hd .pc-choice{min-height:46px;padding:7px 12px;gap:10px;border-radius:8px;text-align:left;border:1px solid var(--t-border);background:var(--t-raised);color:var(--t-foreground)}
+.hd .pc-choice[data-selected]{border-color:var(--t-accent)}
+.hd .pc-choice[data-primary]{background:var(--t-solid);color:var(--t-solid-fg)}
+.hd .pc-choice:disabled{cursor:default}
+.pc-choice-text{gap:1px}
+.pc-choice-label{font-size:14px;font-weight:400;overflow-wrap:anywhere}
+.pc-choice[data-primary] .pc-choice-label{font-weight:500}
+.pc-choice-sub{font-size:12px;color:var(--t-muted);overflow-wrap:anywhere}
+.pc-choice[data-primary] .pc-choice-sub{color:var(--t-solid-fg)}
+.pc-mark{width:18px;justify-content:center}
+.pc-radio{width:16px;height:16px;box-sizing:border-box;border-radius:8px;border:1.5px solid var(--t-input);display:inline-flex;align-items:center;justify-content:center}
+.pc-radio[data-on]{border-color:var(--t-accent)}
+.pc-radio[data-on]::after{content:"";width:8px;height:8px;border-radius:4px;background:var(--t-accent)}
+.pc-check{width:16px;height:16px;box-sizing:border-box;border-radius:4px;border:1.5px solid var(--t-input);display:inline-flex;align-items:center;justify-content:center;color:var(--t-solid-fg);font-size:11px;font-weight:700}
+.pc-check[data-on]{border-color:var(--t-accent);background:var(--t-accent)}
+.pc-perm-body{gap:6px}
+.pc-perm-kind{gap:6px;font-size:12.5px;color:var(--t-muted)}
+.pc-dot{color:var(--t-dim)}
+.pc-cmd{padding:8px 10px;border-radius:7px;background:var(--t-chrome);border:1px solid var(--t-border);font-size:12.5px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.hd .pc-other{box-sizing:border-box;width:100%;min-height:46px;padding:0 12px;border-radius:8px;border:1px solid var(--t-border);background:var(--t-raised);color:var(--t-foreground);font:inherit;font-size:14px;outline:none}
+.hd .pc-other::placeholder{color:var(--t-muted);opacity:1}
+.hd .pc-other:focus{border-color:var(--t-input)}
+.pc-foot{gap:8px}
+.hd .pc-answer{height:44px;justify-content:center;border-radius:7px;background:var(--t-solid);color:var(--t-solid-fg);font-size:14px;font-weight:500}
+.hd .pc-answer:disabled{cursor:default}
+.hd .pc-skip{height:44px;padding:0 14px;border-radius:7px;color:var(--t-muted);font-size:14px}
+.pc-steps{gap:6px;font-size:12px}
+.pc-step{padding:3px 8px;border-radius:5px;color:var(--t-muted)}
+.pc-step[data-on]{background:var(--t-selected);color:var(--t-foreground)}
+.pc-step-n{color:var(--t-dim)}
+.pc-plan{max-height:132px;overflow:hidden;padding:10px 12px;border-radius:8px;background:var(--t-chrome);border:1px solid var(--t-border);font-size:13.5px;line-height:1.5;overflow-wrap:anywhere}
+.pc-plan[data-open]{max-height:none}
+.pc-plan p{margin:0}
+.pc-plan-h{font-weight:600}
+.pc-plan ol,.pc-plan ul{margin:4px 0 0;padding-left:20px}
+.pc-plan-fade{position:absolute;left:0;right:0;bottom:0;height:34px;background:linear-gradient(transparent,var(--t-chrome))}
+.hd .pc-show{align-self:flex-start;height:32px;font-size:13px;color:var(--t-accent)}
+.pc-generic-title{font-size:14px;color:var(--t-muted);overflow-wrap:anywhere}
+.pc-screen{margin:0;padding:8px 10px;border-radius:7px;background:var(--t-chrome);border:1px solid var(--t-border);font-size:12px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}
+.pc-desk{font-size:13.5px;color:var(--t-muted)}
+.pc-refusal{align-items:flex-start;gap:10px;padding:10px 12px;border-radius:8px;background:#241e21;border:1px solid #54312f;font-size:13.5px;line-height:1.45}
+.pc-refusal-dot{width:7px;height:7px;margin-top:7px;border-radius:4px;background:var(--t-blocked)}
+.pc-refusal-text{gap:2px}
+.pc-muted{color:var(--t-muted)}
+.pc-code{padding:1px 5px;border-radius:4px;background:var(--t-surface);border:1px solid var(--t-border);font-size:12.5px}

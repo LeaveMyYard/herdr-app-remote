@@ -1,5 +1,6 @@
 // `terminal.send` (S16): the only way a phone types into a terminal. It runs `hc send`, which pastes the text and
-// presses Enter, and nothing else: no `exec`, no `run`, no `hc keys`, never `--force`.
+// presses Enter, and nothing else: no `exec`, no `run`, no `hc keys`, never `--force` (the one forced send is a
+// prompt card's Other answer, prompt/other.ts, behind a confirmed screen).
 //
 // Capability (`terminal.input`, with its expiry), the rate limits and the audit line are `Security.act`'s; this
 // actor only checks the arguments, keeps one send in flight per device, and reads hc's answer.

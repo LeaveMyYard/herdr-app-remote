@@ -79,6 +79,9 @@ Rows for the Claude Code chat view, from `docs/chatview.md` §11. These rows are
 | ● | Prompt: gone | `new (CV7, prompt_gone)` | - | Already answered on desk-1. | CV7 | - |
 | ● | Prompt: desk busy | `new (CV7, busy)` | - | desk-1 is typing. Try again in a moment. | CV7 | - |
 | ● | Prompt: unknown effect | `new (CV7, unknown_effect)` | - | Agent 1 may have got your answer. Look before you answer again. | CV7 | never invites a second press |
+| ● | Prompt: answering off | `new (CV7, forbidden)` | - | Answering prompts is off for this phone. / Turn it on in Remote on desk-1. | CV7 | main, 2026-11-13 (operator-delegated copy) |
+| ● | Prompt: too many | `new (CV7, rate_limited)` | - | Too many answers. Wait a moment and try again. | CV7 | main, 2026-11-13 |
+| ● | Prompt: no Activity | `new (CV7, audit_unavailable)` | - | Not sent: the activity log can't be written. Nothing changed. | CV7 | main, 2026-11-13 |
 | ● | Stop: button | `new (CV8)` | - | Stop (aria: Stop Agent 1) | CV8 | no confirm |
 | ● | Stop: done | `new (CV8)` | - | Stopped by you · 21:14 | CV8 | status row |
 | ● | Stop: not working | `new (CV8, not_working)` | - | Agent 1 already stopped. | CV8 | - |

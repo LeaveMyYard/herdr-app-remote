@@ -653,7 +653,7 @@ export type ChatAsk = z.infer<typeof ChatAsk>;
 
 const itemBase = { id: ChatItemId, at: z.string().datetime().nullable() };
 
-/** A prompt's option list from the screen (§3a.3). Defined for CV7; CV3 never produces `prompt` items. */
+/** A question of a prompt card (§3a.3, CV7): from the pending AskUserQuestion call, matched to the screen. */
 export const ChatPromptQuestion = z
   .object({
     text: z.string().max(4000),
@@ -683,7 +683,7 @@ export const ChatItem = z.discriminatedUnion("role", [
   z.object({ ...itemBase, role: z.literal("ask"), ask: ChatAsk, cut: z.literal(true).optional() }).strict(),
   /** `compact`: "Earlier messages were summarised". `day`: a day divider ("Today 21:02"), formatted by the phone from `at`. */
   z.object({ ...itemBase, role: z.literal("divider"), divider: z.enum(["compact", "day"]) }).strict(),
-  /** A native prompt card (§3a, §7). Defined here for CV7; CV3 never produces one. */
+  /** A native prompt card (§3a, §7), published by CV7 while the agent is blocked on it (docs/protocol/bridge-api-v1.md). */
   z
     .object({
       ...itemBase,

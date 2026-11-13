@@ -30,6 +30,7 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "bridge-api/push-info": bridgeApi.PushInfo,
   "bridge-api/keys": bridgeApi.KeysTopic,
   "bridge-api/terminal-keys": bridgeApi.TerminalKeysArgs,
+  "bridge-api/prompt-answer": bridgeApi.PromptAnswerArgs,
   "install/receipt": install.InstallReceipt,
 };
 
