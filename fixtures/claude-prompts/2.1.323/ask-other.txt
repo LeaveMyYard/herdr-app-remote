@@ -1,0 +1,25 @@
+
+ ▐▛███▛█   Claude Code v2.1.323
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   ~/project
+
+
+❯ H0-ASK1 please
+
+● Agent 1 will ask now.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Approach
+
+Question Title 123: which approach should Agent 1 take?
+
+  1. Option A
+     Rewrite the parser in Project Alpha
+  2. Option B
+     Patch the existing parser
+  3. Option C
+     Leave it as it is
+❯ 4. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · ctrl+g to edit in VS Code · Esc to cancel
