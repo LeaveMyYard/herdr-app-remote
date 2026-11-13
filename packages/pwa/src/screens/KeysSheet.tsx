@@ -4,6 +4,7 @@ import { Icon } from "../components/Icon";
 import { Tile } from "../components/StateMarks";
 import type { SendOutcome } from "./ChatComposer";
 import * as W from "./keys-words";
+import { useReportBusy } from "../chatview/busy";
 
 /** The special-keys menu (S16b) as the phone sees it: whether it may press, and the desktop's menu. */
 export interface KeysInput {
@@ -205,6 +206,7 @@ export function KeysButton({ agentName, host, keys, demoSheet }: {
 }) {
   const [open, setOpen] = useState(demoSheet?.open ?? false);
   const close = useCallback(() => setOpen(false), []);
+  useReportBusy("keys", open);
   return (
     <>
       <button
