@@ -77,8 +77,8 @@ export interface UsageTopicOptions {
   appHome?: string;
 }
 
-/** The `local.json` keys the panel honours (`binary`, `configDir`); anything else in it is ignored. */
-async function readLocal(appHome: string): Promise<{ binary?: string; configDir?: string }> {
+/** The `local.json` keys the panel honours (`binary`, `configDir`); anything else in it is ignored. Also read by the Claude reader (`claude/profiles.ts`). */
+export async function readLocal(appHome: string): Promise<{ binary?: string; configDir?: string }> {
   try {
     const j = JSON.parse(await readFile(join(appHome, "mods/agent-usage/local.json"), "utf8")) as Record<string, unknown>;
     const out: { binary?: string; configDir?: string } = {};

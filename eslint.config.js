@@ -20,9 +20,9 @@ export default tseslint.config(
     languageOptions: { globals: { console: "readonly" } },
   },
   {
-    // The fake `tailscale` CLI: a Node script run as a process by the tests and the rig.
-    files: ["packages/bridge/test/fake-tailscale.mjs"],
-    languageOptions: { globals: { ...timers, process: "readonly" } },
+    // The fake `tailscale` CLI and the fake Claude reader child: Node scripts run as processes by the tests and the rig.
+    files: ["packages/bridge/test/fake-tailscale.mjs", "packages/bridge/test/fake-reader.mjs"],
+    languageOptions: { globals: { ...timers, process: "readonly", Buffer: "readonly" } },
   },
   {
     files: ["mod/test/**/*.js", "mod/vitest.config.js"],
