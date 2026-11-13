@@ -300,7 +300,7 @@ What does leave: user prompt text, assistant text, the AskUserQuestion text and 
 | # | Slice | Depends | Tier |
 |---|---|---|---|
 | CV0 | This spec and the PhoneChatView board (approved 2026-11-13); rows in COPY.md and PLAN §6 | – | D |
-| CV1 | Capability `transcript.read`: devices.json schema bump, panel switch, Activity | – | SC |
+| CV1 | Capability `transcript.read`: devices.json schema change (a defaulted field, `v` stays 1, no downgrade), panel switch, Activity | – | SC |
 | CV2 | Claude reader: agent-usage profile roots, per-root SDK child, pinned SDK, rig test on fixtures | – | SC |
 | CV3 | `chatview:<t>` topic: binding via the panorama join, tail by stat, diff by uuid, limits, redaction, GET pages | CV1, CV2 | SC |
 | CV4 | PWA chat view: bubbles, safe markdown, tool rows, jump to latest, older pages, text composer, fallback to the text view | CV3 | N |

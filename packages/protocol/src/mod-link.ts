@@ -43,8 +43,8 @@ export type Pong = z.infer<typeof Pong>;
 
 // ---- panel (the desktop Remote panel, copy "panel" only) ----
 
-/** The capabilities the panel can switch (all six; `view` and the rest are desktop-only decisions). */
-export const PanelCap = z.enum(["view", "inbox.answer", "navigate", "terminal.input", "terminal.keys", "push"]);
+/** The capabilities the panel can switch (all seven; `view` and the rest are desktop-only decisions). */
+export const PanelCap = z.enum(["view", "inbox.answer", "navigate", "terminal.input", "terminal.keys", "push", "transcript.read"]);
 /** The capabilities a grant can give a time limit to (`minutes`). */
 export const EXPIRING_CAPS: readonly PanelCap[] = ["terminal.input", "terminal.keys"];
 export type PanelCap = z.infer<typeof PanelCap>;
@@ -164,6 +164,8 @@ export const PanelDevice = z
         /** S16b; optional so a panel view from an older bridge still reads (as off). */
         "terminal.keys": z.boolean().optional(),
         push: z.boolean(),
+        /** CV1 (chat history); optional so a panel view from an older bridge still reads (as off). */
+        "transcript.read": z.boolean().optional(),
       })
       .strict(),
     terminal_input_until: Epoch.nullable(),

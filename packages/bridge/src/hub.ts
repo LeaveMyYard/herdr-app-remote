@@ -66,10 +66,21 @@ interface ConnState {
   dead: boolean;
 }
 
+/**
+ * The topic guard (CV1): whether `client` may read `topic` now. Asked at every `sub`, and by {@link Hub.recheck}
+ * with `recheck` true (a subscription it held, not a new request).
+ * `Security.mayRead` is the real one; it is the only place a topic's capabilities are checked.
+ */
+export type TopicGate = (client: HubClient, topic: string, recheck?: boolean) => boolean;
+
+/** Without a gate the hub fails closed: no transcript topic (`chatview:<t>`, `timeline:<t>`) is ever served. */
+const CLOSED_GATE: TopicGate = (_client, topic) => !bridgeApi.isTranscriptTopic(topic);
+
 export interface HubOptions {
   bridgeVersion: string;
   epoch?: string;
   onAct?: ActHandler;
+  mayRead?: TopicGate;
 }
 
 /**
@@ -86,11 +97,13 @@ export class Hub {
   private readonly conns = new Set<ConnState>();
   private readonly prefixWatchers = new Set<{ prefix: string; fn: (topic: string, count: number) => void }>();
   private readonly onAct: ActHandler | undefined;
+  private readonly mayRead: TopicGate;
 
   constructor(opts: HubOptions) {
     this.epoch = opts.epoch ?? randomBytes(16).toString("hex");
     this.bridgeVersion = opts.bridgeVersion;
     this.onAct = opts.onAct;
+    this.mayRead = opts.mayRead ?? CLOSED_GATE;
   }
 
   private topic(name: string): TopicState {
@@ -271,8 +284,20 @@ export class Hub {
       case "ping":
         c.client.send({ type: "pong" });
         return;
-      case "sub":
+      case "sub": {
+        let refused = 0;
         for (const name of new Set(msg.topics)) {
+          // The topic guard first: a refused topic is never created, counted, snapped or watched (a source that
+          // starts work on its first subscriber, such as a transcript reader, never hears of it).
+          if (!this.mayRead(c.client, name)) {
+            // One frame draws at most MAX_TOPICS_PER_CONN refusals, as it could hold at most that many topics.
+            if (++refused > MAX_TOPICS_PER_CONN) {
+              this.kill(c, 1008, "too many topics");
+              return;
+            }
+            this.refuse(c, name);
+            continue;
+          }
           if (!c.topics.has(name) && c.topics.size >= MAX_TOPICS_PER_CONN) {
             this.kill(c, 1008, "too many topics");
             return;
@@ -280,6 +305,7 @@ export class Hub {
           this.subscribe(c, name);
         }
         return;
+      }
       case "act": {
         let res: ActResult;
         try {
@@ -312,6 +338,28 @@ export class Hub {
     }
     if (t.stale !== null) c.client.send({ type: "stale", topic: name, reason: t.stale });
     if (added) this.notifyWatchers(name, t);
+  }
+
+  /**
+   * Asks the topic gate again for every subscription (of one device, or of all), and ends each one it now refuses
+   * with `stale {reason: "forbidden"}`. Security calls it when a device loses a topic capability (`transcript.read`
+   * turned off), so a chat history already open stops at once rather than at the next `sub`.
+   */
+  recheck(deviceId?: string): void {
+    for (const c of [...this.conns]) {
+      if (deviceId !== undefined && c.client.principal?.deviceId !== deviceId) continue;
+      for (const name of [...c.topics]) if (!this.mayRead(c.client, name, true)) this.refuse(c, name);
+    }
+  }
+
+  /** Ends (or never starts) `c`'s subscription to `name` and tells it why. */
+  private refuse(c: ConnState, name: string): void {
+    if (c.topics.delete(name)) {
+      const t = this.topics.get(name);
+      if (t && t.subscribers.delete(c)) this.notifyWatchers(name, t);
+      if (t && t.subscribers.size === 0 && t.data === undefined && t.stale === null && t.watchers.size === 0) this.topics.delete(name);
+    }
+    c.client.send({ type: "stale", topic: name, reason: "forbidden" });
   }
 
   /** Patches after `seq`, [] if already current, or null if the log can't cover it. */

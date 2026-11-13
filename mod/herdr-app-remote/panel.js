@@ -23,6 +23,8 @@ export const EXPIRY_CHOICES = Object.freeze([
 
 const CAPS = Object.freeze([
   ['view', 'View', 'See agents, the inbox and usage'],
+  // CV1: agents' conversations, separate from View (the screen only). Flips at once, no expiry. Wording: design/COPY.md.
+  ['transcript.read', 'Chat history', "Lets this phone read agents' conversations, not just the screen."],
   ['inbox.answer', 'Answer questions', 'Answer, draft and dismiss in the inbox'],
   ['navigate', 'Navigate', 'Focus agents, tabs and spaces on this computer'],
   ['terminal.input', 'Terminal input', 'Type text into terminals, then Enter'],

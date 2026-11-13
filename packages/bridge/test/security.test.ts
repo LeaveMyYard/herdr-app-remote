@@ -15,10 +15,13 @@ import {
   CODE_TTL_MS,
   CONNECT_LIMIT,
   KIND_LIMITS,
+  ACTION_CAPS,
   MAX_PENDING,
   PAIR_FAIL_LIMIT,
   PENDING_TTL_MS,
   Security,
+  TOPIC_REFUSAL_LOG_LIMIT,
+  topicCaps,
 } from "../src/security/index.js";
 import { newHub } from "./helpers.js";
 
@@ -471,7 +474,7 @@ describe("pairing", () => {
     sec.approve(body.device.id);
     const me2 = JSON.parse((await http("GET", "/api/v1/me", { ...OK_GET, Cookie: cookie })).body) as { device: { state: string; caps: Record<string, boolean> } };
     expect(me2.device.state).toBe("approved");
-    expect(me2.device.caps).toEqual({ view: true, "inbox.answer": true, navigate: false, "terminal.input": false, "terminal.keys": false, push: false });
+    expect(me2.device.caps).toEqual({ view: true, "inbox.answer": true, navigate: false, "terminal.input": false, "terminal.keys": false, push: false, "transcript.read": false });
     (await greeted(cookie)).ws.close();
 
     // Only the token's hash is stored, in a 0600 file.
@@ -1080,5 +1083,190 @@ describe("terminal.keys (S16b)", () => {
     sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: keysInner });
     expect(sec.devices()[0]).toMatchObject({ id, caps: { "terminal.keys": false }, terminal_keys_until: null });
     expect(await sec.act(client(id), "terminal.keys", PRESS)).toMatchObject({ code: "forbidden" });
+  });
+});
+
+// ---- CV1: transcript.read (chat history), a capability of its own ----
+
+describe("transcript.read (CV1)", () => {
+  async function startPaired() {
+    const onTopicsCut = vi.fn();
+    await start();
+    const { id, cookie } = await pairedDevice();
+    sec.close();
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: () => ({ ok: true }), onTopicsCut });
+    return { id, cookie, onTopicsCut };
+  }
+  const client = (id: string) => ({ principal: { deviceId: id }, send: () => undefined, close: () => undefined });
+  const TRANSCRIPT = ["chatview:t3", "timeline:t3"];
+  const OTHERS = ["host", "plugins", "panorama", "inbox", "usage", "setup", "keys", "chat:t3"];
+
+  it("is off after approval: the transcript topics are refused, every other topic is not", async () => {
+    const { id } = await startPaired();
+    expect(sec.devices()[0]).toMatchObject({ caps: { view: true, "transcript.read": false } });
+    for (const t of TRANSCRIPT) expect(sec.mayRead(client(id), t), t).toBe(false);
+    for (const t of OTHERS) expect(sec.mayRead(client(id), t), t).toBe(true);
+    const stored = JSON.parse(await readFile(join(dir, "data", "devices.json"), "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+    expect(stored.devices[0]?.caps["transcript.read"]).toBe(false);
+  });
+
+  it("turns on and off from the desktop, with Activity lines, and has no expiry", async () => {
+    const { id, onTopicsCut } = await startPaired();
+    sec.setCap(id, "transcript.read", true);
+    for (const t of TRANSCRIPT) expect(sec.mayRead(client(id), t), t).toBe(true);
+    expect(activity()).toContain("Phone 1: transcript.read on");
+    expect(onTopicsCut).not.toHaveBeenCalled();
+    // Still on long after: no expiry.
+    clock += 400 * 24 * 3600_000;
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(true);
+    expect(() => sec.setCap(id, "transcript.read", true, clock + 60_000)).toThrow();
+    sec.setCap(id, "transcript.read", false);
+    expect(activity()).toContain("Phone 1: transcript.read off");
+    expect(onTopicsCut).toHaveBeenCalledWith(id);
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(false);
+  });
+
+  it("is separate from view both ways, and never outlives the socket's own rights", async () => {
+    const { id } = await startPaired();
+    sec.setCap(id, "transcript.read", true);
+    sec.pause();
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(false);
+    sec.resume();
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(true);
+    sec.setCap(id, "view", false);
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(false);
+    sec.setCap(id, "view", true);
+    // view back on does not bring chat history back with it: approval-time defaults are not reapplied, it stays as set.
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(true);
+    sec.revoke(id);
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(false);
+    expect(sec.mayRead({ send: () => undefined, close: () => undefined }, "chatview:t3")).toBe(false);
+  });
+
+  it("grants nothing else: no act needs it, and it implies no other capability", async () => {
+    const { id } = await startPaired();
+    sec.setCap(id, "transcript.read", true);
+    expect([...ACTION_CAPS.values()]).not.toContain("transcript.read");
+    expect(await sec.act(client(id), "terminal.send", { terminal: "t3", text: "x" })).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await sec.act(client(id), "agent.focus", { id: "a1" })).toMatchObject({ ok: false, code: "forbidden" });
+  });
+
+  it("a refused subscription is in Activity by identifiers only, throttled per device", async () => {
+    const { id } = await startPaired();
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(false);
+    expect(sec.mayRead(client(id), "timeline:t3")).toBe(false);
+    expect(activity()).toContain("Phone 1 opened the chat of t3: refused, chat history is off");
+    expect(activity()).toContain("Phone 1 opened the timeline of t3: refused, chat history is off");
+    // A name that is not an id is never written.
+    expect(sec.mayRead(client(id), "chatview:Question Title 123 secret")).toBe(false);
+    expect(activity()).toContain("Phone 1 opened the chat of a terminal: refused, chat history is off");
+    expect(activity().join("\n")).not.toContain("secret");
+    const n = activity().length;
+    for (let i = 0; i < 50; i++) sec.mayRead(client(id), "chatview:t3");
+    expect(activity().length - n).toBe(TOPIC_REFUSAL_LOG_LIMIT.max - 3);
+    clock += TOPIC_REFUSAL_LOG_LIMIT.windowMs;
+    sec.mayRead(client(id), "chatview:t3");
+    expect(activity().length - n).toBe(TOPIC_REFUSAL_LOG_LIMIT.max - 2);
+    // A recheck (the switch was just turned off, and Activity says so) writes nothing.
+    clock += TOPIC_REFUSAL_LOG_LIMIT.windowMs;
+    const m = activity().length;
+    expect(sec.mayRead(client(id), "chatview:t3", true)).toBe(false);
+    expect(activity().length).toBe(m);
+  });
+
+  it("requestDevice with needs is the guard for the chat history pages", async () => {
+    const { id, cookie } = await startPaired();
+    const req = { rawHeaders: ["Cookie", cookie] } as unknown as import("node:http").IncomingMessage;
+    const needs = topicCaps("chatview:t3");
+    expect(needs).toEqual(["transcript.read"]);
+    expect(topicCaps("chat:t3")).toEqual([]);
+    expect(sec.requestDevice(req, needs)).toBeUndefined();
+    expect(sec.requestDevice(req)).toEqual({ id });
+    sec.setCap(id, "transcript.read", true);
+    expect(sec.requestDevice(req, needs)).toEqual({ id });
+    sec.pause();
+    expect(sec.requestDevice(req, needs)).toBeUndefined();
+    sec.resume();
+    sec.setCap(id, "view", false);
+    expect(sec.requestDevice(req, needs)).toBeUndefined();
+  });
+
+  /** Like `start`, with the hub's topic gate and the topic cut wired as the app wires them. */
+  async function startGated() {
+    acts = [];
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: () => ({ ok: true }), onTopicsCut: (id) => hub.recheck(id) });
+    hub = newHub({ onAct: sec.act, mayRead: sec.mayRead });
+    srv = createBridgeServer({ hub, guard: sec.guard, routes: sec.routes, onConnect: sec.onConnect });
+    port = (await srv.listen()).port;
+  }
+
+  it("turning it off ends open subscriptions even when devices.json can't be written", async () => {
+    await startGated();
+    const { id, cookie } = await pairedDevice();
+    sec.setCap(id, "transcript.read", true);
+    hub.publish("chatview:t3", { text: "Question Title 123" });
+    const s = await greeted(cookie);
+    s.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3"] }));
+    await s.next(2);
+    expect(s.msgs[1]).toMatchObject({ type: "snap", topic: "chatview:t3" });
+    const data = join(dir, "data");
+    await chmod(data, 0o500);
+    try {
+      expect(() => sec.setCap(id, "transcript.read", false)).toThrow();
+      await s.next(3);
+      expect(s.msgs[2]).toEqual({ type: "stale", topic: "chatview:t3", reason: "forbidden" });
+      hub.publish("chatview:t3", { text: "Question Title 124" });
+      expect(sec.mayRead(client(id), "chatview:t3")).toBe(false);
+      expect(s.ws.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await chmod(data, 0o700);
+    }
+    s.ws.send(JSON.stringify({ type: "ping" }));
+    await s.next(4);
+    expect(s.msgs.slice(3)).toEqual([{ type: "pong" }]);
+    s.ws.close();
+  });
+
+  it("a connection the bridge dropped can't read, even while its close is pending (serve change, same login)", async () => {
+    const { id } = await startPaired();
+    sec.setCap(id, "transcript.read", true);
+    const closes: number[] = [];
+    const kicked = { principal: { deviceId: id }, send: () => undefined, close: (code: number) => void closes.push(code) };
+    sec.onConnect(kicked);
+    expect(sec.mayRead(kicked, "chatview:t3")).toBe(true);
+    // Another serve host with the same owner login: every socket is dropped, the device itself stays current.
+    sec.setServe({ host: "desk-2.example-tailnet.ts.net", login: OWNER });
+    expect(closes).toEqual([CLOSE_REVOKED]);
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(true);
+    expect(sec.mayRead(kicked, "chatview:t3")).toBe(false);
+  });
+
+  it("a refusal while Activity can't be written is still a refusal, and doesn't throw", async () => {
+    const { id } = await startPaired();
+    const f = join(dir, "data", "activity.jsonl");
+    await rm(f, { force: true });
+    await import("node:fs/promises").then((fs) => fs.mkdir(f));
+    expect(() => sec.mayRead(client(id), "chatview:t3")).not.toThrow();
+    expect(sec.mayRead(client(id), "timeline:t3")).toBe(false);
+    expect(sec.auditHealth.ok).toBe(false);
+  });
+
+  it("a devices.json from before CV1 loads, with transcript.read off", async () => {
+    const { id } = await startPaired();
+    sec.close();
+    const p = join(dir, "data", "devices.json");
+    const stored = JSON.parse(await readFile(p, "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+    delete stored.devices[0]!.caps["transcript.read"];
+    // A file from before S16b too: both migrations apply.
+    delete stored.devices[0]!.caps["terminal.keys"];
+    delete stored.devices[0]!.caps["terminal.keys.until"];
+    await import("node:fs/promises").then((fs) => fs.writeFile(p, JSON.stringify(stored)));
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock });
+    expect(sec.devices()[0]).toMatchObject({ id, caps: { "transcript.read": false, "terminal.keys": false } });
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(false);
+    // The next write stores it, so the file is now the new shape.
+    sec.setCap(id, "navigate", true);
+    const again = JSON.parse(await readFile(p, "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+    expect(again.devices[0]?.caps["transcript.read"]).toBe(false);
   });
 });

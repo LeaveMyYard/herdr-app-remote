@@ -173,6 +173,40 @@ describe('panel copy', () => {
     expect(await FakeBridge.next(conn, (x) => x.type === 'panel_act')).toMatchObject({ args: { id: P2, cap: 'terminal.keys', on: false } });
   });
 
+  it('chat history (CV1) is its own switch, off by default, and flips at once with no expiry', async () => {
+    await push(view());
+    click('tab-devices');
+    click(`settings-${P2}`);
+    expect(text(m)).toContain('Chat history');
+    expect(text(m)).toContain("Lets this phone read agents' conversations, not just the screen.");
+    // Off by default: the summary does not name it (a view without the field, from an older bridge, reads as off).
+    expect(text(m)).not.toContain('chat history');
+    click(`cap-${P2}-transcript.read`);
+    const a = await FakeBridge.next(conn, (x) => x.type === 'panel_act');
+    // No "Allow for" chooser first, and never `minutes`.
+    expect(a).toMatchObject({ kind: 'device.cap' });
+    expect(a.args).toEqual({ id: P2, cap: 'transcript.read', on: true });
+    expect(modLink.checkPanelAct(a.kind, a.args).ok).toBe(true);
+    expect(find(m.tree, `expiry-${P2}`)).toBeNull();
+    const v = view();
+    v.devices[1].caps['transcript.read'] = true;
+    await push(v);
+    expect(text(m)).toContain('chat history');
+    expect(text(m)).not.toContain('until');
+    click(`cap-${P2}-transcript.read`);
+    expect((await FakeBridge.next(conn, (x) => x.type === 'panel_act')).args).toEqual({ id: P2, cap: 'transcript.read', on: false });
+    // The bridge refuses a time limit on it.
+    expect(modLink.checkPanelAct('device.cap', { id: P2, cap: 'transcript.read', on: true, minutes: 60 }).ok).toBe(false);
+  });
+
+  it('sanitize keeps transcript.read only when it is exactly true', () => {
+    const v = view();
+    v.devices[1].caps['transcript.read'] = 'yes';
+    expect(sanitize(v).devices[1].caps['transcript.read']).toBe(false);
+    v.devices[1].caps['transcript.read'] = true;
+    expect(sanitize(v).devices[1].caps['transcript.read']).toBe(true);
+  });
+
   it('other switches flip at once, and an enabled terminal input turns off at once', async () => {
     const v = view();
     v.devices[1].caps['terminal.input'] = true;

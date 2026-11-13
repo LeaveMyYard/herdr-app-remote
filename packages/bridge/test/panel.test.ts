@@ -160,6 +160,21 @@ describe("panel acts", () => {
     expect(driver.view().devices.find((x) => x.id === APPROVED)!).toMatchObject({ caps: { "terminal.keys": false }, terminal_keys_until: null });
   });
 
+  it("transcript.read (CV1) turns on and off from the panel, never with a time limit, and shows in the view and Activity", async () => {
+    const p = await open("panel");
+    expect(driver.view().devices.find((x) => x.id === APPROVED)!.caps["transcript.read"]).toBe(false);
+    expect(await act(p, "device.cap", { id: APPROVED, cap: "transcript.read", on: true, minutes: 60 })).toMatchObject({ ok: false, code: "bad_args" });
+    expect(driver.view().devices.find((x) => x.id === APPROVED)!.caps["transcript.read"]).toBe(false);
+    expect(await act(p, "device.cap", { id: APPROVED, cap: "transcript.read", on: true })).toMatchObject({ ok: true });
+    const row = driver.view().devices.find((x) => x.id === APPROVED)!;
+    expect(row.caps).toMatchObject({ "transcript.read": true, view: true, "terminal.input": false });
+    expect(modLink.PanelView.safeParse(driver.view()).success).toBe(true);
+    expect(driver.view().activity.map((a) => a.text)).toContain("Laptop 1: transcript.read on");
+    expect(await act(p, "device.cap", { id: APPROVED, cap: "transcript.read", on: false })).toMatchObject({ ok: true });
+    expect(driver.view().devices.find((x) => x.id === APPROVED)!.caps["transcript.read"]).toBe(false);
+    expect(driver.view().activity[0]?.text).toBe("Laptop 1: transcript.read off");
+  });
+
   it("a failing Activity log shows as a bad Status check, and clears when it writes again", async () => {
     const { mkdir } = await import("node:fs/promises");
     expect(driver.view().checks.some((c) => c.id === "audit")).toBe(false);
