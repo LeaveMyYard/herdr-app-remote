@@ -79,6 +79,13 @@ describe("placeTimeline", () => {
     expect(two.before.get("a1")?.map((i) => i.key)).toEqual(["g1"]);
   });
 
+  it("never replaces a Claude ask, even one carrying the anchor's id", () => {
+    const claudeAsk: Chat = { id: "a1", role: "ask", at: at(2), ask: { via: "claude", question: "Pick one", header: null, multi: false, options: [] }, tool_use_id: "toolu_1" };
+    const p = placeTimeline([claudeAsk, tools("t1", 5)], [tl("g1", 3, "toolu_1")]);
+    expect(p.replace.size).toBe(0);
+    expect(p.before.get("t1")?.map((i) => i.key)).toEqual(["g1"]);
+  });
+
   it("drops nothing on an empty chat", () => {
     expect(placeTimeline([], [tl("g1", 1), tl("g2", null, "toolu_1")]).tail.map((i) => i.key)).toEqual(["g1", "g2"]);
   });
@@ -136,16 +143,75 @@ describe("inline question", () => {
     expect(a.calls).toEqual([{ kind: "inbox.dismiss", args: { key: "group:123", rev: "rev-fake-123" } }]);
   });
 
-  it("offers no one-tap answer for a multi-select or several questions: More options… opens the Question screen", () => {
+  it("offers no one-tap answer for a multi-select question: More options… opens the Question screen", () => {
     const d = boardQuestion.data as { questions: Record<string, unknown>[] };
     const multi = { ...boardQuestion, data: { ...d, questions: [{ ...d.questions[0], multi_select: true }] } };
     render(<TimelineRow item={multi} now={NOW} />);
     expect(screen.queryByRole("button", { name: /Option A/ })).toBeNull();
     expect(screen.getByRole("link", { name: "More options…" })).toHaveAttribute("href", "#/inbox/q/group%3A123/123");
   });
+
+  it("offers no one-tap answer for several single-select questions", () => {
+    const d = boardQuestion.data as { questions: Record<string, unknown>[] };
+    const two = { ...boardQuestion, data: { ...d, questions: [d.questions[0], { ...d.questions[0], id: 124 }] } };
+    render(<TimelineRow item={two} now={NOW} />);
+    expect(screen.queryByRole("button", { name: /Option A/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "More options…" })).toBeInTheDocument();
+  });
+
+  it("shows only the acts the row allows: no options without answer, no Dismiss without dismiss", () => {
+    const d = boardQuestion.data as Record<string, unknown>;
+    const noAnswer = render(<TimelineRow item={{ ...boardQuestion, data: { ...d, actions: ["dismiss"] } }} now={NOW} />);
+    expect(screen.queryByRole("button", { name: /Option A/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    noAnswer.unmount();
+    const noDismiss = render(<TimelineRow item={{ ...boardQuestion, data: { ...d, actions: ["answer"] } }} now={NOW} />);
+    expect(screen.getByRole("button", { name: /Option A/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    noDismiss.unmount();
+    render(<TimelineRow item={{ ...boardQuestion, data: { ...d, actions: [] } }} now={NOW} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("link", { name: "More options…" })).toBeInTheDocument();
+  });
+
+  it("sends one act at a time: a second tap before the first answer comes back sends nothing", async () => {
+    const calls: string[] = [];
+    let settle: (r: ActResult) => void = () => {};
+    const fn: ActFn = (kind) => {
+      calls.push(kind);
+      return new Promise<ActResult>((res) => {
+        settle = res;
+      });
+    };
+    render(<TimelineRow item={boardQuestion} act={fn} now={NOW} />);
+    wait(ROW_ARM_MS);
+    const optA = screen.getByRole("button", { name: /Option A/ });
+    // Both taps land before React re-renders the row as busy, so only the in-flight check is left to stop the second.
+    await flush(async () => {
+      fireEvent.click(optA);
+      fireEvent.click(optA);
+      await Promise.resolve();
+    });
+    expect(calls).toEqual(["inbox.answer"]);
+    await flush(async () => {
+      settle({ ok: true });
+      await Promise.resolve();
+    });
+  });
 });
 
 describe("alert, failed and unknown rows", () => {
+  it("drops a Seen or Retry tap that lands before the row is armed", async () => {
+    const a = fakeAct();
+    const alertRow = render(<TimelineRow item={boardAlert} act={a.fn} now={NOW} />);
+    await tap(screen.getByRole("button", { name: "Seen" }));
+    expect(a.calls).toEqual([]);
+    alertRow.unmount();
+    render(<TimelineRow item={boardFailed} act={a.fn} now={NOW} />);
+    await tap(screen.getByRole("button", { name: "Retry delivery" }));
+    expect(a.calls).toEqual([]);
+  });
+
   it("marks an alert seen with inbox.ack", async () => {
     const a = fakeAct();
     render(<TimelineRow item={boardAlert} act={a.fn} now={NOW} />);

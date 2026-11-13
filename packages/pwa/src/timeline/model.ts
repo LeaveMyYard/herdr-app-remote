@@ -7,6 +7,7 @@
 //   An open question older than every loaded item shows at the top; one with no `at`, or newer than every item,
 //   goes at the end. An item is never dropped.
 import { bridgeApi } from "@herdr-remote/protocol";
+import { nodeUid } from "../panorama/select";
 
 type ChatItem = bridgeApi.ChatItem;
 type TimelineItem = bridgeApi.TimelineItem;
@@ -78,8 +79,8 @@ export function swarmData(s: bridgeApi.StripItem): bridgeApi.SwarmStripData | nu
   return r.success ? r.data : null;
 }
 
-/** The Peek route of a root's subagent (App.tsx: `#/swarm/peek/<root key \0 node id>`). */
-export const peekHref = (rootKey: string, nodeId: string): string => `#/swarm/peek/${encodeURIComponent(`${rootKey}\u0000${nodeId}`)}`;
+/** The Peek route of a root's subagent (App.tsx: `#/swarm/peek/<nodeUid>`). */
+export const peekHref = (rootKey: string, nodeId: string): string => `#/swarm/peek/${encodeURIComponent(nodeUid({ key: rootKey }, nodeId))}`;
 
 /** A route the bridge gave, used only when it is one of the phone's own (`#/…`). */
 export const safeHref = (h: string | null): string | undefined => (h !== null && bridgeApi.TimelineHref.safeParse(h).success ? h : undefined);

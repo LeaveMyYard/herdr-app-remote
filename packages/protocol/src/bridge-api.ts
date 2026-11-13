@@ -709,7 +709,10 @@ export const ChatItem = z.discriminatedUnion("role", [
     .strict(),
   /** A status row such as "Stopped by you · 21:14" (CV8). Defined here; CV3 never produces one. */
   z.object({ ...itemBase, role: z.literal("status"), status: z.enum(["stopped"]) }).strict(),
-]);
+]).superRefine((i, ctx) => {
+  // A `tool_use_id` names an `ask_operator` call: never on a Claude ask, which no timeline item may replace.
+  if (i.role === "ask" && i.tool_use_id !== undefined && i.ask.via !== "inbox") ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tool_use_id"], message: "tool_use_id is only on a via inbox ask" });
+});
 export type ChatItem = z.infer<typeof ChatItem>;
 
 /**

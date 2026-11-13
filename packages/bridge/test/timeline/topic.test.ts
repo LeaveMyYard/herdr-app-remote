@@ -81,7 +81,9 @@ describe("TimelineTopicDriver", () => {
 // End to end: the anchor comes from the chat view the bridge itself read for the terminal.
 class History {
   messages: ClaudeMessage[] = [];
+  unbound = false;
   bind(): Promise<BindResult> {
+    if (this.unbound) return Promise.resolve({ ok: false, reason: "no_binding" });
     return Promise.resolve({ ok: true, binding: { sessionId: SID, root: { configDir: "/work/c", projects: "/work/c/projects", profileIds: ["p"] }, via: "transcript" } });
   }
   read(): Promise<ReadResult> {
@@ -90,13 +92,14 @@ class History {
 }
 
 describe("anchors through the chat view (asker's own transcript only)", () => {
-  async function both(messages: ClaudeMessage[]) {
+  async function both(messages: ClaudeMessage[], o: { unbound?: boolean } = {}) {
     const h = hostState();
     const host: HostState = { ...h, agents: h.agents.map((a) => (a.id === "agent-1" ? { ...a, program: "claude" } : a)) };
     const hub = newHub({ mayRead: () => true });
     hub.publish("host", host as unknown as Json);
     const history = new History();
     history.messages = messages;
+    history.unbound = o.unbound ?? false;
     const transcript = `/work/c/projects/-w/${SID}.jsonl`;
     const feed = { view: { feed: mkFeed([root({ terminal: "t1", harness: "claude", session_id: SID, transcript, cwd: "/w" })]), stale: false, aged: false, error: null }, contract: {} as Contract, at: Date.now() };
     const chatview = new ChatviewTopicDriver({ hub, history, feed: () => ({ ...feed, at: Date.now() }), intervalMs: 1e9, stat: () => Promise.resolve({ size: 10, mtimeMs: 1 }), map: oneDay });
@@ -112,7 +115,7 @@ describe("anchors through the chat view (asker's own transcript only)", () => {
     const c = await join(hub);
     await c.send({ type: "sub", topics: ["timeline:t1", "chatview:t1"] });
     await chatview.settled("chatview:t1");
-    return { hub, chat: () => hub.get("chatview:t1") as unknown as bridgeApi.ChatviewTopic, tl: () => hub.get("timeline:t1") as unknown as bridgeApi.TimelineTopic };
+    return { hub, chatview, chat: () => hub.get("chatview:t1") as unknown as bridgeApi.ChatviewTopic, tl: () => hub.get("timeline:t1") as unknown as bridgeApi.TimelineTopic };
   }
 
   it("anchors the question on the ask_operator call that carries its id, and the chat item names that id", async () => {
@@ -125,6 +128,19 @@ describe("anchors through the chat view (asker's own transcript only)", () => {
     const { chat, tl } = await both([user(1, "Go"), said(2, [tool("toolu_1", "Bash", { command: "ls" })])]);
     expect(chat().items.some((i) => i.role === "ask")).toBe(false);
     expect(tl().items[0]!.anchor).toBe(null);
+  });
+
+  it("holds no ids while the chat view is not good: null, not an empty set", async () => {
+    const { chatview, chat, tl } = await both([user(1, "Go"), said(2, [tool("toolu_1", INBOX_TOOL, { question: "?" })])], { unbound: true });
+    expect(chat().state).toBe("unavailable");
+    expect(chatview.inboxAsks("t1")).toBeNull();
+    expect(tl().items[0]!.anchor).toBe(null);
+  });
+
+  it("names the ids of a good chat view, and none for a terminal whose chat view is not open", async () => {
+    const { chatview } = await both([user(1, "Go"), said(2, [tool("toolu_1", INBOX_TOOL, { question: "?" })])]);
+    expect([...chatview.inboxAsks("t1")!]).toEqual(["toolu_1"]);
+    expect(chatview.inboxAsks("t2")).toBeNull();
   });
 
   it("does not anchor on an ask_operator call of another id", async () => {

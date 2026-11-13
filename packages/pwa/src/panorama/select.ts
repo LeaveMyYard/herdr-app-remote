@@ -191,7 +191,7 @@ export function swarmScope(host: HostState | undefined, topic: bridgeApi.Panoram
   return { label, roots: topic.roots.filter((r) => r.space_id === spaceId) };
 }
 
-export const nodeUid = (root: Root, id: string): string => `${root.key}\u0000${id}`;
+export const nodeUid = (root: Pick<Root, "key">, id: string): string => `${root.key}\u0000${id}`;
 
 export interface SwarmStats {
   roots: number;
