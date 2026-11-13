@@ -43,6 +43,7 @@ sleep 20
 echo done > "$rig/daemon.finished"
 EOT
 chmod +x "$rig/bin/"*.sh
+cp "$here/fake-anthropic.mjs" "$here/claude-prompts-harness.mjs" "$rig/bin/"
 cp "$here/sidecar.mjs" "$here/inner.sh" "$here/lib.sh" "$rig/bin/"
 # The real link mod and the harness, for the scenarios that use them (rig-only copy of the mod).
 repo=$(cd "$here/.." && pwd -P)
@@ -61,6 +62,13 @@ cat > "$rig/fakebin/tailscale" <<'EOT'
 FAKE_TS_FIXTURES=/mnt/r/bin/tailscale-fixtures exec node /mnt/r/bin/fake-tailscale.mjs /mnt/r/ts "$@"
 EOT
 chmod +x "$rig/fakebin/tailscale"
+# The operator's Claude Code config (~/.claude*, ~/.claude.json*) is hidden inside the rig: a scenario that runs the
+# claude binary must never be able to read real credentials, settings or transcripts, even by a wrong path.
+claude_hide=""
+for p in "$HOME"/.claude "$HOME"/.claude-* "$HOME"/.claude.json*; do
+  if [ -d "$p" ] && [ ! -L "$p" ]; then claude_hide="$claude_hide --tmpfs $p"
+  elif [ -e "$p" ] || [ -L "$p" ]; then claude_hide="$claude_hide --ro-bind /dev/null $p"; fi
+done
 ts_hide=""
 for d in /run/tailscale /var/run/tailscale; do
   [ -d "$d" ] && [ ! -L "$d" ] && ts_hide="$ts_hide --tmpfs $d"
@@ -72,6 +80,7 @@ bwrap --dev-bind / / \
   --tmpfs /run/user \
   --tmpfs "$HOME/.config/herdr-app" \
   $ts_hide \
+  $claude_hide \
   --bind "$rig" "$rig" \
   --tmpfs /mnt --bind "$rig" /mnt/r \
   --unshare-pid --proc /proc --unshare-net --die-with-parent --new-session \

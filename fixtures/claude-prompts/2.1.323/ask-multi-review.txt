@@ -1,0 +1,22 @@
+
+ ▐▛███▛█   Claude Code v2.1.323
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   ~/project
+
+
+❯ H0-ASKM please
+
+● Agent 1 will ask now.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Checks  ✔ Submit  →
+
+Review your answers
+
+ ● Question Title 123: which checks should Agent 1 run?
+   → Lint, Typecheck
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
