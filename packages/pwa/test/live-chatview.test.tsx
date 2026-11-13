@@ -137,7 +137,7 @@ describe("LiveApp chat view", () => {
     });
     expect(sockets).toHaveLength(1);
     expect(client.getSnapshot().topics["chat:term-1"]?.data).toBeDefined();
-    expect(before.keys).toBe(1);
+    expect(before).toEqual({ chat: 1, keys: 1 });
     // Clearing the draft moves the screen to the chat view.
     await userEvent.clear(screen.getByRole("textbox", { name: "Message to the agent" }));
     expect(screen.getByRole("log", { name: "Conversation" })).toBeInTheDocument();

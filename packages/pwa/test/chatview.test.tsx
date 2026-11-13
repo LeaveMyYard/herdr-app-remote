@@ -89,6 +89,10 @@ describe("markdown", () => {
     ["stars", "*".repeat(32768)],
     ["backticks", "`".repeat(32768)],
     ["open links", "[a](".repeat(8000)],
+    ["empty brackets", "[]".repeat(16384)],
+    ["brackets with a stray close", "[a]]".repeat(8000)],
+    ["links with no closing paren", "[](".repeat(10000)],
+    ["stars before spaces", "*a *".repeat(8000)],
     ["open bold", "**a ".repeat(8000)],
     ["list markers", "- ".repeat(16000)],
     ["quote markers", "> ".repeat(16000)],
@@ -98,6 +102,20 @@ describe("markdown", () => {
     it(`stays linear on ${name}`, () => {
       const t0 = performance.now();
       render(<Markdown text={text} />).unmount();
+      expect(performance.now() - t0).toBeLessThan(150);
+    });
+  }
+  // A code, bold or strike opener is itself the mark it looks for, so its search stops at the next opener. These
+  // inputs make thousands of elements, so the scan is timed without the DOM.
+  const OPENERS: [string, string][] = [
+    ["backtick runs of mixed length", "``a`".repeat(8000)],
+    ["bold openers among single stars", "**a*".repeat(8000)],
+    ["strike openers among single tildes", "~~a~".repeat(8000)],
+  ];
+  for (const [name, text] of OPENERS) {
+    it(`scans linearly on ${name}`, () => {
+      const t0 = performance.now();
+      inline(text);
       expect(performance.now() - t0).toBeLessThan(250);
     });
   }

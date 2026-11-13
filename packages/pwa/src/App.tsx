@@ -280,11 +280,11 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
       ...(typed ? { now: typed.now, demoSheet: { open: typed.sheet, pressed: typed.pressed } } : {}),
     } as const;
     const route = cvDemo
-      ? { mode: cvDemo.mode, view: { topic: cvDemo.topic, loadOlder: cvDemo.loadOlder } }
+      ? { mode: cvDemo.mode, view: { topic: cvDemo.topic, loadOlder: cvDemo.loadOlder }, onShown: undefined }
       : live?.chat?.mode
         ? { mode: live.chat.mode, view: live.chat.view, onShown: live.chat.onShown }
         : null;
-    const chat = route ? <ChatRoute mode={route.mode} view={route.view} onShown={"onShown" in route ? route.onShown : undefined} text={textProps} slots={cvDemo ? { strip: <div className="nf cv-strip-demo" data-vis-mask="" style={cvDemo.mode.kind === "text" ? { height: 42 } : undefined} /> } : undefined} /> : <Chat {...textProps} />;
+    const chat = route ? <ChatRoute mode={route.mode} view={route.view} onShown={route.onShown} text={textProps} slots={cvDemo ? { strip: <div className="nf cv-strip-demo" data-vis-mask="" style={cvDemo.mode.kind === "text" ? { height: 42 } : undefined} /> } : undefined} /> : <Chat {...textProps} />;
     // The board's computer is "desk-1"; live data gets its name from LiveApp's provider.
     return <AppFrame>{typed ? <HostNameProvider name="desk-1">{chat}</HostNameProvider> : chat}</AppFrame>;
   }

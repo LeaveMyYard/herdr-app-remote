@@ -16,9 +16,23 @@ export function safeHref(raw: string): string | null {
   return /^(https?:\/\/|mailto:)[^\s<>"'`]+$/i.test(url) ? url : null;
 }
 
-function closer(s: string, mark: string, from: number): number {
-  const end = s.indexOf(mark, from);
-  return end < 0 || end - from > SPAN ? -1 : end;
+/**
+ * Finds the next `mark` at or after `from`, within SPAN. Each mark remembers its last search: while `from` stays
+ * between that search's start and its result, the answer can't have changed. The scan only moves forward, so no
+ * text is searched twice for one mark, and a reply full of openers with no closer (`[]` repeated) costs one pass.
+ */
+function closers(s: string) {
+  const last = new Map<string, [from: number, end: number]>();
+  return (mark: string, from: number): number => {
+    const hit = last.get(mark);
+    let end: number;
+    if (hit && from >= hit[0] && (hit[1] < 0 || from <= hit[1])) end = hit[1];
+    else {
+      end = s.indexOf(mark, from);
+      last.set(mark, [from, end]);
+    }
+    return end < 0 || end - from > SPAN ? -1 : end;
+  };
 }
 
 export function inline(s: string, depth = 0, k = "i"): ReactNode[] {
@@ -33,6 +47,7 @@ export function inline(s: string, depth = 0, k = "i"): ReactNode[] {
     flush();
     out.push(node);
   };
+  const closer = closers(s);
   let i = 0;
   while (i < s.length) {
     const c = s[i] as string;
@@ -40,7 +55,7 @@ export function inline(s: string, depth = 0, k = "i"): ReactNode[] {
       let run = 1;
       while (s[i + run] === "`") run++;
       const mark = "`".repeat(run);
-      const end = closer(s, mark, i + run);
+      const end = closer(mark, i + run);
       if (end > i + run) {
         push(<code key={`${k}${key++}`}>{s.slice(i + run, end).replace(/^ (.*) $/, "$1")}</code>);
         i = end + run;
@@ -53,7 +68,7 @@ export function inline(s: string, depth = 0, k = "i"): ReactNode[] {
     if (depth < MAX_DEPTH && (c === "*" || c === "~")) {
       const mark = s.startsWith(c + c, i) ? c + c : c === "*" ? "*" : "";
       if (mark && s[i + mark.length] !== undefined && !/\s/.test(s[i + mark.length] as string)) {
-        const end = closer(s, mark, i + mark.length);
+        const end = closer(mark, i + mark.length);
         if (end > i + mark.length && !/\s/.test(s[end - 1] as string)) {
           const inner = inline(s.slice(i + mark.length, end), depth + 1, `${k}${key}.`);
           const el = mark === "**" ? <strong key={`${k}${key}`}>{inner}</strong> : mark === "~~" ? <del key={`${k}${key}`}>{inner}</del> : <em key={`${k}${key}`}>{inner}</em>;
@@ -65,8 +80,8 @@ export function inline(s: string, depth = 0, k = "i"): ReactNode[] {
       }
     }
     if (depth < MAX_DEPTH && c === "[") {
-      const close = closer(s, "](", i + 1);
-      const end = close < 0 ? -1 : closer(s, ")", close + 2);
+      const close = closer("](", i + 1);
+      const end = close < 0 ? -1 : closer(")", close + 2);
       if (close > i + 1 && end >= 0) {
         const href = safeHref(s.slice(close + 2, end));
         if (href) {
