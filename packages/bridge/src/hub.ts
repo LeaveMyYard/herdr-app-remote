@@ -284,11 +284,17 @@ export class Hub {
       case "ping":
         c.client.send({ type: "pong" });
         return;
-      case "sub":
+      case "sub": {
+        let refused = 0;
         for (const name of new Set(msg.topics)) {
           // The topic guard first: a refused topic is never created, counted, snapped or watched (a source that
           // starts work on its first subscriber, such as a transcript reader, never hears of it).
           if (!this.mayRead(c.client, name)) {
+            // One frame draws at most MAX_TOPICS_PER_CONN refusals, as it could hold at most that many topics.
+            if (++refused > MAX_TOPICS_PER_CONN) {
+              this.kill(c, 1008, "too many topics");
+              return;
+            }
             this.refuse(c, name);
             continue;
           }
@@ -299,6 +305,7 @@ export class Hub {
           this.subscribe(c, name);
         }
         return;
+      }
       case "act": {
         let res: ActResult;
         try {

@@ -1191,6 +1191,66 @@ describe("transcript.read (CV1)", () => {
     expect(sec.requestDevice(req, needs)).toBeUndefined();
   });
 
+  /** Like `start`, with the hub's topic gate and the topic cut wired as the app wires them. */
+  async function startGated() {
+    acts = [];
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: () => ({ ok: true }), onTopicsCut: (id) => hub.recheck(id) });
+    hub = newHub({ onAct: sec.act, mayRead: sec.mayRead });
+    srv = createBridgeServer({ hub, guard: sec.guard, routes: sec.routes, onConnect: sec.onConnect });
+    port = (await srv.listen()).port;
+  }
+
+  it("turning it off ends open subscriptions even when devices.json can't be written", async () => {
+    await startGated();
+    const { id, cookie } = await pairedDevice();
+    sec.setCap(id, "transcript.read", true);
+    hub.publish("chatview:t3", { text: "Question Title 123" });
+    const s = await greeted(cookie);
+    s.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3"] }));
+    await s.next(2);
+    expect(s.msgs[1]).toMatchObject({ type: "snap", topic: "chatview:t3" });
+    const data = join(dir, "data");
+    await chmod(data, 0o500);
+    try {
+      expect(() => sec.setCap(id, "transcript.read", false)).toThrow();
+      await s.next(3);
+      expect(s.msgs[2]).toEqual({ type: "stale", topic: "chatview:t3", reason: "forbidden" });
+      hub.publish("chatview:t3", { text: "Question Title 124" });
+      expect(sec.mayRead(client(id), "chatview:t3")).toBe(false);
+      expect(s.ws.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await chmod(data, 0o700);
+    }
+    s.ws.send(JSON.stringify({ type: "ping" }));
+    await s.next(4);
+    expect(s.msgs.slice(3)).toEqual([{ type: "pong" }]);
+    s.ws.close();
+  });
+
+  it("a connection the bridge dropped can't read, even while its close is pending (serve change, same login)", async () => {
+    const { id } = await startPaired();
+    sec.setCap(id, "transcript.read", true);
+    const closes: number[] = [];
+    const kicked = { principal: { deviceId: id }, send: () => undefined, close: (code: number) => void closes.push(code) };
+    sec.onConnect(kicked);
+    expect(sec.mayRead(kicked, "chatview:t3")).toBe(true);
+    // Another serve host with the same owner login: every socket is dropped, the device itself stays current.
+    sec.setServe({ host: "desk-2.example-tailnet.ts.net", login: OWNER });
+    expect(closes).toEqual([CLOSE_REVOKED]);
+    expect(sec.mayRead(client(id), "chatview:t3")).toBe(true);
+    expect(sec.mayRead(kicked, "chatview:t3")).toBe(false);
+  });
+
+  it("a refusal while Activity can't be written is still a refusal, and doesn't throw", async () => {
+    const { id } = await startPaired();
+    const f = join(dir, "data", "activity.jsonl");
+    await rm(f, { force: true });
+    await import("node:fs/promises").then((fs) => fs.mkdir(f));
+    expect(() => sec.mayRead(client(id), "chatview:t3")).not.toThrow();
+    expect(sec.mayRead(client(id), "timeline:t3")).toBe(false);
+    expect(sec.auditHealth.ok).toBe(false);
+  });
+
   it("a devices.json from before CV1 loads, with transcript.read off", async () => {
     const { id } = await startPaired();
     sec.close();

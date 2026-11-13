@@ -641,12 +641,16 @@ export class Security {
     }
     if (!on && cap === "view") this.cut(id);
     else if (!on && isExpiring(cap)) this.cut(id, cap);
-    this.store.update(id, (x) => {
-      x.caps[cap] = on;
-      if (isExpiring(cap)) x.caps[untilKey(cap)] = on ? until : null;
-    });
-    // After the store holds "off", so the gate the hub asks again already refuses.
-    if (!on && cap === "transcript.read") this.onTopicsCut?.(id);
+    try {
+      this.store.update(id, (x) => {
+        x.caps[cap] = on;
+        if (isExpiring(cap)) x.caps[untilKey(cap)] = on ? until : null;
+      });
+    } finally {
+      // After the store holds "off" in memory (it changes memory before it writes), so the gate the hub asks again
+      // already refuses; in a finally, so a failed write (full disk) can't leave open chat history streaming.
+      if (!on && cap === "transcript.read") this.onTopicsCut?.(id);
+    }
     this.scheduleExpiry();
     const limit = isExpiring(cap) && on && until !== null ? ` until ${new Date(until).toISOString().slice(0, 16)}Z` : "";
     this.audit({ event: "device.cap", device: d.name, text: `${d.name}: ${cap} ${on ? "on" : "off"}${limit}` });
