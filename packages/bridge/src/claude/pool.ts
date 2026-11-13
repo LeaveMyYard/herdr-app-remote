@@ -6,6 +6,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ClaudeRoot } from "./profiles.js";
 import { checkRequest, type ReaderRequest, type WireReply } from "./wire.js";
 
@@ -61,6 +62,14 @@ export function procRss(pid: number): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The child's own idle timer is a backstop: it fires a grace period after the bridge's, so the bridge always
+ * retires the child first and a call arriving just as the idle time ends is never lost to the child exiting.
+ */
+export function childIdleMs(idleMs: number): number {
+  return idleMs + EXIT_GRACE_MS;
 }
 
 /** Node 22.13 and 23.5 renamed `--experimental-permission` to `--permission`. */
@@ -197,10 +206,12 @@ export class ReaderPool {
   }
 
   private start(root: ClaudeRoot): Reader | undefined {
-    const allow = [this.o.script, root.configDir, root.projects].map((p) => `--allow-fs-read=${p}`);
+    // Read access to the projects dir only, never the config dir itself (it holds `.credentials.json`). Node
+    // checks the lexical path, so a symlinked `<configDir>/projects` needs both its own path and its realpath.
+    const allow = [this.o.script, join(root.configDir, "projects"), root.projects].map((p) => `--allow-fs-read=${p}`);
     let proc: ChildProcess;
     try {
-      proc = spawn(process.execPath, [permissionFlag(), ...allow, this.o.script, "--idle-ms", String(this.o.idleMs)], {
+      proc = spawn(process.execPath, [permissionFlag(), ...allow, this.o.script, "--idle-ms", String(childIdleMs(this.o.idleMs))], {
         // A clean env: no tokens, no NODE_OPTIONS, nothing of the bridge's own. Only where to read from.
         env: { CLAUDE_CONFIG_DIR: root.configDir, HOME: this.o.home },
         cwd: "/",

@@ -130,13 +130,28 @@ describe("ClaudeHistory", () => {
   it("read maps reader errors and shape failures to reader_failed", async () => {
     const { roots } = world();
     const binding = { sessionId: S, root: roots[0]!, via: "transcript" as const };
-    const fake = (reply: ReaderReply) => {
+    const fake = (reply: ReaderReply, info: ReaderReply = { ok: true, value: { sessionId: S } }) => {
       const p = new ReaderPool({ script: "/nonexistent/claude-reader.mjs" });
-      p.call = () => Promise.resolve(reply);
+      p.call = (_root, req) => Promise.resolve(req.op === "info" ? info : reply);
       return new ClaudeHistory({ appHome: "/nonexistent", pool: p });
     };
     expect(await fake({ ok: false, error: "rss" }).read(binding)).toEqual({ ok: false, reason: "reader_failed", detail: "rss" });
     expect(await fake({ ok: true, value: { not: "an array" } }).read(binding)).toMatchObject({ ok: false, reason: "reader_failed", detail: "shape" });
-    expect(await fake({ ok: true, value: [] }).read(binding)).toMatchObject({ ok: true, messages: [] });
+  });
+
+  it("read tells an empty session from one the reader can't see", async () => {
+    const { roots } = world();
+    const binding = { sessionId: S, root: roots[0]!, via: "transcript" as const };
+    const fake = (info: ReaderReply) => {
+      const p = new ReaderPool({ script: "/nonexistent/claude-reader.mjs" });
+      p.call = (_root, req) => Promise.resolve(req.op === "info" ? info : { ok: true, value: [] });
+      return new ClaudeHistory({ appHome: "/nonexistent", pool: p });
+    };
+    expect(await fake({ ok: true, value: { sessionId: S } }).read(binding)).toMatchObject({ ok: true, messages: [] });
+    expect(await fake({ ok: true, value: null }).read(binding)).toEqual({ ok: false, reason: "not_found" });
+    expect(await fake({ ok: true, value: { sessionId: "22222222-2222-4222-8222-222222222222" } }).read(binding)).toEqual({ ok: false, reason: "not_found" });
+    expect(await fake({ ok: false, error: "timeout" }).read(binding)).toEqual({ ok: false, reason: "reader_failed", detail: "timeout" });
+    // a later page past the end is just empty
+    expect(await fake({ ok: true, value: null }).read(binding, { offset: 50 })).toMatchObject({ ok: true, messages: [] });
   });
 });

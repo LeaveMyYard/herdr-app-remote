@@ -1,13 +1,13 @@
 // ReaderPool against a fake reader child (test/fake-reader.mjs): one child per projects root, clean env,
 // the permission model, per-call timeout, RSS limit, idle exit and the cap of 4. Fake data only.
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { claude } from "../../src/index.js";
 
-const { ReaderPool, permissionFlag, procRss } = claude;
+const { ReaderPool, childIdleMs, permissionFlag, procRss } = claude;
 type ReaderEvent = claude.ReaderEvent;
 type ClaudeRoot = claude.ClaudeRoot;
 
@@ -73,19 +73,46 @@ describe("ReaderPool", () => {
       const v = (got as { value: { env: Record<string, string>; cwd: string; argv: string[] } }).value;
       expect(v.env).toEqual({ CLAUDE_CONFIG_DIR: r.configDir, HOME: h });
       expect(v.cwd).toBe("/");
-      expect(v.argv).toEqual([FAKE, "--idle-ms", "60000"]);
+      expect(v.argv).toEqual([FAKE, "--idle-ms", "61000"]);
       expect(p.running).toBe(1);
     } finally {
       delete process.env.HERDR_TEST_SECRET;
     }
   });
 
-  it("runs the child under the permission model: no writes, no child processes", async () => {
+  it("runs the child under the permission model: no writes, no child processes, no credentials", async () => {
+    const h = home();
+    const r = root(h, 1);
+    writeFileSync(join(r.configDir, ".credentials.json"), '{"fake":"credentials"}');
+    writeFileSync(join(r.projects, "readable.txt"), "fake");
+    const { pool: p } = pool(h);
+    const got = await p.call(r, { op: "info", session: sid("07") });
+    expect(got).toEqual({ ok: true, value: { write: "ERR_ACCESS_DENIED", spawn: "ERR_ACCESS_DENIED", credentials: "ERR_ACCESS_DENIED", projects: false } });
+    expect(existsSync(join(h, "written-by-reader"))).toBe(false);
+  });
+
+  it("can read a symlinked projects dir by its own path, and still not the config dir", async () => {
+    const h = home();
+    const target = join(h, "shared-projects");
+    mkdirSync(target);
+    writeFileSync(join(target, "readable.txt"), "fake");
+    const configDir = join(h, ".claude-1");
+    mkdirSync(configDir);
+    writeFileSync(join(configDir, ".credentials.json"), '{"fake":"credentials"}');
+    symlinkSync(target, join(configDir, "projects"));
+    const { pool: p } = pool(h);
+    const got = await p.call({ configDir, projects: target, profileIds: ["agent-1"] }, { op: "info", session: sid("07") });
+    expect(got).toMatchObject({ ok: true, value: { credentials: "ERR_ACCESS_DENIED", projects: false } });
+  });
+
+  it("discards the child's stderr", async () => {
     const h = home();
     const { pool: p } = pool(h);
-    const got = await p.call(root(h, 1), { op: "info", session: sid("07") });
-    expect(got).toEqual({ ok: true, value: { write: "ERR_ACCESS_DENIED", spawn: "ERR_ACCESS_DENIED" } });
-    expect(existsSync(join(h, "written-by-reader"))).toBe(false);
+    expect(await p.call(root(h, 1), { op: "info", session: sid("10") })).toEqual({ ok: true, value: { devnull: true } });
+  });
+
+  it("gives the child an idle backstop later than the bridge's own", () => {
+    expect(childIdleMs(60_000)).toBeGreaterThan(60_000);
   });
 
   it("picks the permission flag the running node knows", () => {
@@ -242,6 +269,18 @@ describe("ReaderPool", () => {
     expect(p.pidFor(roots[0]!)).toBeUndefined();
     expect(p.running).toBe(4);
     expect(peak).toBe(4);
+  });
+
+  it("queues at most 8 calls behind the one in flight", async () => {
+    const h = home();
+    const r = root(h, 1);
+    const { pool: p } = pool(h, { callTimeoutMs: 5000 });
+    const calls = [p.call(r, { op: "info", session: sid("02") })];
+    for (let i = 0; i < 8; i++) calls.push(p.call(r, { op: "info", session: sid("09") }));
+    await until(() => p.pidFor(r) !== undefined);
+    expect(await p.call(r, { op: "info", session: sid("09") })).toEqual({ ok: false, error: "busy" });
+    p.close();
+    for (const c of calls) expect(await c).toMatchObject({ ok: false });
   });
 
   it("refuses a bad request without starting a child", async () => {

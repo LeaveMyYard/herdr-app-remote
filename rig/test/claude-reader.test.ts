@@ -8,7 +8,7 @@
 // To refresh the expected files after a deliberate SDK bump: UPDATE_CLAUDE_FIXTURES=1 pnpm --filter
 // @herdr-remote/rig test, then review the diff like code.
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -129,11 +129,33 @@ describe("Claude reader rig", () => {
     expect(page.ok && page.messages).toEqual(r.messages.slice(2, 5));
   });
 
-  it("an unknown session reads as empty", async () => {
+  it("an unknown session, or one in another root, is not_found", async () => {
     const roots = await history.discover();
     if (!roots.ok) throw new Error("no roots");
-    const r = await history.read({ sessionId: "44444444-4444-4444-8444-444444444444", root: roots.roots[0]!, via: "transcript" });
-    expect(r).toMatchObject({ ok: true, messages: [] });
+    expect(await history.read({ sessionId: "44444444-4444-4444-8444-444444444444", root: roots.roots[0]!, via: "transcript" })).toEqual({ ok: false, reason: "not_found" });
+    expect(await history.read({ sessionId: S2, root: roots.roots[0]!, via: "transcript" })).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("reads through a profile whose projects dir is a symlink (the read grant covers its own path)", async () => {
+    const h2 = mkdtempSync(join(process.env.HERDR_REMOTE_TEST_TMP ?? tmpdir(), "rig-claude-link-"));
+    try {
+      cpSync(join(FIX, "roots/claude-1/projects"), join(h2, "shared-projects"), { recursive: true });
+      mkdirSync(join(h2, "claude-agent-1"));
+      symlinkSync(join(h2, "shared-projects"), join(h2, "claude-agent-1/projects"));
+      mkdirSync(join(h2, ".config/agent-usage"), { recursive: true });
+      writeFileSync(join(h2, ".config/agent-usage/config.toml"), `[[claude.profiles]]\nid = "agent-1"\nconfig_dir = "~/claude-agent-1"\n`);
+      const h = new claude.ClaudeHistory({ appHome: join(h2, ".config/herdr-app"), home: h2, pool: { script: SCRIPT, home: h2 } });
+      try {
+        const b = await h.bind({ sessionId: S1, transcript: join(h2, "claude-agent-1/projects/-work-project-alpha", `${S1}.jsonl`), cwd: null });
+        if (!b.ok) throw new Error(`not bound: ${JSON.stringify(b)}`);
+        const r = await h.read(b.binding);
+        expect(r.ok && r.messages.length).toBe(18);
+      } finally {
+        h.close();
+      }
+    } finally {
+      rmSync(h2, { recursive: true, force: true });
+    }
   });
 
   it("left the private HOME as it was", async () => {

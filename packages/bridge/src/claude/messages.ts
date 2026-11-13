@@ -1,8 +1,10 @@
 // Defensive checks on what the SDK's getSessionMessages returns (docs/chatview.md §3, §9). The SDK types
 // `message` as `unknown` and has no `timestamp` in its type, so every message and block is checked here.
 // A block of a type this version doesn't know is dropped. A message whose envelope or known blocks don't
-// match the shapes the rig test pins counts as failed and is left out; when more than FAIL_SHARE of the
-// messages fail, the whole read is `shape` (the chat view goes unavailable and the phone shows the terminal).
+// match the shapes the rig test pins counts as failed and is left out. A message of an unknown `type` is
+// dropped and counts toward the same share, so a Claude Code change that moves turns to a new type can't
+// silently hide half a conversation: when more than FAIL_SHARE of the messages fail or are dropped, the whole
+// read is `shape` (the chat view goes unavailable and the phone shows the terminal).
 //
 // What is kept is only what the chat view can use. Thinking text, tool_result content and `toolUseResult`
 // are not copied (§5.2). Tool inputs are kept, because the topic (CV3) derives file base names and
@@ -40,7 +42,7 @@ export interface ReadStats {
   failed: number;
   /** Blocks of unknown types, dropped. */
   droppedBlocks: number;
-  /** Messages of an unknown `type`, dropped without counting as failed. */
+  /** Messages of an unknown `type`, dropped. They count toward the failure share like failed ones. */
   droppedMessages: number;
 }
 
@@ -107,7 +109,7 @@ function checkMessage(m: unknown, stats: ReadStats): ClaudeMessage | null | unde
   return { ...env, type: m.type as "user" | "assistant", content };
 }
 
-/** Checks a getSessionMessages result. Not an array, or more than `failShare` failed: `ok: false`. */
+/** Checks a getSessionMessages result. Not an array, or more than `failShare` failed or dropped: `ok: false`. */
 export function checkMessages(raw: unknown, failShare = FAIL_SHARE): CheckResult {
   const stats: ReadStats = { total: 0, failed: 0, droppedBlocks: 0, droppedMessages: 0 };
   if (!Array.isArray(raw)) return { ok: false, stats };
@@ -119,6 +121,6 @@ export function checkMessages(raw: unknown, failShare = FAIL_SHARE): CheckResult
     else if (c === undefined) stats.droppedMessages++;
     else messages.push(c);
   }
-  if (stats.total > 0 && stats.failed / stats.total > failShare) return { ok: false, stats };
+  if (stats.total > 0 && (stats.failed + stats.droppedMessages) / stats.total > failShare) return { ok: false, stats };
   return { ok: true, messages, stats };
 }

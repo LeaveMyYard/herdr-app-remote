@@ -7,12 +7,13 @@
 //   ...000000000004  crash: exits 3 without replying
 //   ...000000000005  big: replies with a 2 MB string
 //   ...000000000006  wrong id: replies to a different request id
-//   ...000000000007  probe: tries to write a file and start a process, reports what was denied
+//   ...000000000007  probe: tries to write a file, start a process and read the config dir's credentials, reports what was denied
 //   ...000000000008  slow: replies after 150 ms
+//   ...000000000010  stderr: writes a marker to stderr, replies whether fd 2 is /dev/null (char device 1,3)
 //   anything else    replies {session}
 // Like the real child it exits when stdin closes and after --idle-ms with no request.
 import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { fstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const idleMs = Number(process.argv[process.argv.indexOf('--idle-ms') + 1]);
@@ -50,6 +51,18 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     } catch (e) {
       denied.spawn = e.code;
     }
+    try {
+      readFileSync(`${process.env.CLAUDE_CONFIG_DIR}/.credentials.json`, 'utf8');
+      denied.credentials = false;
+    } catch (e) {
+      denied.credentials = e.code;
+    }
+    try {
+      readFileSync(`${process.env.CLAUDE_CONFIG_DIR}/projects/readable.txt`, 'utf8');
+      denied.projects = false;
+    } catch (e) {
+      denied.projects = e.code;
+    }
     reply({ id: req.id, ok: true, value: denied });
   } else if (kind === '08') {
     setTimeout(() => {
@@ -57,6 +70,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       arm();
     }, 150);
     return;
+  } else if (kind === '10') {
+    process.stderr.write('FAKE-READER-STDERR-MARKER\n');
+    const st = fstatSync(2);
+    reply({ id: req.id, ok: true, value: { devnull: st.isCharacterDevice() && st.rdev === 259 } });
   } else reply({ id: req.id, ok: true, value: { session: req.session } });
   arm();
 });

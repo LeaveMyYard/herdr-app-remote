@@ -38,8 +38,16 @@ export type BindResult =
   | { ok: false; reason: "no_binding" }
   | { ok: false; reason: "reader_failed"; detail: ReaderError };
 
+/**
+ * A read. The SDK answers `[]` both for a session with no messages and for one it can't find (not in this root,
+ * or a path the child may not read), so an empty first page is checked with getSessionInfo:
+ * - `ok: true` with `messages: []`: the reader has the session, and it has no messages (yet);
+ * - `not_found`: this root's reader can't see the session at all (no file yet, the wrong root, or blocked).
+ *   CV3 decides: e.g. a session whose `root.transcript` has a size > 0 is then `reader_failed`, not "no messages".
+ */
 export type ReadResult =
   | { ok: true; messages: ClaudeMessage[]; stats: ReadStats }
+  | { ok: false; reason: "not_found" }
   | { ok: false; reason: "reader_failed"; detail: ReaderError | "shape"; stats?: ReadStats };
 
 export interface ReadOptions {
@@ -116,6 +124,12 @@ export class ClaudeHistory {
     if (!r.ok) return { ok: false, reason: "reader_failed", detail: r.error };
     const c = checkMessages(r.value);
     if (!c.ok) return { ok: false, reason: "reader_failed", detail: "shape", stats: c.stats };
+    if (c.stats.total === 0 && !o.offset) {
+      const info = await this.pool.call(b.root, { op: "info", session: b.sessionId });
+      if (!info.ok) return { ok: false, reason: "reader_failed", detail: info.error };
+      const v = info.value;
+      if (v === null || typeof v !== "object" || (v as { sessionId?: unknown }).sessionId !== b.sessionId) return { ok: false, reason: "not_found" };
+    }
     return c;
   }
 

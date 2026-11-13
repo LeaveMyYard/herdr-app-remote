@@ -96,9 +96,13 @@ describe("checkMessages", () => {
     expect(checkMessages([])).toEqual({ ok: true, messages: [], stats: { total: 0, failed: 0, droppedBlocks: 0, droppedMessages: 0 } });
   });
 
-  it("drops a message of an unknown type without failing", () => {
-    const r = checkMessages([env("attachment", { message: {} }), user("Prompt")]);
-    expect(r).toMatchObject({ ok: true, stats: { total: 2, failed: 0, droppedMessages: 1 } });
+  it("drops a message of an unknown type, and counts it toward the failure share", () => {
+    const prompts = (k: number) => Array.from({ length: k }, () => user("Prompt"));
+    const r = checkMessages([env("attachment", { message: {} }), ...prompts(9)]);
+    expect(r).toMatchObject({ ok: true, stats: { total: 10, failed: 0, droppedMessages: 1 } });
+    expect(r.ok && r.messages).toHaveLength(9);
+    expect(checkMessages([env("attachment"), env("turn"), ...prompts(8)])).toMatchObject({ ok: false, stats: { failed: 0, droppedMessages: 2 } });
+    expect(checkMessages([env("attachment"), { type: "user", uuid: "x" }, ...prompts(8)]).ok).toBe(false);
   });
 
   it("keeps system messages with their subtype when the SDK gives one", () => {
