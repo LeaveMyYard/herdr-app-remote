@@ -118,7 +118,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);oversc
 @keyframes hd-breathe{0%,100%{opacity:.7}50%{opacity:1}}
 
 /* Hidden viewport diagnostics overlay (see Diagnostics.tsx) */
-.diag{position:fixed;inset:0;z-index:100;overflow:auto;background:var(--t-chrome);color:var(--t-foreground,inherit);padding:calc(var(--sat) + 12px) max(12px,env(safe-area-inset-right)) calc(var(--sab) + 12px) max(12px,env(safe-area-inset-left));font:12px/1.4 ui-monospace,monospace}
+.diag{position:fixed;inset:0 0 calc(-1 * var(--ios-vp-fix, 0px)) 0;z-index:100;overflow:auto;background:var(--t-chrome);color:var(--t-foreground,inherit);padding:calc(var(--sat) + 12px) max(12px,env(safe-area-inset-right)) calc(var(--sab) + 12px) max(12px,env(safe-area-inset-left));font:12px/1.4 ui-monospace,monospace}
 .diag-bar{display:flex;gap:8px;margin-bottom:8px}
 .diag-bar button{min-height:44px;padding:0 16px}
 .diag-list>div{padding:4px 0;border-bottom:1px solid var(--t-border)}

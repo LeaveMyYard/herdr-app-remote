@@ -7,7 +7,8 @@ export interface VpInput {
   standalone: boolean;
   screenWidth: number;
   screenHeight: number;
-  /** visualViewport.height, else innerHeight. */
+  /** innerWidth / innerHeight: the layout viewport, which the keyboard does not resize on iOS. */
+  viewportWidth: number;
   viewportHeight: number;
   insetTop: number;
 }
@@ -17,9 +18,10 @@ const TOLERANCE = 2;
 /** The px to extend the frame by, or 0 when the workaround must not apply. */
 export function detectDeficit(i: VpInput): number {
   if (!i.standalone) return 0; // a normal Safari tab
-  if (i.screenHeight < i.screenWidth) return 0; // landscape
+  // Landscape (iOS keeps screen.width/height portrait when rotated, so look at the layout viewport too).
+  if (i.screenHeight < i.screenWidth || i.viewportWidth > i.viewportHeight) return 0;
   const deficit = i.screenHeight - i.viewportHeight;
-  if (!(deficit > 0) || !(i.insetTop > 0)) return 0; // keyboard open shrinks it by far more than inset-top
+  if (!(deficit > 0) || !(i.insetTop > 0)) return 0; // a shrunken viewport (not the bug) never equals inset-top
   return Math.abs(deficit - i.insetTop) <= TOLERANCE ? Math.round(deficit) : 0;
 }
 
@@ -32,14 +34,15 @@ function insetTop(doc: Document): number {
   return Number.isFinite(v) ? v : 0;
 }
 
-function read(win: Window, doc: Document): VpInput {
-  const standaloneMq = typeof win.matchMedia === "function" && win.matchMedia("(display-mode: standalone)").matches;
+function read(win: Window, doc: Document, readInset: (d: Document) => number): VpInput {
   return {
-    standalone: (win.navigator as unknown as { standalone?: boolean }).standalone === true || standaloneMq,
+    // iOS only: navigator.standalone exists nowhere else, which keeps Android and desktop installs out.
+    standalone: (win.navigator as unknown as { standalone?: boolean }).standalone === true,
     screenWidth: win.screen.width,
     screenHeight: win.screen.height,
-    viewportHeight: win.visualViewport?.height ?? win.innerHeight,
-    insetTop: insetTop(doc),
+    viewportWidth: win.innerWidth,
+    viewportHeight: win.innerHeight,
+    insetTop: readInset(doc),
   };
 }
 
@@ -49,20 +52,37 @@ function tabbarReachable(win: Window, doc: Document): boolean {
   if (!bar || typeof doc.elementFromPoint !== "function") return true; // nothing to check against
   const r = bar.getBoundingClientRect();
   if (r.height === 0) return true;
-  const hit = doc.elementFromPoint(Math.min(win.innerWidth - 1, r.x + r.width / 2), r.y + r.height / 2);
+  // elementFromPoint is null outside the layout viewport, so test the bar's top edge, which stays inside it.
+  const hit = doc.elementFromPoint(
+    Math.min(win.innerWidth - 1, r.x + r.width / 2),
+    Math.max(0, Math.min(r.y + 1, win.innerHeight - 1)),
+  );
   return hit !== null && bar.contains(hit);
 }
 
-/** Keeps --ios-vp-fix on the root in step with the window. Returns the cleanup. */
-export function installIosVpFix(win: Window = window, doc: Document = document): () => void {
-  const set = (px: number) => doc.documentElement.style.setProperty("--ios-vp-fix", `${px}px`);
+/** Keeps --ios-vp-fix on the root in step with the window. Returns the cleanup. `readInset` is injectable for tests. */
+export function installIosVpFix(win: Window = window, doc: Document = document, readInset = insetTop): () => void {
+  const root = doc.documentElement;
+  let disposed = false;
+  let frame = 0;
+  let droppedFor = ""; // inputs for which the tab bar check failed: stay off until they change
+  const set = (px: number, note = "") => {
+    root.style.setProperty("--ios-vp-fix", `${px}px`);
+    if (note) root.dataset.iosVpFix = note;
+    else delete root.dataset.iosVpFix;
+  };
   const update = () => {
-    const px = detectDeficit(read(win, doc));
+    const input = read(win, doc, readInset);
+    const key = JSON.stringify(input);
+    const px = detectDeficit(input);
+    if (px > 0 && key === droppedFor) return set(0, "dropped: tab bar not hit");
     set(px);
-    // The variable only takes effect after layout; check the tab bar then, and drop the fix if it is not hit.
-    if (px > 0) {
-      win.requestAnimationFrame?.(() => {
-        if (!tabbarReachable(win, doc)) set(0);
+    if (px > 0 && typeof win.requestAnimationFrame === "function") {
+      win.cancelAnimationFrame?.(frame);
+      frame = win.requestAnimationFrame(() => {
+        if (disposed || tabbarReachable(win, doc)) return;
+        droppedFor = key;
+        set(0, "dropped: tab bar not hit");
       });
     }
   };
@@ -71,9 +91,12 @@ export function installIosVpFix(win: Window = window, doc: Document = document):
   win.addEventListener("orientationchange", update);
   win.visualViewport?.addEventListener("resize", update);
   return () => {
+    disposed = true;
+    win.cancelAnimationFrame?.(frame);
     win.removeEventListener("resize", update);
     win.removeEventListener("orientationchange", update);
     win.visualViewport?.removeEventListener("resize", update);
-    doc.documentElement.style.removeProperty("--ios-vp-fix");
+    root.style.removeProperty("--ios-vp-fix");
+    delete root.dataset.iosVpFix;
   };
 }

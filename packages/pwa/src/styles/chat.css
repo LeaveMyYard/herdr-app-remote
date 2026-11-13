@@ -62,8 +62,8 @@
 .chat-foot-out{height:auto;gap:4px;padding:14px 16px calc(var(--sab) + 8px);border-top:1px solid var(--t-border)}
 .chat-out{margin:0;font-size:14px;color:var(--t-foreground)}
 .chat-out-how{margin:0;font-size:13px;color:var(--t-muted)}
-.keys-scrim{position:fixed;inset:0;z-index:3;background:#00000080}
-.keys-sheet{font-family:Inter,system-ui,sans-serif;position:fixed;left:0;right:0;bottom:0;z-index:4;padding:8px 16px calc(var(--sab) + 4px);gap:12px;border-radius:16px 16px 0 0;background:var(--t-popover);border-top:1px solid #ffffff1f;box-shadow:0 -12px 32px #00000080}
+.keys-scrim{position:fixed;inset:0 0 calc(-1 * var(--ios-vp-fix, 0px)) 0;z-index:3;background:#00000080}
+.keys-sheet{font-family:Inter,system-ui,sans-serif;position:fixed;left:0;right:0;bottom:calc(-1 * var(--ios-vp-fix, 0px));z-index:4;padding:8px 16px calc(var(--sab) + 4px);gap:12px;border-radius:16px 16px 0 0;background:var(--t-popover);border-top:1px solid #ffffff1f;box-shadow:0 -12px 32px #00000080}
 .keys-grip{align-self:center;width:36px;height:5px;border-radius:3px;background:var(--t-input)}
 .keys-head{gap:8px}
 .keys-titles{gap:2px}
