@@ -1,0 +1,44 @@
+{
+  "terminal": "t3",
+  "harness": "claude",
+  "state": "ok",
+  "items": [
+    {
+      "id": "a2000000-0000-4000-8000-000000000001",
+      "role": "you",
+      "at": "2026-01-02T12:00:01.000Z",
+      "text": "Run the tests for Project Alpha"
+    },
+    {
+      "id": "prompt-869c88101cae467f93e58471fe758a1f",
+      "at": null,
+      "prompt_id": "not-hex",
+      "rev": "cinl20AuJ2iIl6IJbeITJ2NEr-5tpVf7",
+      "kind": "permission",
+      "title": "Do you want to proceed?",
+      "summary": "cargo test --workspace",
+      "options": [
+        {
+          "label": "Yes"
+        },
+        {
+          "label": "Yes, and don’t ask again for: cargo test *"
+        },
+        {
+          "label": "Yes, and switch to auto mode · auto mode handles these prompts for you"
+        },
+        {
+          "label": "No"
+        }
+      ],
+      "role": "prompt",
+      "state": "open"
+    }
+  ],
+  "older": false,
+  "rev": "0c6e9b2f41a8d375",
+  "status": {
+    "state": "blocked",
+    "since": null
+  }
+}

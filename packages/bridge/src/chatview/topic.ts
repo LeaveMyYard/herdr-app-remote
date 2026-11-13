@@ -22,6 +22,9 @@ import type { Json } from "../patch.js";
 import { diff } from "../patch.js";
 import type { Contract, FeedView } from "../panorama/feed.js";
 import { mapMessages, newest, type MapOptions } from "./map.js";
+import { cardRev, matchPrompt, pendingTools, promptItem, type Match, type PendingTool } from "../prompt/match.js";
+import { parseScreen } from "../prompt/screen.js";
+import type { PromptSource, PublishedPrompt } from "../prompt/answer.js";
 
 type ChatItem = bridgeApi.ChatItem;
 type ChatviewTopic = bridgeApi.ChatviewTopic;
@@ -68,6 +71,11 @@ export interface ChatviewOptions {
   map?: MapOptions;
   /** The topic value failed its own schema (a bug): logged by the app, the topic goes `reader_failed`. */
   onInvalid?: (topic: string, error: string) => void;
+  /**
+   * Native prompt cards (CV7, §3a): the screen of a terminal (`hc read`, null when it fails) and the key of the
+   * cards' `rev` HMAC. Without it, no card is ever published.
+   */
+  prompts?: { read: (terminal: string) => Promise<string | null>; revKey: Buffer };
 }
 
 /** What panorama and the host prove about a terminal: a session to read, or why there is none. */
@@ -184,6 +192,12 @@ export function windowOps(prev: ChatviewTopic, next: ChatviewTopic): bridgeApi.P
 
 const newRev = (): string => randomBytes(8).toString("hex");
 
+/** The `rev` of the prompt card a published value shows, or null. */
+const shownCard = (v: ChatviewTopic): string | null => {
+  const last = v.items[v.items.length - 1];
+  return last?.role === "prompt" ? last.rev : null;
+};
+
 interface Watch {
   topic: string;
   terminal: string;
@@ -204,6 +218,16 @@ interface Watch {
   last: ChatviewTopic | undefined;
   /** The look in flight (or the last one, settled). */
   inflight: Promise<void>;
+  /** The host's agent state at the last look. */
+  agentState: AgentState | null;
+  /** Top-level tool calls with no result at the last read (T). */
+  pending: PendingTool[];
+  /** AskUserQuestion item ids per tool_use id: a card for that call takes their place. */
+  askIds: Map<string, string[]>;
+  /** The prompt card published now (CV7), or null. */
+  card: PublishedPrompt | null;
+  /** Prompt ids answered through the bridge: not published again while the screen still shows them. */
+  answered: string[];
 }
 
 export type PageResult =
@@ -276,7 +300,26 @@ export class ChatviewTopicDriver {
       return void this.o.hub.setStale(topic, "too_many_chats");
     }
     this.waiting.delete(topic);
-    const w: Watch = { topic, terminal, timer: undefined, stopped: false, proved: null, sessionId: null, binding: null, seen: null, retryAt: 0, items: [], rev: newRev(), last: undefined, inflight: Promise.resolve() };
+    const w: Watch = {
+      topic,
+      terminal,
+      timer: undefined,
+      stopped: false,
+      proved: null,
+      sessionId: null,
+      binding: null,
+      seen: null,
+      retryAt: 0,
+      items: [],
+      rev: newRev(),
+      last: undefined,
+      inflight: Promise.resolve(),
+      agentState: null,
+      pending: [],
+      askIds: new Map(),
+      card: null,
+      answered: [],
+    };
     this.watches.set(topic, w);
     void this.tick(w);
   }
@@ -322,6 +365,7 @@ export class ChatviewTopicDriver {
       if (w.stopped) return;
       try {
         await this.step(w);
+        if (!w.stopped) await this.promptPass(w);
       } catch {
         if (!w.stopped) this.unavailable(w, "claude", "reader_failed", null, true);
       }
@@ -333,6 +377,7 @@ export class ChatviewTopicDriver {
   /** One look: resolve the binding, stat the transcript, read if it changed, publish. */
   private async step(w: Watch): Promise<void> {
     const r = resolve(w.terminal, this.o.hub.get("host"), this.o.feed(), this.now());
+    w.agentState = r.agentState;
     if (!r.ok) return this.unavailable(w, r.harness, r.reason, r.agentState, true);
     const history = this.o.history;
     if (history === null) return this.unavailable(w, r.harness, "reader_failed", r.agentState, true);
@@ -369,7 +414,10 @@ export class ChatviewTopicDriver {
     if (read.ok) messages = read.messages;
     else if (read.reason === "not_found" && now.size === 0) messages = []; // a new session: no file, or an empty one, yet
     else return this.failRead(w, r.agentState); // `not_found` with a transcript on disk is a reader that can't see it
-    const items = mapMessages(messages, this.o.map).slice(-CHATVIEW_KEPT);
+    const askIds = new Map<string, string[]>();
+    const items = mapMessages(messages, { ...this.o.map, askIds }).slice(-CHATVIEW_KEPT);
+    w.pending = pendingTools(messages);
+    w.askIds = askIds;
     const rewritten = w.sessionId !== r.session.sessionId || !continues(w.items, items);
     if (rewritten) w.rev = newRev();
     w.sessionId = r.session.sessionId;
@@ -377,6 +425,67 @@ export class ChatviewTopicDriver {
     w.seen = now;
     this.publish(w, r.agentState, rewritten);
   }
+
+  /** The items as shown: a prompt card replaces its AskUserQuestion items and goes last. */
+  private shownItems(w: Watch): ChatItem[] {
+    const c = w.card;
+    if (!c) return w.items;
+    const hide = new Set(c.match.toolUseId !== null ? (w.askIds.get(c.match.toolUseId) ?? []) : []);
+    const items = hide.size > 0 ? w.items.filter((i) => !hide.has(i.id)) : w.items;
+    return [...items, promptItem(c.match, c.rev)];
+  }
+
+  /**
+   * The prompt card (CV7, §3a.2): only while the host says `blocked` (S), from the pending calls of the last read (T)
+   * and a fresh screen (V). Anything else (not blocked, no screen, the topic unavailable) is no card.
+   */
+  private async promptPass(w: Watch): Promise<void> {
+    const pr = this.o.prompts;
+    let next: PublishedPrompt | null = null;
+    if (pr && w.last?.state === "ok" && w.agentState === "waiting") {
+      const text = await pr.read(w.terminal);
+      if (w.stopped) return;
+      if (text !== null) {
+        // A screen with no prompt block: whatever was answered is over, and the same dialog asked again is new.
+        if (!parseScreen(text).ok) w.answered = [];
+        const m: Match = matchPrompt(w.pending, text);
+        if (!w.answered.includes(m.promptId)) next = { match: m, rev: cardRev(pr.revKey, m) };
+      }
+    } else if (w.last?.state === "ok" && w.agentState !== null && w.agentState !== "waiting") {
+      // Not blocked: no prompt is open, so nothing answered is still on screen.
+      w.answered = [];
+    }
+    if ((next?.rev ?? null) === (w.card?.rev ?? null) && (next?.match.promptId ?? null) === (w.card?.match.promptId ?? null)) return;
+    w.card = next;
+    if (w.last?.state === "ok") this.publish(w, w.agentState, false);
+  }
+
+  /** What the answer path (prompt/answer.ts) needs: the card published now, T and S fresh, and "answered". */
+  readonly promptSource: PromptSource = {
+    current: (t) => this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${t}`)?.card ?? undefined,
+    fresh: async (t) => {
+      const w = this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${t}`);
+      const history = this.o.history;
+      if (!w || !w.binding || !history) return null;
+      const r = resolve(t, this.o.hub.get("host"), this.o.feed(), this.now());
+      if (!r.ok || r.session.sessionId !== w.sessionId) return null;
+      const read = await history.read(w.binding);
+      if (!read.ok) return null;
+      return { pending: pendingTools(read.messages), blocked: r.agentState === "waiting" };
+    },
+    isAnswered: (t, id) => this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${t}`)?.answered.includes(id) ?? false,
+    answered: (t, id) => {
+      const w = this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${t}`);
+      if (!w) return;
+      w.answered.push(id);
+      if (w.answered.length > 32) w.answered.shift();
+      if (w.card?.match.promptId === id) {
+        w.card = null;
+        if (w.last?.state === "ok") this.publish(w, w.agentState, false);
+      }
+      void this.poll(w.topic);
+    },
+  };
 
   private failRead(w: Watch, agentState: AgentState | null): void {
     // Bind again next time: the root list or the reader may have changed.
@@ -391,14 +500,14 @@ export class ChatviewTopicDriver {
     if (w.last?.state !== "ok") return;
     // Nothing to send when the status line is the same: skip rebuilding and checking the window every second.
     const status = statusOf(agentState, w.items);
-    if (status.state === w.last.status.state && status.since === w.last.status.since) return;
+    if (status.state === w.last.status.state && status.since === w.last.status.since && shownCard(w.last) === (w.card?.rev ?? null)) return;
     this.publish(w, agentState, false);
   }
 
   private publish(w: Watch, agentState: AgentState | null, fresh: boolean): void {
     const status = statusOf(agentState, w.items);
     const base = { terminal: w.terminal, harness: "claude", state: "ok" as const, items: [] as ChatItem[], older: false, rev: w.rev, status };
-    const win = newest(w.items, base, bridgeApi.CHATVIEW_WINDOW, bridgeApi.CHATVIEW_SNAP_MAX_BYTES);
+    const win = newest(this.shownItems(w), base, bridgeApi.CHATVIEW_WINDOW, bridgeApi.CHATVIEW_SNAP_MAX_BYTES);
     const value: ChatviewTopic = { ...base, items: win.items, older: win.older };
     this.emit(w, value, fresh);
   }
@@ -408,6 +517,9 @@ export class ChatviewTopicDriver {
     // The history held is dropped: it is never shown under another binding. The next good read starts a new `rev`.
     w.items = [];
     w.sessionId = null;
+    w.pending = [];
+    w.askIds = new Map();
+    w.card = null;
     if (forget) {
       w.proved = null;
       w.binding = null;

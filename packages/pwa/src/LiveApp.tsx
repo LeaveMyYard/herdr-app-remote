@@ -196,6 +196,15 @@ export function LiveApp({
   const onForbidden = useCallback(() => {
     if (terminal !== undefined) setDeniedFor({ terminal, seq: viewSeq });
   }, [terminal, viewSeq]);
+  // CV7: a prompt card's answer. Never retried; an unknown effect re-reads the chat view, so the card shows as it is now.
+  const promptAct = useCallback(
+    async (kind: "prompt.answer", args: Record<string, unknown>) => {
+      const r = await client.act(kind, args);
+      if (r.unknown_effect && viewName) client.refresh(viewName);
+      return r;
+    },
+    [client, viewName],
+  );
   const loadOlder = useCallback((before: string, rev: string) => (terminal !== undefined ? fetchOlder(terminal, before, rev) : Promise.resolve<OlderResult>({ ok: false, code: "failed" })), [terminal]);
   const waited = useWaited(terminal ?? "", VIEW_WAIT_MS, viewName !== null && viewTopic === undefined && viewStale === null);
   const mode: ViewMode | undefined =
@@ -263,7 +272,7 @@ export function LiveApp({
             stale: chatView?.stale ?? (chatView?.data !== undefined && chatTopic === undefined ? "bad_data" : null),
             terminal,
             input,
-            ...(mode ? { mode, onShown: setShown, view: { topic: viewTopic, loadOlder, onForbidden } } : {}),
+            ...(mode ? { mode, onShown: setShown, view: { topic: viewTopic, loadOlder, onForbidden, promptAct } } : {}),
             ...(timeline ? { timeline } : {}),
           }
         : chatAgent

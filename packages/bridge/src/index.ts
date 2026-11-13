@@ -29,4 +29,5 @@ export { terminalKeysActor, TERMINAL_KEYS, type TerminalKeysActor } from "./term
 export { KeysMenu, menuTopic, DEFAULT_KEYS } from "./terminal/keys-config.js";
 export * as claude from "./claude/index.js";
 export * as chatview from "./chatview/index.js";
+export * as prompt from "./prompt/index.js";
 export * as timeline from "./timeline/index.js";

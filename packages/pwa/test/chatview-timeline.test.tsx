@@ -8,13 +8,14 @@ import { ROW_ARM_MS } from "../src/inbox/arm";
 import type { ChatAgent } from "../src/screens/Chat";
 import { ChatView } from "../src/screens/ChatView";
 import { boardQuestion } from "../src/timeline/TimelineBoard";
+import { PROMPT_FIXTURES } from "../src/chatview/prompt/fixtures";
 
 // CV5b: a timeline row keeps its component when placement moves it, so the inbox's one-act-in-flight guard holds.
 // Fake data only. The question is asked at 21:02 (boardQuestion.at).
 type Item = bridgeApi.ChatItem;
 const agent: ChatAgent = { name: "Agent 1", folder: "~/code/alpha", harness: "claude", status: "working" };
 const NOW = Date.parse("2026-01-02T21:10:00Z");
-const at = (m: number) => new Date(Date.UTC(2026, 0, 2, 21, m)).toISOString();
+const at = (m: number, sec = 0) => new Date(Date.UTC(2026, 0, 2, 21, m, sec)).toISOString();
 const ai = (id: string, m: number): Item => ({ id, role: "agent", at: at(m), text: `Reply ${id}` });
 const ask = (id: string, m: number): Item => ({ id, role: "ask", at: at(m), ask: { via: "inbox", question: null, header: null, multi: false, options: [] }, tool_use_id: "toolu_01FakeAskOperator123" });
 const topic = (items: Item[], older = false): bridgeApi.ChatviewTopic => ({ terminal: "t1", harness: "claude", state: "ok", items, older, rev: "r1", status: { state: "working", since: null } });
@@ -115,6 +116,35 @@ describe("a timeline row that moves keeps its act in flight", () => {
     await tapA();
     v.rerender(topic([ai("m1", 5)]));
     expect(screen.queryByText("No messages yet")).toBeNull();
+    await pass(ROW_ARM_MS + 1);
+    await tapA();
+    expect(sent).toHaveLength(1);
+  });
+});
+
+describe("an inline question and an open prompt card (CV7)", () => {
+  const prompt = (state: "open" | "answered" = "open"): Item => ({ ...PROMPT_FIXTURES.perm!.item, id: "p1", at: at(1, 30), state });
+  /** The list's rows in order: a timeline row's data-key, a prompt card's "prompt", else the item's text. */
+  const order = () =>
+    [...document.querySelectorAll(".cv-list > .cv-item")].map((el) => el.querySelector("[data-key]")?.getAttribute("data-key") ?? (el.querySelector(".pc-card") ? "prompt" : (el.textContent ?? "")));
+
+  it("the question newer than every item goes above an open card that ends the list; the card stays last", () => {
+    mount(topic([ai("m1", 1), prompt()]), [question()], pending().fn);
+    expect(order()).toEqual(["Agent 1Reply m1", "group:123", "prompt"]);
+  });
+
+  it("a card that is no longer open does not hold the end", () => {
+    mount(topic([ai("m1", 1), prompt("answered")]), [question()], pending().fn);
+    expect(order().at(-1)).toBe("group:123");
+  });
+
+  it("the card arriving moves the question above it without dropping its act in flight", async () => {
+    const { sent, fn } = pending();
+    const v = mount(topic([ai("m1", 1)]), [question()], fn);
+    await pass(ROW_ARM_MS + 1);
+    await tapA();
+    v.rerender(topic([ai("m1", 1), prompt()]));
+    expect(order().slice(-2)).toEqual(["group:123", "prompt"]);
     await pass(ROW_ARM_MS + 1);
     await tapA();
     expect(sent).toHaveLength(1);

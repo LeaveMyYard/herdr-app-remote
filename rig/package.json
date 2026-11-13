@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node -e \"0\"",
-    "typecheck": "node --check sidecar.mjs && node --check link-harness.mjs && node --check inbox-harness.mjs && node --check panel-harness.mjs && node --check terminal-harness.mjs && node --check keys-harness.mjs && node --check chat-harness.mjs && node --check transcript-harness.mjs && node --check chatview-harness.mjs && node --check claude-prompts-harness.mjs && node --check fake-anthropic.mjs && node --check serve-standin.mjs",
+    "typecheck": "node --check sidecar.mjs && node --check link-harness.mjs && node --check inbox-harness.mjs && node --check panel-harness.mjs && node --check terminal-harness.mjs && node --check keys-harness.mjs && node --check chat-harness.mjs && node --check transcript-harness.mjs && node --check chatview-harness.mjs && node --check claude-prompts-harness.mjs && node --check prompt-answer-harness.mjs && node --check fake-anthropic.mjs && node --check serve-standin.mjs",
     "test": "vitest run",
     "rig": "sh run.sh"
   }

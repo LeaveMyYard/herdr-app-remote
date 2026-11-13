@@ -474,7 +474,7 @@ describe("pairing", () => {
     sec.approve(body.device.id);
     const me2 = JSON.parse((await http("GET", "/api/v1/me", { ...OK_GET, Cookie: cookie })).body) as { device: { state: string; caps: Record<string, boolean> } };
     expect(me2.device.state).toBe("approved");
-    expect(me2.device.caps).toEqual({ view: true, "inbox.answer": true, navigate: false, "terminal.input": false, "terminal.keys": false, push: false, "transcript.read": false });
+    expect(me2.device.caps).toEqual({ view: true, "inbox.answer": true, navigate: false, "terminal.input": false, "terminal.keys": false, push: false, "transcript.read": false, "prompt.answer": false });
     (await greeted(cookie)).ws.close();
 
     // Only the token's hash is stored, in a 0600 file.
@@ -1038,7 +1038,7 @@ describe("terminal.keys (S16b)", () => {
     expect(onCut.mock.lastCall).toEqual([id]);
   });
 
-  it("only terminal.input and terminal.keys can expire", async () => {
+  it("only terminal.input, terminal.keys and prompt.answer can expire", async () => {
     const id = await startWith();
     for (const cap of ["view", "navigate", "push", "inbox.answer"] as const) expect(() => sec.setCap(id, cap, true, clock + 1000)).toThrow();
     expect(() => sec.setCap(id, "terminal.keys", true, clock - 1)).toThrow();
@@ -1083,6 +1083,93 @@ describe("terminal.keys (S16b)", () => {
     sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner: keysInner });
     expect(sec.devices()[0]).toMatchObject({ id, caps: { "terminal.keys": false }, terminal_keys_until: null });
     expect(await sec.act(client(id), "terminal.keys", PRESS)).toMatchObject({ code: "forbidden" });
+  });
+});
+
+// ---- CV7: prompt.answer (answer native prompts), a capability of its own with an expiry ----
+
+describe("prompt.answer (CV7)", () => {
+  const client = (id: string) => ({ principal: { deviceId: id }, send: () => undefined, close: () => undefined });
+  const ANSWER = { terminal: "t3", prompt_id: "a".repeat(64), rev: "r1", choice: { other: "secret words 123" } };
+  const inner: ActHandler = (_c, kind, args) => {
+    acts.push({ kind, args });
+    return kind === "prompt.answer" ? { ok: true, audit_label: "a question\nown answer (16 chars)" } : { ok: true };
+  };
+  async function startWith(extra: Partial<ConstructorParameters<typeof Security>[0]> = {}) {
+    await start();
+    const { id } = await pairedDevice();
+    sec.close();
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner, ...extra });
+    return id;
+  }
+
+  it("is off after approval and refused while off; typing or keys don't imply it", async () => {
+    const id = await startWith();
+    expect(sec.devices()[0]).toMatchObject({ caps: { "prompt.answer": false }, prompt_answer_until: null });
+    sec.setCap(id, "terminal.input", true);
+    sec.setCap(id, "terminal.keys", true);
+    expect(await sec.act(client(id), "prompt.answer", ANSWER)).toEqual({ ok: false, code: "forbidden" });
+    expect(acts).toHaveLength(0);
+    expect(activity()).toContain("Phone 1 answered a prompt in t3: refused");
+    expect(JSON.stringify(sec.activity(1000))).not.toContain("secret words");
+    sec.setCap(id, "prompt.answer", true);
+    expect(await sec.act(client(id), "prompt.answer", ANSWER)).toMatchObject({ ok: true });
+    expect(activity()).toContain("Phone 1 answered a question in t3: own answer (16 chars)");
+    expect(JSON.stringify(sec.activity(1000))).not.toContain("secret words");
+  });
+
+  it("expires by itself and cuts only its own work", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const onCut = vi.fn();
+      const id = await startWith({ onCut });
+      sec.setCap(id, "terminal.keys", true, clock + 120_000);
+      sec.setCap(id, "prompt.answer", true, clock + 60_000);
+      expect(sec.devices()[0]).toMatchObject({ prompt_answer_until: clock + 60_000 });
+      clock += 60_000;
+      vi.advanceTimersByTime(60_000);
+      expect(activity()).toContain("Phone 1: prompt.answer expired");
+      expect(onCut).toHaveBeenCalledWith(id, "prompt.answer");
+      expect(onCut).not.toHaveBeenCalledWith(id, "terminal.keys");
+      const stored = JSON.parse(await readFile(join(dir, "data", "devices.json"), "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+      expect(stored.devices[0]?.caps).toMatchObject({ "prompt.answer": false, "prompt.answer.until": null, "terminal.keys": true });
+      expect(await sec.act(client(id), "prompt.answer", ANSWER)).toMatchObject({ code: "forbidden" });
+      sec.setCap(id, "prompt.answer", true);
+      sec.setCap(id, "prompt.answer", false);
+      expect(onCut).toHaveBeenLastCalledWith(id, "prompt.answer");
+    } finally {
+      sec.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("6 per 10 s, and refused while Activity can't be written", async () => {
+    const id = await startWith();
+    const c = client(id);
+    expect(KIND_LIMITS.get("prompt.answer")).toEqual({ max: 6, windowMs: 10_000 });
+    sec.setCap(id, "prompt.answer", true);
+    for (let i = 0; i < 6; i++) expect(await sec.act(c, "prompt.answer", ANSWER)).toMatchObject({ ok: true });
+    expect(await sec.act(c, "prompt.answer", ANSWER)).toMatchObject({ ok: false, code: "rate_limited" });
+    clock += 10_000;
+    const f = join(dir, "data", "activity.jsonl");
+    await rm(f, { force: true });
+    await import("node:fs/promises").then((fs) => fs.mkdir(f));
+    await sec.act(c, "inbox.ack", {});
+    expect(sec.auditHealth.ok).toBe(false);
+    expect(await sec.act(c, "prompt.answer", ANSWER)).toEqual({ ok: false, code: "audit_unavailable" });
+    expect(acts.filter((a) => a.kind === "prompt.answer")).toHaveLength(6);
+  });
+
+  it("a devices.json from before CV7 loads, with prompt.answer off", async () => {
+    const id = await startWith();
+    sec.close();
+    const p = join(dir, "data", "devices.json");
+    const stored = JSON.parse(await readFile(p, "utf8")) as { devices: { caps: Record<string, unknown> }[] };
+    delete stored.devices[0]!.caps["prompt.answer"];
+    delete stored.devices[0]!.caps["prompt.answer.until"];
+    await import("node:fs/promises").then((fs) => fs.writeFile(p, JSON.stringify(stored)));
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner });
+    expect(sec.devices()[0]).toMatchObject({ id, caps: { "prompt.answer": false }, prompt_answer_until: null });
   });
 });
 

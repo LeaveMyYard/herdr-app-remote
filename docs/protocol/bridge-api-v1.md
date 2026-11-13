@@ -49,7 +49,7 @@ The bridge listens on `127.0.0.1` only and is reached through `tailscale serve`.
 
 PLAN §2 says the phone gets its cookie "on approval". Setting it at pairing time instead is deliberate: the cookie is worthless until approval, and the bridge never has to hold a plaintext token while it waits for the desktop.
 
-`GET /api/v1/me` returns `200 {device: {id, name, login, state, caps, terminal_input_until, terminal_keys_until, created_at, approved_at, last_seen, live}}` for the cookie's device, or `401 {error: "unpaired"}`. `caps` maps each capability to whether it is in effect now.
+`GET /api/v1/me` returns `200 {device: {id, name, login, state, caps, terminal_input_until, terminal_keys_until, prompt_answer_until, created_at, approved_at, last_seen, live}}` for the cookie's device, or `401 {error: "unpaired"}`. `caps` maps each capability to whether it is in effect now.
 
 Only the token's sha256 is stored, in `devices.json` (mode 0600, in a 0700 directory). Devices are revoked and renamed on the desktop only. A revoked device's sockets are closed at once, before the change is written to disk, so a failed write can't leave a revoked device streaming. A change of serve name or owner login closes every live socket.
 
@@ -92,6 +92,7 @@ Checked by the bridge for every `act`:
 | `terminal.keys` | off; turned on from the desktop only, can expire (S16b) | `terminal.keys` |
 | `push` | off | `push.subscribe`, `push.unsubscribe` |
 | `transcript.read` | off; turned on from the desktop only, no expiry (CV1) | no `act`; the transcript topics `chatview:<t>` and `timeline:<t>` and `GET /api/v1/chatview/<t>` (below) |
+| `prompt.answer` | off; turned on from the desktop only, can expire (CV7) | `prompt.answer` (and `agent.stop`, CV8) |
 
 There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other kind is refused and logged.
 
@@ -118,6 +119,7 @@ Per approved device, on top of the pairing limit above:
 | `act`s of any kind and outcome | 30 per 10 s | `res` `rate_limited` |
 | `terminal.send` (counted once the capability allows it) | 6 per 10 s | `res` `rate_limited` |
 | `terminal.keys` (counted once the capability allows it) | 10 per 10 s | `res` `rate_limited` |
+| `prompt.answer` (counted once the capability allows it) | 6 per 10 s | `res` `rate_limited` |
 | `GET /api/v1/chatview/<t>` (counted once the capabilities allow it) | 20 per 10 s | `429 rate_limited` |
 
 A refusal for a limit is written to Activity once per filled window, not once per attempt, so a looping client can't flood the log. The windows slide: the next attempt is allowed once the oldest counted one is older than the window.
@@ -126,7 +128,7 @@ A refusal for a limit is written to Activity once per filled window, not once pe
 
 `activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers and lengths only, plus, for an answer, the option label the bridge resolved from its own inbox data. A label sent by the client is never logged. Examples: "Phone 1 sent 12 chars to t3", "Phone 1 answered Q119 (Option B)".
 
-A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send` and `terminal.keys` are refused (`audit_unavailable`) while the log is failing, because their audit line is their whole safeguard; the refusal's own line is the probe that clears the flag. So are a chat open (`stale audit_unavailable`) and an older chat page (`503 audit_unavailable`, CV3), whose lines are their record.
+A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send`, `terminal.keys` and `prompt.answer` are refused (`audit_unavailable`) while the log is failing, because their audit line is their whole safeguard; the refusal's own line is the probe that clears the flag. So are a chat open (`stale audit_unavailable`) and an older chat page (`503 audit_unavailable`, CV3), whose lines are their record.
 
 ### Web Push (S17)
 
@@ -287,6 +289,12 @@ Older items of an open chat view: up to `n` (default 50) items just before the i
 - Activity records the length only: "Phone 1 sent 12 chars to t3". The text is never logged, echoed in a `res`, or kept.
 - The PWA asks before the first send to each terminal while it is open ("Type this into Agent 1's terminal?"); the bridge doesn't depend on that.
 
+### Native prompt cards and `prompt.answer` (CV7)
+
+`docs/chatview.md` §3a. A `chatview:<t>` item with role `prompt` (`ChatItem` in the protocol package) is a native prompt of Claude Code, published only while the host says the agent is `waiting` (blocked) and the transcript's pending call and the screen agree. It is the last item, and replaces that call's `ask` items. Fields: `prompt_id` (64 hex: sha256 over the tool_use id, the screen's title line and its ordered labels), `rev` (an HMAC of the card as published, per bridge start), `kind` (`permission`, `question`, `plan`, `other`, `unparsed`), `title` (the screen's title line; the phone shows its own heading per kind), `summary` (permission: the command, redacted), `questions` (question: one entry, its text, header, options with descriptions, `multi`, and `other`: whether Other may be answered), `plan_md` (plan, redacted, at most 32 KB), `options` (the buttons, as the screen labels them, in its order; for a question, its options without Other and "Chat about this"), `screen_lines` (`unparsed`: the bottom of the screen, redacted, read-only, at most 60 lines of 400 characters) and `state` (`open`).
+
+**`act prompt.answer {terminal, prompt_id, rev, choice}`** (`PromptAnswerArgs`) needs `prompt.answer`. `choice` is `{option: i}` (an index into `options`; not for a multi-select), `{picks: [i…]}` (a multi-select question's options, at least one, distinct) or `{other: text}` (a single-select question with `other`; 1 to 2000 characters, one line: no newline, tab or other control character, and not starting with `!`, `/` or `#`). While an answer runs in a terminal, `terminal.send` and `terminal.keys` into it answer `busy`. An Enter or Other send that hc held over 1 s for the desk is `unknown_effect` even when the prompt is gone. The bridge refuses with nothing pressed when the card is not the one it publishes now or the screen differs (`prompt_changed`; `prompt_moved` when the difference shows only after phase A pressed arrows or ticks, which decide nothing), the prompt left the screen (`prompt_gone`), another answer runs for the terminal or hc kept phase A waiting (`busy`), or the choice doesn't fit the card (`bad_choice`). It presses arrow keys (and space for a multi-select tick), reads the screen again, and presses Enter only when the cursor is on the expected row of the same prompt; an Other answer pastes the text with `hc send --force` only after a fresh read confirms the prompt's own Other field is active. A multi-select whose first Enter (on Submit) brings no review step, while the question is gone from the screen, is `unknown_effect`. After Enter, a prompt still on screen and a call still pending after 2 s is `unknown_effect` (`unknown_effect: true`); so are hc failures that may have pressed (`timeout`, `cancelled` when the device lost `prompt.answer`). Nothing is pressed again by itself. Activity: "Phone 1 answered a permission prompt in t3: option 1 of 3 (Yes)", "Phone 1 answered a question in t3: own answer (12 chars)"; never the command, question or Other text.
+
 ### `terminal.keys` and the `keys` topic (S16b)
 
 Special keys (Esc, Tab, Shift-Tab, Ctrl-C, arrows) are pressed from a menu the desktop defines. The phone names a menu entry; it never sends key names, so the menu is the whole of what a phone can press.
@@ -352,7 +360,7 @@ Special keys (Esc, Tab, Shift-Tab, Ctrl-C, arrows) are pressed from a menu the d
 | `paused` | remote access is paused |
 | `internal_error` | the handler threw; always with `unknown_effect: true` |
 | `rate_limited` | the device is over a rate limit (see Rate limits) |
-| `audit_unavailable` | `terminal.send` or `terminal.keys` while Activity can't be written |
+| `audit_unavailable` | `terminal.send`, `terminal.keys` or `prompt.answer` while Activity can't be written |
 
 The device is re-checked before every `act`, so a revoke or pause refuses the next one. An `act` that is already running when it lands still completes.
 

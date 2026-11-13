@@ -132,9 +132,9 @@ export default class Remote extends View {
       openUrl: (cx, url) => {
         if (typeof url === 'string' && url.startsWith('https://login.tailscale.com/')) cx.open_url(url);
       },
-      // Turning terminal input or special keys on asks for an expiry first; every other switch flips at once.
+      // Turning terminal input, special keys or answer prompts on asks for an expiry first; every other switch flips at once.
       toggleCap: (cx, d, cap) => {
-        if ((cap === 'terminal.input' || cap === 'terminal.keys') && !d.caps[cap]) return this.on.askExpiry(cx, d.id, cap);
+        if ((cap === 'terminal.input' || cap === 'terminal.keys' || cap === 'prompt.answer') && !d.caps[cap]) return this.on.askExpiry(cx, d.id, cap);
         return this.act(cx, 'device.cap', { id: d.id, cap, on: !d.caps[cap] });
       },
       setTerminalInput: (cx, d, minutes, cap = 'terminal.input') => {

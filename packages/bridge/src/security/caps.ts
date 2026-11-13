@@ -4,11 +4,11 @@
  */
 import { bridgeApi } from "@herdr-remote/protocol";
 
-export const CAPABILITIES = ["view", "inbox.answer", "navigate", "terminal.input", "terminal.keys", "push", "transcript.read"] as const;
+export const CAPABILITIES = ["view", "inbox.answer", "navigate", "terminal.input", "terminal.keys", "push", "transcript.read", "prompt.answer"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
 /** The capabilities a desktop grant can give a time limit to; each has its own `<cap>.until` in {@link Caps}. */
-export const EXPIRING = ["terminal.input", "terminal.keys"] as const;
+export const EXPIRING = ["terminal.input", "terminal.keys", "prompt.answer"] as const;
 export type ExpiringCapability = (typeof EXPIRING)[number];
 
 export function isExpiring(cap: Capability): cap is ExpiringCapability {
@@ -32,6 +32,15 @@ export interface Caps {
    * chat history pages). Separate from `view`, which shows only the screen; off by default, no expiry.
    */
   "transcript.read": boolean;
+  /**
+   * Answer prompts (CV7, docs/chatview.md §5.1): `prompt.answer` (and CV8's `agent.stop`). Off by default, desktop
+   * only, with an expiry like `terminal.keys`. Separate from `terminal.input` and `terminal.keys`: approving a
+   * command is a stronger act than typing, and the phone never chooses keys (the bridge derives them from a
+   * verified screen).
+   */
+  "prompt.answer": boolean;
+  /** Epoch ms after which `prompt.answer` is off again; null means no expiry. */
+  "prompt.answer.until": number | null;
 }
 
 /** What a device gets on approval: `view` and `inbox.answer` on, the rest off. */
@@ -46,12 +55,14 @@ export function defaultCaps(): Caps {
     "terminal.keys.until": null,
     push: false,
     "transcript.read": false,
+    "prompt.answer": false,
+    "prompt.answer.until": null,
   };
 }
 
 /** The `until` field of an expiring capability. */
-export function untilKey(cap: ExpiringCapability): "terminal.input.until" | "terminal.keys.until" {
-  return cap === "terminal.input" ? "terminal.input.until" : "terminal.keys.until";
+export function untilKey(cap: ExpiringCapability): `${ExpiringCapability}.until` {
+  return `${cap}.until`;
 }
 
 export function hasCap(caps: Caps, cap: Capability, now: number): boolean {
@@ -85,6 +96,8 @@ export const ACTION_CAPS: ReadonlyMap<string, Capability> = new Map<string, Capa
   ["pane.focus", "navigate"],
   ["terminal.send", "terminal.input"],
   ["terminal.keys", "terminal.keys"],
+  // CV7: a native prompt's answer, pressed by the bridge from a verified screen (docs/chatview.md §3a).
+  ["prompt.answer", "prompt.answer"],
   ["push.subscribe", "push"],
   ["push.unsubscribe", "push"],
   // S5b: a one-time code that moves this (approved) device into its Home Screen app. Answered by Security itself.

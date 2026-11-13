@@ -4,6 +4,7 @@ import type { OlderResult } from "../bridge/chatview";
 import { useHostName } from "../bridge/host-name";
 import { applyTopic, initHeld, prepend, type Held } from "../chatview/merge";
 import { renderDefaultItem, Spinner, type ItemCtx } from "../chatview/Items";
+import { hasOpenPrompt, PromptTail, type PromptAct } from "../chatview/prompt/PromptCard";
 import * as W from "../chatview/words";
 import { ChatHead, useInputOn, type ChatAgent } from "./Chat";
 import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
@@ -39,6 +40,8 @@ export interface ChatViewProps {
   /** A native prompt is open (CV7): the composer waits. */
   locked?: boolean;
   renderItem?: ((item: Item, prev: Item | undefined, draw: () => ReactNode) => ReactNode | undefined) | undefined;
+  /** Sends `prompt.answer` for a prompt card (CV7); resolves with the bridge's `res`. */
+  promptAct?: PromptAct | undefined;
   /** Plugin items (`timeline:<t>`, CV5), placed among the items by `placeTimeline`. */
   timeline?: InlineTimeline | undefined;
 }
@@ -51,7 +54,7 @@ const JUMP_PX = 160;
 const TOP_PX = 160;
 
 /** The working line owns its one-second clock, so the list is not re-rendered by it. */
-function StatusLine({ status, now }: { status: bridgeApi.ChatviewStatus; now: () => number }) {
+function StatusLine({ status, now, card }: { status: bridgeApi.ChatviewStatus; now: () => number; card: boolean }) {
   const working = status.state === "working";
   const [, tick] = useState(0);
   useEffect(() => {
@@ -68,7 +71,8 @@ function StatusLine({ status, now }: { status: bridgeApi.ChatviewStatus; now: ()
       </div>
     );
   }
-  if (status.state === "blocked") {
+  // "Waiting for you" only when no prompt card already says it (§3).
+  if (status.state === "blocked" && !card) {
     return (
       <div role="status" className="row cv-status cv-status-wait">
         <span>{W.WAITING}</span>
@@ -86,7 +90,7 @@ const isNews = (i: Item) => i.role !== "divider";
  * composer. The scroll follows the end unless the reader has scrolled up; then a button jumps back, counting what
  * arrived. Older pages load as the top is reached.
  */
-export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal, backHref = "#/agents", now = Date.now, strip, tail, locked, renderItem, timeline }: ChatViewProps) {
+export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal, backHref = "#/agents", now = Date.now, strip, tail: extraTail, locked: lockedProp, renderItem, promptAct, timeline }: ChatViewProps) {
   const host = useHostName();
   const { on, ranOut } = useInputOn(input, now);
   const [held, setHeld] = useState<Held>(() => initHeld(topic));
@@ -97,6 +101,16 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
     setHeld(cur);
   }
   const items = cur.items;
+  // An open prompt card locks the composer ("Answer the prompt above first"); a refused card that left the topic is
+  // kept, dimmed with its refusal, at the end (CV7).
+  const card = hasOpenPrompt(items);
+  const locked = lockedProp === true || card;
+  const tail = (
+    <>
+      {terminal !== undefined ? <PromptTail terminal={terminal} items={items} agent={agent.short ?? agent.name} desk={host} /> : null}
+      {extraTail}
+    </>
+  );
 
   const working = topic.status.state === "working";
   const t0 = now();
@@ -205,13 +219,17 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
     setAway(false);
   };
 
-  const ctx: ItemCtx = { agent: agent.short ?? agent.name, working, now: t0 };
+  const ctx: ItemCtx = { agent: agent.short ?? agent.name, working, now: t0, ...(terminal !== undefined && promptAct ? { prompt: { terminal, desk: host, act: promptAct } } : {}) };
   const placed = usePlaced(items, timeline);
   // Chat items and timeline rows as one flat, keyed list: a timeline row that moves (a newer message arrives, its
   // anchored ask loads, an older page goes in above) keeps its component, so an act in flight stays in flight.
   const listRows: ReactNode[] = [];
+  /** Where a run of open prompt cards that ends the list starts, else null. */
+  let promptRun: number | null = null;
   const addRows = (list: readonly bridgeApi.TimelineItem[] | undefined) => {
-    if (timeline && list) for (const t of list) listRows.push(timelineRow(t, timeline.act, t0));
+    if (!timeline || !list || list.length === 0) return;
+    for (const t of list) listRows.push(timelineRow(t, timeline.act, t0));
+    promptRun = null;
   };
   items.forEach((item, i) => {
     addRows(placed?.before.get(item.id));
@@ -222,6 +240,8 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
     const draw = () => renderDefaultItem(item, prev, ctx);
     const node = renderItem?.(item, prev, draw) ?? draw();
     if (node !== null && node !== undefined) {
+      if (item.role === "prompt" && item.state === "open") promptRun ??= listRows.length;
+      else promptRun = null;
       listRows.push(
         <div key={item.id} className="cv-item">
           {node}
@@ -229,7 +249,9 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
       );
     }
   });
-  addRows(placed?.tail);
+  // Rows newer than every item go at the end, but above an open prompt card that ends the list: the card is what
+  // the agent waits on now, and stays last above the locked composer (CV7).
+  if (timeline && placed) listRows.splice(promptRun ?? listRows.length, 0, ...placed.tail.map((t) => timelineRow(t, timeline.act, t0)));
   const typing = on && input && terminal !== undefined ? { input, terminal } : null;
   const empty = items.length === 0;
   return (
@@ -265,7 +287,7 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
             ) : null}
             {listRows}
             {tail}
-            <StatusLine status={topic.status} now={now} />
+            <StatusLine status={topic.status} now={now} card={card} />
           </div>
         </div>
         {away || fresh > 0 ? (

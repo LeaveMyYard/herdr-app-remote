@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { type Binaries } from "../plugins/detect.js";
 import { resolvedBinaries } from "../plugins/binaries.js";
 import { run as defaultRun, type Runner } from "../plugins/exec.js";
-import { ChatTopicDriver } from "../chat/topic.js";
+import { randomBytes } from "node:crypto";
+import { CHAT_READ_TIMEOUT_MS, ChatTopicDriver } from "../chat/topic.js";
 import { ChatviewTopicDriver } from "../chatview/topic.js";
 import { chatviewRoute } from "../chatview/route.js";
 import { TimelineTopicDriver } from "../timeline/topic.js";
@@ -27,6 +28,8 @@ import { Security, type DeviceView, type ServeIdentity } from "../security/secur
 import { createBridgeServer, type BridgeServer, type GuardVerdict } from "../server.js";
 import { terminalSendActor } from "../terminal/send.js";
 import { terminalKeysActor } from "../terminal/keys.js";
+import { promptAnswerActor, type PromptSource } from "../prompt/answer.js";
+import { PROMPT_READ_LINES } from "../prompt/screen.js";
 import { KeysMenu, type Loaded as KeysLoaded, type LoadState as KeysLoadState } from "../terminal/keys-config.js";
 import { UsageTopicDriver } from "../usage.js";
 import type { Json } from "../patch.js";
@@ -139,15 +142,28 @@ export async function startApp(o: AppOptions): Promise<App> {
 
   let usage: UsageTopicDriver | undefined = undefined;
   // `terminal.send` (S16): `hc send` only, under `terminal.input` (expiry, rate limit and audit in Security).
-  const terminal = terminalSendActor({ run, binaries });
+  // While a prompt answer runs in a terminal (CV7), typing and key presses there from any device are `busy`.
+  const terminal = terminalSendActor({ run, binaries, busy: (t) => prompts.answering(t) });
   const dataDir = join(o.appHome, "data/herdr-app-remote");
   // The key menu (S16b), from `keys.json` or the default; reported once the hub and security exist (below).
   let onKeysLoad: (l: KeysLoaded) => void = () => {};
   const keysMenu = new KeysMenu(dataDir, (l) => onKeysLoad(l));
   // `terminal.keys` (S16b): `hc keys` with a menu entry's tokens only, under `terminal.keys`.
-  const keys = terminalKeysActor({ run, binaries, menu: keysMenu });
+  const keys = terminalKeysActor({ run, binaries, menu: keysMenu, busy: (t) => prompts.answering(t) });
   let inboxDriver: InboxTopicDriver | undefined = undefined;
   let push: PushService | undefined = undefined;
+  // `prompt.answer` (CV7): presses keys the bridge derives from a verified screen, for a card the chat view published.
+  const promptSourceRef: { current?: PromptSource } = {};
+  const prompts = promptAnswerActor({
+    run,
+    binaries,
+    source: {
+      current: (t) => promptSourceRef.current?.current(t),
+      fresh: (t) => promptSourceRef.current?.fresh(t) ?? Promise.resolve(null),
+      answered: (t, id) => promptSourceRef.current?.answered(t, id),
+      isAnswered: (t, id) => promptSourceRef.current?.isAnswered(t, id) ?? false,
+    },
+  });
   const actors: Actor[] = [
     ...(o.actors ?? []),
     (_c, kind, args) => usage?.act(kind, args),
@@ -157,6 +173,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     (c, kind, args) => push?.act(c, kind, args),
     terminal,
     keys,
+    prompts,
     navigateActor(o.link),
   ];
   // Security's topic cut reaches the hub, which is built after it.
@@ -179,8 +196,10 @@ export async function startApp(o: AppOptions): Promise<App> {
     // A device that may no longer type has its `hc send` in flight killed (hc holds one while the desktop is typed on),
     // and its `hc keys` likewise; losing just one of the two capabilities kills just that one.
     onCut: (id, cap) => {
-      if (cap !== "terminal.keys") terminal.cancel(id ?? undefined);
-      if (cap !== "terminal.input") keys.cancel(id ?? undefined);
+      if (cap === undefined || cap === "terminal.input") terminal.cancel(id ?? undefined);
+      if (cap === undefined || cap === "terminal.keys") keys.cancel(id ?? undefined);
+      // Losing `prompt.answer` stops only that device's own answer in flight (§5.1).
+      if (cap === undefined || cap === "prompt.answer") prompts.cancel(id ?? undefined);
     },
     onAuditHealth: (h) => log({ event: "audit_health", ok: h.ok, failures: h.failures }),
     // Chat history turned off (CV1): its open `chatview:<t>` / `timeline:<t>` subscriptions end now.
@@ -231,7 +250,22 @@ export async function startApp(o: AppOptions): Promise<App> {
           pool: { ...(o.claude.pool ?? {}), script: o.claude.script, scriptSha256: o.claude.sha256, ...(o.home !== undefined ? { home: o.home } : {}) },
         })
       : null;
-  const chatview = new ChatviewTopicDriver({ hub, history, feed: () => panorama.feedView(), onInvalid: (topic, error) => log({ event: "invalid_topic", topic, error }) });
+  const chatview = new ChatviewTopicDriver({
+    hub,
+    history,
+    feed: () => panorama.feedView(),
+    onInvalid: (topic, error) => log({ event: "invalid_topic", topic, error }),
+    // Native prompt cards (CV7): the screen as the text view reads it, and a per-start key for the cards' `rev`.
+    prompts: {
+      read: async (t) => {
+        if (!bridgeApi.TERMINAL_ID.test(t)) return null;
+        const r = await run(binaries.hc, ["read", t, "--lines", String(PROMPT_READ_LINES)], { timeoutMs: CHAT_READ_TIMEOUT_MS });
+        return r.code === 0 && !r.error ? r.stdout : null;
+      },
+      revKey: randomBytes(32),
+    },
+  });
+  promptSourceRef.current = chatview.promptSource;
   // Plugin items inline in the chat view (CV5): inbox rows of the terminal, anchored only on its own transcript.
   const timeline = new TimelineTopicDriver({
     hub,

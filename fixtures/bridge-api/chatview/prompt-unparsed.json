@@ -1,0 +1,47 @@
+{
+  "terminal": "t3",
+  "harness": "claude",
+  "state": "ok",
+  "items": [
+    {
+      "id": "a2000000-0000-4000-8000-000000000001",
+      "role": "you",
+      "at": "2026-01-02T12:00:01.000Z",
+      "text": "Run the tests for Project Alpha"
+    },
+    {
+      "id": "prompt-26c9999bf726bd1ced0c198fc2f36aa6",
+      "at": "2026-01-02T12:00:02.000Z",
+      "prompt_id": "26c9999bf726bd1ced0c198fc2f36aa60781ed62e885af5236c11a2da9d99484",
+      "rev": "YB-LHrmXFv-sM2pu4Eygl6F0O0OVEi5L",
+      "kind": "unparsed",
+      "title": "",
+      "options": [],
+      "screen_lines": [
+        " Bash command",
+        " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below",
+        " Run the Project Alpha tests",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " cargo test --workspace",
+        "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+        " This command requires approval",
+        "",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. Yes, and don’t ask again for: cargo test *",
+        "   3. Yes, and switch to auto mode · auto mode handles these prompts for you",
+        "   4. No",
+        "",
+        " Esc to cancel · Tab to amend"
+      ],
+      "role": "prompt",
+      "state": "open"
+    }
+  ],
+  "older": false,
+  "rev": "0c6e9b2f41a8d375",
+  "status": {
+    "state": "blocked",
+    "since": null
+  }
+}

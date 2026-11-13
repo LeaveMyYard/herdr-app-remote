@@ -5,6 +5,7 @@ import { BusyProvider } from "../chatview/busy";
 import type { ViewMode } from "../chatview/mode";
 import { Chat, ChatHead, type ChatProps } from "./Chat";
 import { ChatView, type ChatViewProps } from "./ChatView";
+import type { PromptAct } from "../chatview/prompt/PromptCard";
 
 export interface ChatRouteProps {
   mode: ViewMode;
@@ -14,6 +15,8 @@ export interface ChatRouteProps {
     topic: bridgeApi.ChatviewTopic | undefined;
     loadOlder?: ((before: string, rev: string) => Promise<OlderResult>) | undefined;
     onForbidden?: (() => void) | undefined;
+    /** Sends `prompt.answer` (CV7). */
+    promptAct?: PromptAct | undefined;
   } | undefined;
   /** Extension points of the chat view (CV5, CV7). */
   /** What is on screen now (null while pending), so the text topics stay subscribed while a held text view shows. */
@@ -53,6 +56,7 @@ export function ChatRoute({ mode, text, view, slots, onShown }: ChatRouteProps) 
         topic={view.topic}
         loadOlder={view.loadOlder}
         onForbidden={view.onForbidden}
+        promptAct={view.promptAct}
         input={text.input}
         terminal={text.terminal}
         backHref={text.backHref ?? "#/agents"}

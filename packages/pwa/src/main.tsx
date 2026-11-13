@@ -18,6 +18,7 @@ import { HostNameProvider } from "./bridge/host-name";
 import { boardData, host as demoHost } from "./fixtures";
 import { registerServiceWorker } from "./sw-register";
 import { installIosVpFix } from "./ios-vp-fix";
+import { PromptCardsBoard } from "./chatview/prompt/fixtures";
 import { TimelineBoard } from "./timeline/TimelineBoard";
 
 const STATUSES: readonly ConnectionStatus[] = ["online", "connecting", "offline", "stale", "unpaired", "refused", "paused", "unavailable"];
@@ -61,6 +62,10 @@ if (fixture !== null) {
 let app;
 if (fixture === "pair") {
   app = <PairPage view={pairFixture(params.get("state"))} host="desk-1" />;
+} else if (fixture === "prompt-cards") {
+  // CV7: the prompt cards alone, where the PhoneChatView board draws them (visual harness).
+  const top = Number(params.get("top"));
+  app = <PromptCardsBoard state={params.get("state")} {...(params.get("top") !== null && Number.isFinite(top) ? { top } : {})} />;
 } else if (fixture === "timeline") {
   // CV5: the timeline parts of PhoneChatView where the board draws them (`&state=off` the question, `history` the alert).
   app = <TimelineBoard state={params.get("state")} />;

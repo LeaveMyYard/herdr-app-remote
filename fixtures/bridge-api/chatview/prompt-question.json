@@ -1,0 +1,62 @@
+{
+  "terminal": "t3",
+  "harness": "claude",
+  "state": "ok",
+  "items": [
+    {
+      "id": "a2000000-0000-4000-8000-000000000001",
+      "role": "you",
+      "at": "2026-01-02T12:00:01.000Z",
+      "text": "Run the tests for Project Alpha"
+    },
+    {
+      "id": "prompt-02bfa9ee220eb78e838d26adc22bef00",
+      "at": "2026-01-02T12:00:02.000Z",
+      "prompt_id": "02bfa9ee220eb78e838d26adc22bef006b7d162303035c7afaf53502640d5188",
+      "rev": "DC2-2lu8d_Mlr9X0DtysRd0I-JpU59bK",
+      "kind": "question",
+      "title": "Question Title 123: which approach should Agent 1 take?",
+      "questions": [
+        {
+          "text": "Question Title 123: which approach should Agent 1 take?",
+          "header": "Approach",
+          "multi": false,
+          "options": [
+            {
+              "label": "Option A",
+              "description": "Rewrite the parser in Project Alpha"
+            },
+            {
+              "label": "Option B",
+              "description": "Patch the existing parser"
+            },
+            {
+              "label": "Option C",
+              "description": "Leave it as it is"
+            }
+          ],
+          "other": true
+        }
+      ],
+      "options": [
+        {
+          "label": "Option A"
+        },
+        {
+          "label": "Option B"
+        },
+        {
+          "label": "Option C"
+        }
+      ],
+      "role": "prompt",
+      "state": "open"
+    }
+  ],
+  "older": false,
+  "rev": "0c6e9b2f41a8d375",
+  "status": {
+    "state": "blocked",
+    "since": null
+  }
+}
