@@ -10,12 +10,17 @@ import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
  * `skip` (painted out of both): ask1's Skip button only. The board draws Skip beside Answer on a one-question card;
  * the operator decided (Q521, 2026-11-13) that Skip only moves to the next question, so the card hides it on the last
  * or only one: an operator-approved deviation. The Answer button is compared.
+ * `skip` also paints out the text line of the Other field in ask1 and askm (otherText): the board draws it at 14 px, the app at 16 px,
+ * because iOS Safari zooms into any field under 16 px (a functional deviation requested by the operator, 2026-11-13).
+ * The field's box (border, fill, height) stays compared.
  */
 const W = 390;
+/** The Other field's text line, relative to the clip, for a card whose field is at page y `fieldY` (x 31, 330 x 46: ask1 607, askm 607 with clip tops 357 and 325). */
+const otherText = (clipTop: number, fieldY = 607): Rect => ({ x: 40, y: fieldY - clipTop + 12, width: 300, height: 22 });
 const CARDS: readonly { state: string; top: number; bottom: number; picks?: string[]; press?: string; skip?: Rect[] }[] = [
   { state: "perm", top: 409, bottom: 721 },
-  { state: "ask1", top: 357, bottom: 721, picks: ["Option A"], skip: [{ x: 296, y: 303, width: 66, height: 48 }] },
-  { state: "askm", top: 325, bottom: 721, picks: ["Option A", "Option C"] },
+  { state: "ask1", top: 357, bottom: 721, picks: ["Option A"], skip: [{ x: 296, y: 303, width: 66, height: 48 }, otherText(357)] },
+  { state: "askm", top: 325, bottom: 721, picks: ["Option A", "Option C"], skip: [otherText(325)] },
   { state: "plan", top: 298, bottom: 721 },
   { state: "changed", top: 330, bottom: 721, press: "Yes" },
 ];

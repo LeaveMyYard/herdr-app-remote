@@ -16,6 +16,12 @@ const SWITCHER: Rect = { x: 0, y: 0, width: 390, height: 44 };
  * the app shows Stop only while the host says working (that state's demo topic is idle), so Send stands there.
  */
 const STOP_BUTTON: Rect = { x: 330, y: 762, width: 56, height: 52 };
+/**
+ * The text view's composer line in the PhoneKeys boards (the field is at x 12, y 765, 314 x 45): the board draws its
+ * placeholder at 15 px, the app at 16 px, because iOS Safari zooms into any field under 16 px (a functional deviation
+ * requested by the operator, 2026-11-13). Painted out of both images; the field's box and the key bar stay compared.
+ */
+const KEYS_COMPOSER_TEXT: Rect = { x: 26, y: 777, width: 290, height: 22 };
 const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[]; viewport?: { width: number; height: number }; clip?: Rect; compare?: string }[] = [
   { ref: "PhoneAgentsBasic", url: "/?fixture=basic#/agents" },
   { ref: "PhoneUsage", url: "/?fixture=usage#/usage" },
@@ -26,7 +32,7 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[];
   // Chat's terminal text, spinner, tile and footer slot (S16's key bar and composer) are masked in the page.
   { ref: "PhoneChat", url: "/?fixture=chat#/chat/a-1", nav: false },
   // PhoneKeys (S16b): the key bar, Keys sheet, typing-time line and ran-out footer are compared; the text stays masked.
-  ...(["bar", "menu", "off", "soon", "gone"] as const).map((s) => ({ ref: `PhoneKeys-${s}`, url: `/?fixture=chat&typing=${s}#/chat/a-1`, nav: false, skip: [SWITCHER], compare: ".chat-foot" })),
+  ...(["bar", "menu", "off", "soon", "gone"] as const).map((s) => ({ ref: `PhoneKeys-${s}`, url: `/?fixture=chat&typing=${s}#/chat/a-1`, nav: false, skip: [SWITCHER, ...(s === "gone" ? [] : [KEYS_COMPOSER_TEXT])], compare: ".chat-foot" })),
   // CV4: the chat view, with the timeline strip (CV5b) drawn and compared under the header ("new": account chip only).
   // The working state's composer has Stop (CV8). The other board states (history, off) have items from CV7 and I1 (the
   // answered row) or a different scroll position and are checked by eye (screenshots in the PRs); Codex's notice card
