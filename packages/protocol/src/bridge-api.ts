@@ -679,7 +679,8 @@ export const ChatItem = z.discriminatedUnion("role", [
     .strict(),
   z.object({ ...itemBase, role: z.literal("agent"), text: z.string(), cut: z.literal(true).optional() }).strict(),
   z.object({ ...itemBase, role: z.literal("tools"), tools: ChatTools }).strict(),
-  z.object({ ...itemBase, role: z.literal("ask"), ask: ChatAsk }).strict(),
+  /** `cut`: the message's questions and options were cut to fit its 32 KB. */
+  z.object({ ...itemBase, role: z.literal("ask"), ask: ChatAsk, cut: z.literal(true).optional() }).strict(),
   /** `compact`: "Earlier messages were summarised". `day`: a day divider ("Today 21:02"), formatted by the phone from `at`. */
   z.object({ ...itemBase, role: z.literal("divider"), divider: z.enum(["compact", "day"]) }).strict(),
   /** A native prompt card (§3a, §7). Defined here for CV7; CV3 never produces one. */

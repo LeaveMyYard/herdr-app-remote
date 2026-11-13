@@ -428,6 +428,25 @@ describe("topic gate (CV1)", () => {
     expect(a.got.filter((m) => m.type === "snap")).toMatchObject([{ topic: "chatview:t3", data: { n: 1 } }]);
   });
 
+  it("checks the connection's topic cap before the gate, so a gate never records an open the cap refuses", async () => {
+    const asked: string[] = [];
+    const hub = newHub({
+      mayRead: (_c, t) => {
+        asked.push(t);
+        return true;
+      },
+    });
+    const closed: number[] = [];
+    const conn = hub.connect({ principal: { deviceId: "d-a" }, send: () => undefined, close: (code: number) => void closed.push(code) });
+    const send = (m: unknown) => hub.handleRaw(conn, JSON.stringify(m));
+    await send({ type: "hello", api: 1 });
+    for (let i = 0; i < 64; i++) await send({ type: "sub", topics: [`chat:t${i}`] });
+    expect(asked).toHaveLength(64);
+    await send({ type: "sub", topics: ["chatview:t99"] });
+    expect(asked).not.toContain("chatview:t99");
+    expect(closed).toEqual([1008]);
+  });
+
   it("recheck ends exactly the subscriptions the gate now refuses, for that device only", async () => {
     const allowed = new Set(["d-a", "d-b"]);
     const hub = newHub({ mayRead: (c, t) => !bridgeApi.isTranscriptTopic(t) || allowed.has(c.principal?.deviceId ?? "") });

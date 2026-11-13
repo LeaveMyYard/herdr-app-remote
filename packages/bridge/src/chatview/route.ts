@@ -62,6 +62,8 @@ export function chatviewRoute(o: ChatviewRouteOptions): (req: IncomingMessage, r
       json(res, 403, { error: "forbidden" });
       return true;
     }
+    // Asked twice on purpose: first for the socket's rights alone (401: not a usable device), then with the
+    // topic's capabilities (403: a device without chat history), so the two answers stay distinct.
     const device = o.gate.requestDevice(req, []);
     if (!device) {
       json(res, 401, { error: "unpaired" });

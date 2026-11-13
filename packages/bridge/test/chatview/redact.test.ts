@@ -32,6 +32,15 @@ describe("redact (§5.3, best effort)", () => {
     expect(redact('{"authorization": "Bearer abc123"}')).toBe(`{"authorization": "Bearer ${HIDDEN}"}`);
   });
 
+  it("hides tokens glued to a word before them, and a bare Bearer token", () => {
+    expect(redact(`TOKEN_ghp_${"A1b2C3d4".repeat(5)}`)).toBe(`TOKEN_${HIDDEN}`);
+    expect(redact("fooAKIAABCDEFGHIJKLMNOP")).toBe(`foo${HIDDEN}`);
+    expect(redact("AKIAABCDEFGHIJKLMNOPQ")).toBe("AKIAABCDEFGHIJKLMNOPQ");
+    expect(redact("x-xoxb-1234567890-abcdefghij")).toBe(`x-${HIDDEN}`);
+    expect(redact("token: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln")).toBe(`token: Bearer ${HIDDEN}`);
+    expect(redact("a Bearer of news")).toBe("a Bearer of news");
+  });
+
   it("leaves ordinary text alone", () => {
     const t = "Agent 1 read README.md in Project Alpha. sk-ant is a prefix; ghp_ alone too; AKIA short; xoxb-1.";
     expect(redact(t)).toBe(t);

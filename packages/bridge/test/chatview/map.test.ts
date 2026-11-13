@@ -41,6 +41,64 @@ describe("chat items (§3)", () => {
     expect(JSON.stringify(items)).not.toContain("1.23");
   });
 
+  it("harness wrappers never reach the phone, in one block or many (H1 probes)", () => {
+    const leak = (items: bridgeApi.ChatItem[]) => JSON.stringify(items);
+    // P1: two blocks, both reminders.
+    expect(map([user(1, [text("<system-reminder>HOOKCTX one</system-reminder>"), text("<system-reminder>HOOKCTX two</system-reminder>")])])).toEqual([]);
+    // P2: a reminder block and a prompt block: the prompt only.
+    expect(map([user(1, [text("<system-reminder>HOOKCTX</system-reminder>"), text("real prompt")])])).toEqual([{ id: U(1), role: "you", at: AT(1), text: "real prompt" }]);
+    // P3: tool results and reminders: nothing, and the tool row is still closed.
+    const p3 = map([agent(1, [tool("t1", "Bash", {})]), user(2, [result("t1"), text("<system-reminder>A</system-reminder>"), text("<system-reminder>B</system-reminder>")])]);
+    expect(p3).toEqual([{ id: U(1), role: "tools", at: AT(1), tools: { kind: "shell", count: 1, running: 0, failed: 0, names: ["Bash"] } }]);
+    // P4: IDE context (underscore tags) with a prompt.
+    const p4 = map([user(1, [text("<ide_opened_file>The user opened /work/user-1/secret.ts</ide_opened_file>"), text("fix it")])]);
+    expect(p4).toEqual([{ id: U(1), role: "you", at: AT(1), text: "fix it" }]);
+    // In one block, around the prompt; with attributes; an unclosed wrapper hides the rest of its block.
+    const one = map([
+      user(1, "<ide_selection>const key = 1;</ide_selection>\nexplain this\n<system-reminder>HOOKCTX</system-reminder>"),
+      user(2, '<user-prompt-submit-hook kind="x">HOOKCTX</user-prompt-submit-hook>please'),
+      user(3, "look here <system-reminder>HOOKCTX never closed"),
+      user(4, "<ide-diagnostics>HOOKCTX</ide-diagnostics>"),
+    ]);
+    expect(one.map((i) => (i as { text: string }).text)).toEqual(["explain this", "please", "look here"]);
+    // Fail closed: a block that is only tags of any name is not shown.
+    expect(map([user(1, [text("<unknown_ctx>HOOKCTX</unknown_ctx>"), text("hi")])])).toEqual([{ id: U(1), role: "you", at: AT(1), text: "hi" }]);
+    // A command chip still comes through when it is all there is, across blocks.
+    expect(map([user(1, [text("<command-name>/compact</command-name>"), text("<command-args>secret args</command-args>")])])).toEqual([{ id: U(1), role: "you", at: AT(1), text: "/compact", command: true }]);
+    expect(leak([...p3, ...p4, ...one])).not.toMatch(/HOOKCTX|secret|const key/);
+  });
+
+  it("labels are cut by UTF-16 units (what the schema counts), so emoji never break the topic", () => {
+    const emoji = "😀".repeat(399);
+    const [ask] = map([agent(1, [tool("q", "AskUserQuestion", { questions: [{ question: "Q?", header: emoji, options: [{ label: emoji, description: emoji.repeat(6) }] }] })])]);
+    expect(bridgeApi.ChatItem.safeParse(ask).success).toBe(true);
+    const a = (ask as { ask: bridgeApi.ChatAsk }).ask;
+    expect(a.options[0]!.label.length).toBeLessThanOrEqual(400);
+    expect(a.options[0]!.label.endsWith("😀…")).toBe(true);
+    const [row] = map([agent(1, [tool("t", "𝒜".repeat(100), {}), tool("u", "Read", { file_path: `/w/${"😀".repeat(200)}` })])]);
+    expect(bridgeApi.ChatItem.safeParse(row).success).toBe(true);
+  });
+
+  it("control and bidi characters never reach a label", () => {
+    const [row] = map([agent(1, [tool("t", "Bad\nTool\u202e", {}), tool("u", "Read", { file_path: "/w/evil\u202egnp.ts\nx" })])]);
+    expect((row as { tools: bridgeApi.ChatTools }).tools.names).toEqual(["Bad Tool", "Read · evil gnp.ts x"]);
+  });
+
+  it("an AskUserQuestion call counts toward the message's 32 KB and is cut to fit", () => {
+    const big = "問".repeat(4000);
+    const options = Array.from({ length: 20 }, (_, i) => ({ label: `${i}${"選".repeat(130)}`, description: "説".repeat(660) }));
+    const questions = Array.from({ length: 4 }, () => ({ question: big, header: "H", options }));
+    const items = map([agent(1, [text("t".repeat(20_000)), tool("q", "AskUserQuestion", { questions })])]);
+    const asks = items.filter((i) => i.role === "ask") as Extract<bridgeApi.ChatItem, { role: "ask" }>[];
+    expect(asks).toHaveLength(4);
+    expect(asks.every((a) => a.cut === true)).toBe(true);
+    const bytes = 20_000 + asks.reduce((n, a) => n + Buffer.byteLength((a.ask.question ?? "") + (a.ask.header ?? "") + a.ask.options.map((o) => o.label + (o.description ?? "")).join("")), 0);
+    expect(bytes).toBeLessThanOrEqual(bridgeApi.CHATVIEW_MESSAGE_MAX_BYTES);
+    for (const a of asks) expect(bridgeApi.ChatItem.safeParse(a).success).toBe(true);
+    // A small one is untouched.
+    expect(map([agent(1, [tool("q", "AskUserQuestion", { questions: [{ question: "Q?", options: [{ label: "A" }] }] })])])[0]).not.toHaveProperty("cut");
+  });
+
   it("consecutive tool calls are one row counted by kind, named by tool and file base name only", () => {
     const items = map([
       agent(1, [tool("t1", "Read", { file_path: "/work/user-1/work/project-alpha/src/main.ts" })]),

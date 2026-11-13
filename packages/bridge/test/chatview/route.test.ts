@@ -173,6 +173,7 @@ describe("GET /api/v1/chatview/<t>", () => {
   });
 
   it("allows 20 per 10 s per device", async () => {
+    expect(PAGE_LIMIT).toEqual({ max: 20, windowMs: 10_000 });
     const { id, cookie } = await paired();
     sec.setCap(id, "transcript.read", true);
     for (let i = 0; i < PAGE_LIMIT.max; i++) expect((await get(PATH, cookie)).status).toBe(200);

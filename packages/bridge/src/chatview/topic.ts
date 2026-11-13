@@ -58,8 +58,8 @@ export interface ChatviewOptions {
   hub: Hub;
   /** The reader; null when the bridge has no verified reader (then every Claude chat view is `reader_failed`). */
   history: ChatviewHistory | null;
-  /** The feed as panorama's driver last read it (`PanoramaTopicDriver.feedView`). */
-  feed: () => { view: FeedView; contract: Contract | undefined } | undefined;
+  /** The feed as panorama's driver last read it, and when (`PanoramaTopicDriver.feedView`). */
+  feed: () => FeedSnapshot | undefined;
   intervalMs?: number;
   retryMs?: number;
   /** Test seam: the stat of `root.transcript`. Default {@link statOnly}. */
@@ -75,6 +75,19 @@ export type Resolution =
   | { ok: true; harness: "claude"; session: ProvedSession & { transcript: string }; agentState: AgentState }
   | { ok: false; harness: string; reason: Reason; agentState: AgentState | null };
 
+/** The feed as panorama's driver read it, with the time of that read. */
+export interface FeedSnapshot {
+  view: FeedView;
+  contract: Contract | undefined;
+  at: number;
+}
+
+/**
+ * A feed read longer ago than this is not used: panorama's driver re-reads it every second, so a snapshot this old
+ * means it stopped (a throw, a stall) and its `aged` flag can no longer be trusted.
+ */
+export const FEED_SNAPSHOT_MAX_AGE_MS = 3_000;
+
 const HARNESS = /^[A-Za-z0-9._-]{1,64}$/;
 const harnessId = (h: string | undefined): string => (h !== undefined && HARNESS.test(h) ? h : "unknown");
 
@@ -82,7 +95,7 @@ const harnessId = (h: string | undefined): string => (h !== undefined && HARNESS
  * The binding for terminal `t`, from the host topic and panorama's feed only (§2.1). Never by cwd, title, pane id
  * or recency. The harness check comes first, so a Codex pane says `harness` even without panorama.
  */
-export function resolve(t: string, hostRaw: unknown, fv: { view: FeedView; contract: Contract | undefined } | undefined): Resolution {
+export function resolve(t: string, hostRaw: unknown, fv: FeedSnapshot | undefined, now: number = Date.now()): Resolution {
   const host = bridgeApi.HostTopic.safeParse(hostRaw);
   if (!host.success) return { ok: false, harness: "unknown", reason: "no_binding", agentState: null };
   const agents = host.data.agents.filter((a) => a.terminal_id === t);
@@ -96,8 +109,16 @@ export function resolve(t: string, hostRaw: unknown, fv: { view: FeedView; contr
   if (host.data.shared["panorama.feed.owner"] === null || feed === null || fv?.contract === undefined) {
     return { ok: false, harness: harnessId(hint), reason: "no_panorama", agentState };
   }
-  // An aged feed applies no joins (numbering is per core instance); a failed read can't be trusted either.
-  if (fv.view.stale || fv.view.aged) return { ok: false, harness: harnessId(hint), reason: "no_binding", agentState };
+  // An aged feed applies no joins (numbering is per core instance); a failed read can't be trusted either. Age is
+  // checked again here, at use, so it never rests on the panorama driver still refreshing.
+  const old = now - fv.at > FEED_SNAPSHOT_MAX_AGE_MS || now < fv.at - FEED_SNAPSHOT_MAX_AGE_MS;
+  let agedNow = false;
+  try {
+    agedNow = typeof fv.contract.aged === "function" && fv.contract.aged(feed, now) !== false;
+  } catch {
+    agedNow = true;
+  }
+  if (fv.view.stale || fv.view.aged || old || agedNow) return { ok: false, harness: harnessId(hint), reason: "no_binding", agentState };
   const roots = feed.roots.filter((r) => r.host === "herdr-core" && r.terminal === t);
   if (roots.length !== 1) return { ok: false, harness: harnessId(hint), reason: "no_binding", agentState };
   const root = roots[0]!;
@@ -299,7 +320,7 @@ export class ChatviewTopicDriver {
 
   /** One look: resolve the binding, stat the transcript, read if it changed, publish. */
   private async step(w: Watch): Promise<void> {
-    const r = resolve(w.terminal, this.o.hub.get("host"), this.o.feed());
+    const r = resolve(w.terminal, this.o.hub.get("host"), this.o.feed(), this.now());
     if (!r.ok) return this.unavailable(w, r.harness, r.reason, r.agentState, true);
     const history = this.o.history;
     if (history === null) return this.unavailable(w, r.harness, "reader_failed", r.agentState, true);
@@ -328,6 +349,10 @@ export class ChatviewTopicDriver {
     if (w.seen !== null && w.last?.state === "ok" && now.size === w.seen.size && now.mtimeMs === w.seen.mtimeMs) return this.republish(w, r.agentState);
     const read = await history.read(w.binding);
     if (w.stopped) return;
+    // The read can take seconds: if the binding went bad meanwhile (the feed aged, another session), this result is
+    // not published; the next look says why.
+    const again = resolve(w.terminal, this.o.hub.get("host"), this.o.feed(), this.now());
+    if (!again.ok || again.session.sessionId !== r.session.sessionId || again.session.transcript !== r.session.transcript) return;
     let messages: ClaudeMessage[];
     if (read.ok) messages = read.messages;
     else if (read.reason === "not_found" && now.size === 0) messages = []; // a new session: no file, or an empty one, yet
@@ -385,7 +410,13 @@ export class ChatviewTopicDriver {
     const checked = bridgeApi.ChatviewTopic.safeParse(value);
     if (!checked.success) {
       this.o.onInvalid?.(w.topic, checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
-      if (value.state === "ok") return this.unavailable(w, value.harness, "reader_failed", null, true);
+      // Keep the binding and wait before reading again, as after a failed read: a value that fails its own schema
+      // must not turn into a bind and a full read every second.
+      if (value.state === "ok") {
+        w.seen = null;
+        w.retryAt = this.now() + (this.o.retryMs ?? CHATVIEW_RETRY_MS);
+        return this.unavailable(w, value.harness, "reader_failed", null);
+      }
       return;
     }
     const prev = w.last;

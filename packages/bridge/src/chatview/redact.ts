@@ -14,22 +14,24 @@ const PATTERNS: readonly RegExp[] = [
   /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]{0,40}PRIVATE KEY-----|$)/g,
   // Anthropic API and admin keys.
   /sk-ant-[A-Za-z0-9_-]{8,}/g,
-  // GitHub tokens: classic (ghp_, gho_, ghu_, ghs_, ghr_) and fine-grained.
-  /\bgh[pousr]_[A-Za-z0-9]{20,}/g,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
+  // GitHub tokens: classic (ghp_, gho_, ghu_, ghs_, ghr_) and fine-grained. No leading `\b`: `TOKEN_ghp_…` is hidden too.
+  /gh[pousr]_[A-Za-z0-9]{20,}/g,
+  /github_pat_[A-Za-z0-9_]{20,}/g,
   // AWS access key ids (long-term and temporary).
-  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])/g,
   // Slack tokens (xoxb-, xoxp-, xoxa-, xoxr-, xoxs-, xoxe-).
-  /\bxox[abeprs]-[A-Za-z0-9-]{10,}/g,
+  /xox[abeprs]-[A-Za-z0-9-]{10,}/g,
 ];
 
 /** `Authorization: Bearer <token>` keeps its header words; only the token is hidden. */
 const BEARER = /(\bAuthorization["']?\s*[:=]\s*["']?Bearer\s+)[^\s"'`,;]+/gi;
+/** A bare `Bearer <token>` (no header name) with a token-like value of 20 or more characters. */
+const BARE_BEARER = /(\bBearer\s+)[A-Za-z0-9._~+/=-]{20,}/g;
 
 /** `s` with every known secret shape replaced by {@link HIDDEN}. */
 export function redact(s: string): string {
   if (s === "") return s;
   let out = s;
   for (const p of PATTERNS) out = out.replace(p, HIDDEN);
-  return out.replace(BEARER, `$1${HIDDEN}`);
+  return out.replace(BEARER, `$1${HIDDEN}`).replace(BARE_BEARER, `$1${HIDDEN}`);
 }

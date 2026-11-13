@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { applyPatch, bridgeApi, type HostState } from "@herdr-remote/protocol";
 import type { BindResult, ClaudeMessage, ProvedSession, ReadResult } from "../../src/claude/index.js";
-import { ChatviewTopicDriver, continues, resolve, windowOps, type StatResult } from "../../src/chatview/topic.js";
+import { ChatviewTopicDriver, continues, resolve, statOnly, windowOps, type FeedSnapshot, type StatResult } from "../../src/chatview/topic.js";
 import type { Contract, FeedRoot, FeedView } from "../../src/panorama/feed.js";
 import type { Json } from "../../src/patch.js";
 import { join, newHub } from "../helpers.js";
@@ -15,9 +15,13 @@ const TOPIC = "chatview:t1";
 const CONTRACT = {} as Contract;
 
 const claudeRoot = (over: Partial<FeedRoot> = {}): FeedRoot => root({ terminal: "t1", harness: "claude", session_id: SID, transcript: TRANSCRIPT, cwd: "/work/project-alpha", ...over });
-const view = (roots: FeedRoot[] = [claudeRoot()], over: Partial<FeedView> = {}): { view: FeedView; contract: Contract | undefined } => ({
+/** Read "now" by default (`at` is the resolve tests' NOW; setup's feed stamps its own clock unless `at` is pinned). */
+const NOW = 1_000_000;
+const view = (roots: FeedRoot[] = [claudeRoot()], over: Partial<FeedView> = {}, at?: number): FeedSnapshot & { pinned?: boolean } => ({
   view: { feed: mkFeed(roots), stale: false, aged: false, error: null, ...over },
   contract: CONTRACT,
+  at: at ?? NOW,
+  ...(at !== undefined ? { pinned: true } : {}),
 });
 const host = (over: Partial<HostState> = {}, agent1: Partial<HostState["agents"][number]> = {}): HostState => {
   const h = hostState(over);
@@ -58,7 +62,7 @@ async function setup(o: { host?: HostState; feed?: ReturnType<typeof view> | und
   const drv = new ChatviewTopicDriver({
     hub,
     history,
-    feed: () => env.feed,
+    feed: () => (env.feed && !env.feed.pinned ? { ...env.feed, at: env.clock } : env.feed),
     intervalMs: 1e9,
     retryMs: 5_000,
     now: () => env.clock,
@@ -81,7 +85,7 @@ async function setup(o: { host?: HostState; feed?: ReturnType<typeof view> | und
 const itemIds = (t: bridgeApi.ChatviewTopic) => t.items.filter((i) => !(i.role === "divider" && i.divider === "day")).map((i) => i.id);
 
 describe("resolve: only panorama's proved join (§2.1, §6)", () => {
-  const ok = resolve("t1", host(), view());
+  const ok = resolve("t1", host(), view(), NOW);
   it("binds the exact terminal's root to its live agent", () => {
     expect(ok).toEqual({ ok: true, harness: "claude", session: { sessionId: SID, transcript: TRANSCRIPT, cwd: "/work/project-alpha" }, agentState: "working" });
   });
@@ -105,12 +109,24 @@ describe("resolve: only panorama's proved join (§2.1, §6)", () => {
     ["a relative transcript", host(), view([claudeRoot({ transcript: "x.jsonl" })]), "no_binding", "claude"],
     ["no host topic", undefined, view(), "no_binding", "unknown"],
   ] as const)("%s: %s", (_name, h, fv, reason, harness) => {
-    const r = resolve("t1", h, fv);
+    const r = resolve("t1", h, fv, NOW);
     expect(r).toMatchObject({ ok: false, reason, harness });
   });
 
+  it("checks the feed's age at use: a snapshot panorama's driver stopped refreshing, or one the contract calls aged, binds nothing", () => {
+    expect(resolve("t1", host(), view(undefined, {}, NOW - 3_001), NOW)).toMatchObject({ ok: false, reason: "no_binding" });
+    expect(resolve("t1", host(), view(undefined, {}, NOW - 2_000), NOW)).toMatchObject({ ok: true });
+    expect(resolve("t1", host(), view(undefined, {}, NOW + 10_000), NOW)).toMatchObject({ ok: false, reason: "no_binding" });
+    // The view says fresh, the contract (asked now) says aged.
+    const agedContract = { aged: () => true } as unknown as Contract;
+    expect(resolve("t1", host(), { ...view(), contract: agedContract }, NOW)).toMatchObject({ ok: false, reason: "no_binding" });
+    const throwing = { aged: () => { throw new Error("x"); } } as unknown as Contract;
+    expect(resolve("t1", host(), { ...view(), contract: throwing }, NOW)).toMatchObject({ ok: false, reason: "no_binding" });
+    expect(resolve("t1", host(), { ...view(), contract: { aged: () => false } as unknown as Contract }, NOW)).toMatchObject({ ok: true });
+  });
+
   it("never matches by cwd, title or pane id", () => {
-    expect(resolve("t1", host(), view([claudeRoot({ terminal: null, pane_id: "t1", title: "t1", cwd: "/work/t1" })]))).toMatchObject({ ok: false, reason: "no_binding" });
+    expect(resolve("t1", host(), view([claudeRoot({ terminal: null, pane_id: "t1", title: "t1", cwd: "/work/t1" })]), NOW)).toMatchObject({ ok: false, reason: "no_binding" });
   });
 });
 
@@ -283,6 +299,77 @@ describe("chatview:<t> topic", () => {
     await b.poll();
     expect(b.value()).toMatchObject({ state: "unavailable", reason: "no_binding", items: [] });
     expect(JSON.stringify(b.value())).not.toContain("Hello Agent 1");
+  });
+
+  it("a panorama driver that stopped refreshing hides the chat once its snapshot is 3 s old", async () => {
+    const { env, value, poll } = await setup();
+    expect(value().state).toBe("ok");
+    env.feed = view(undefined, {}, env.clock);
+    env.clock += 3_001;
+    await poll();
+    expect(value()).toMatchObject({ state: "unavailable", reason: "no_binding", items: [] });
+  });
+
+  it("a value that fails its own schema waits before reading again, and keeps the binding", async () => {
+    const history = new FakeHistory();
+    history.messages = [user(1, "Hello"), { ...agent(2, "Hi."), uuid: "not a valid id!" }];
+    const { env, value, poll } = await setup({ history });
+    expect(value()).toMatchObject({ state: "unavailable", reason: "reader_failed" });
+    expect(history.reads).toBe(1);
+    await poll();
+    await poll();
+    expect(history.reads).toBe(1);
+    env.clock += 5_000;
+    await poll();
+    expect(history.reads).toBe(2);
+    expect(history.binds).toHaveLength(1);
+  });
+
+  it("after a failure the same session starts over: a new rev and a snap, never the items held before", async () => {
+    const { history, env, client, value, poll } = await setup();
+    const rev = value().rev;
+    history!.readResult = { ok: false, reason: "reader_failed", detail: "timeout" };
+    env.stat = { size: 300, mtimeMs: 5 };
+    await poll();
+    history!.readResult = undefined;
+    env.clock += 5_000;
+    await poll();
+    expect(value().state).toBe("ok");
+    expect(value().rev).not.toBe(rev);
+    expect(client.ofType("snap").at(-1)?.data).toEqual(value());
+  });
+
+  it("a read whose binding went bad meanwhile is not published", async () => {
+    const history = new FakeHistory();
+    const { env, value, poll } = await setup({ history });
+    const before = structuredClone(value());
+    // The feed ages while the read runs.
+    history.read = () => {
+      env.feed = view(undefined, { aged: true, stale: true });
+      return Promise.resolve({ ok: true, messages: [user(1, "Hello Agent 1"), agent(2, "Hi."), user(3, "Late")], stats: { total: 3, failed: 0, droppedBlocks: 0, droppedMessages: 0 } });
+    };
+    env.stat = { size: 500, mtimeMs: 7 };
+    await poll();
+    expect(value()).toEqual(before);
+    await poll();
+    expect(value()).toMatchObject({ state: "unavailable", reason: "no_binding" });
+  });
+
+  it("statOnly reads size and mtime without opening the file", async () => {
+    const { mkdtempSync, writeFileSync, chmodSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join: pjoin } = await import("node:path");
+    const d = mkdtempSync(pjoin(tmpdir(), "cv3-stat-"));
+    try {
+      const f = pjoin(d, "t.jsonl");
+      writeFileSync(f, "x".repeat(42));
+      chmodSync(f, 0o000);
+      expect(await statOnly(f)).toMatchObject({ size: 42 });
+      expect(await statOnly(pjoin(d, "missing.jsonl"))).toBe("missing");
+      expect(await statOnly(d)).toBe("error");
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
   });
 
   it("without a verified reader the Claude chat view is reader_failed", async () => {

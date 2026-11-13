@@ -35,8 +35,19 @@ const WRAPPERS: ReadonlySet<string> = new Set([
   "bash-stderr",
   "system-reminder",
 ]);
-const TAGGED = /^\s*(?:<([a-z][a-z-]{0,40})>[\s\S]*?<\/\1>\s*)+$/;
-const TAG = /<([a-z][a-z-]{0,40})>([\s\S]*?)<\/\1>/g;
+/**
+ * Whether a tag is one the harness injects into the user's turn (fail closed: every `ide_*`/`ide-*` tag, every
+ * `system-*`, `local-command-*`, `bash-*`, `command-*` tag, and any `*hook*` tag, besides the list above).
+ */
+export function isWrapperTag(tag: string): boolean {
+  return WRAPPERS.has(tag) || /^(?:ide|system|local-command|bash|command)[-_]/.test(tag) || tag.includes("hook");
+}
+/** A tagged section; tag names may hold `_` (`ide_opened_file`) and the open tag may carry attributes. */
+const TAG = /<([a-z][a-z0-9_-]{0,40})(?:\s[^<>]*)?>([\s\S]*?)<\/\1\s*>/g;
+/** Text that is nothing but tagged sections, whatever their names. */
+const ONLY_TAGS = /^\s*(?:<([a-z][a-z0-9_-]{0,40})(?:\s[^<>]*)?>[\s\S]*?<\/\1\s*>\s*)+$/;
+/** An opening wrapper tag with no closing one: everything from it on is treated as injected. */
+const OPEN_TAG = /<([a-z][a-z0-9_-]{0,40})(?:\s[^<>]*)?>/g;
 /** What a command chip may show: a slash command's name, nothing typed after it. */
 const COMMAND = /^\/[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}$/;
 
@@ -63,11 +74,19 @@ const BASE_MAX = 120;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
-/** A short label: no control characters, one line, cut by code point. */
-function label(s: string, max: number): string {
+/**
+ * A short label: no control or bidi characters, one line, at most `max` UTF-16 units (what the schema counts),
+ * cut between code points.
+ */
+export function label(s: string, max: number): string {
   const t = redact(s).replace(CONTROL, " ").replace(/\s+/g, " ").trim();
-  const cps = [...t];
-  return cps.length > max ? `${cps.slice(0, max - 1).join("")}…` : t;
+  if (t.length <= max) return t;
+  let out = "";
+  for (const c of t) {
+    if (out.length + c.length > max - 1) break;
+    out += c;
+  }
+  return `${out}…`;
 }
 
 /** At most `max` UTF-8 bytes of `s`, cut between code points. */
@@ -96,14 +115,33 @@ export function messageText(blocks: readonly string[]): { text: string; cut: boo
   return { text: all.text, cut: cut || all.cut };
 }
 
-/** A user text that is only Claude Code's wrappers: a command chip, or nothing. Null for a real prompt. */
-function wrapped(text: string): { command: string } | "hidden" | null {
-  if (!TAGGED.test(text)) return null;
-  const tags = [...text.matchAll(TAG)];
-  if (!tags.every((m) => WRAPPERS.has(m[1]!))) return null;
-  const name = tags.find((m) => m[1] === "command-name")?.[2]?.trim();
-  if (name === undefined) return "hidden";
-  const cmd = name.startsWith("/") ? name : `/${name}`;
+/**
+ * The parts of a user turn that are the user's own words, block by block. Every harness wrapper section is removed
+ * wherever it sits in a block (hook context, reminders, IDE context, command output); a block that is then empty,
+ * or nothing but tagged sections of any name, is left out (fail closed); an unclosed wrapper tag hides the rest of
+ * its block. With nothing left, a `<command-name>` makes a chip ("/compact"), else the turn shows nothing.
+ */
+export function userText(blocks: readonly string[]): { kept: string[] } | { command: string } | "hidden" {
+  let command: string | undefined;
+  const kept: string[] = [];
+  for (const b of blocks) {
+    let rest = b.replace(TAG, (all: string, tag: string, inner: string) => {
+      if (!isWrapperTag(tag)) return all;
+      if (tag === "command-name") command ??= inner.trim();
+      return "";
+    });
+    for (const m of rest.matchAll(OPEN_TAG)) {
+      if (isWrapperTag(m[1]!)) {
+        rest = rest.slice(0, m.index);
+        break;
+      }
+    }
+    if (rest.trim() === "" || ONLY_TAGS.test(rest)) continue;
+    kept.push(rest.trim());
+  }
+  if (kept.length > 0) return { kept };
+  if (command === undefined) return "hidden";
+  const cmd = command.startsWith("/") ? command : `/${command}`;
   return { command: COMMAND.test(cmd) ? cmd : "/command" };
 }
 
@@ -132,6 +170,30 @@ function askQuestions(input: unknown): bridgeApi.ChatAsk[] | null {
     });
   }
   return out;
+}
+
+/** The text bytes of ask items: what counts toward the 32 KB per message. */
+const askBytes = (asks: readonly bridgeApi.ChatAsk[]): number =>
+  asks.reduce((n, q) => n + Buffer.byteLength((q.question ?? "") + (q.header ?? "") + q.options.map((o) => o.label + (o.description ?? "")).join(""), "utf8"), 0);
+
+/**
+ * Ask items within what is left of the message's 32 KB: when they don't fit, every field is cut to a smaller size
+ * (the question four times the others), step by step, and the items are marked cut.
+ */
+export function fitAsks(asks: bridgeApi.ChatAsk[], budget: number): { asks: bridgeApi.ChatAsk[]; cut: boolean } {
+  if (askBytes(asks) <= budget) return { asks, cut: false };
+  const at = (s: string, n: number) => cutBytes(s, n).text;
+  let out = asks;
+  for (const lim of [1000, 400, 200, 100, 50, 20]) {
+    out = asks.map((q) => ({
+      ...q,
+      question: q.question === null ? null : at(q.question, lim * 4),
+      header: q.header === null ? null : at(q.header, lim),
+      options: q.options.map((o) => ({ label: at(o.label, lim), description: o.description === null ? null : at(o.description, lim) })),
+    }));
+    if (askBytes(out) <= budget) break;
+  }
+  return { asks: out, cut: true };
 }
 
 /** The name line of one call: the tool's name, and a file tool's file base name. */
@@ -212,26 +274,28 @@ export function mapMessages(messages: readonly ClaudeMessage[], o: MapOptions = 
           }
         } else if (b.type === "text") texts.push(b.text);
       }
-      const shown = texts.filter((t) => t.trim() !== "");
-      if (shown.length === 0) continue;
-      const w = shown.length === 1 ? wrapped(shown[0]!) : null;
+      if (texts.length === 0) continue;
+      const w = userText(texts);
       if (w === "hidden") continue;
       run = null;
-      if (w !== null) {
+      if ("command" in w) {
         push({ id: nextId(), role: "you", at: m.at, text: w.command, command: true });
         continue;
       }
-      const t = messageText(shown);
+      const t = messageText(w.kept);
       push({ id: nextId(), role: "you", at: m.at, text: t.text, ...(t.cut ? { cut: true as const } : {}) });
       continue;
     }
     // assistant
     let texts: string[] = [];
+    /** Text bytes this message has sent so far: its asks share the 32 KB with its text. */
+    let used = 0;
     const flush = () => {
       if (texts.length === 0) return;
       const t = messageText(texts);
       texts = [];
       if (t.text.trim() === "") return;
+      used += Buffer.byteLength(t.text, "utf8");
       run = null;
       push({ id: nextId(), role: "agent", at: m.at, text: t.text, ...(t.cut ? { cut: true as const } : {}) });
     };
@@ -246,7 +310,9 @@ export function mapMessages(messages: readonly ClaudeMessage[], o: MapOptions = 
         const qs = askQuestions(b.input);
         if (qs) {
           run = null;
-          for (const ask of qs) push({ id: nextId(), role: "ask", at: m.at, ask });
+          const fit = fitAsks(qs, Math.max(0, bridgeApi.CHATVIEW_MESSAGE_MAX_BYTES - used));
+          used += askBytes(fit.asks);
+          for (const ask of fit.asks) push({ id: nextId(), role: "ask", at: m.at, ask, ...(fit.cut ? { cut: true as const } : {}) });
           continue;
         }
       }

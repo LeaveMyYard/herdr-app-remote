@@ -311,6 +311,12 @@ export class Hub {
         for (const name of new Set(msg.topics)) {
           // The topic guard first: a refused topic is never created, counted, snapped or watched (a source that
           // starts work on its first subscriber, such as a transcript reader, never hears of it).
+          // The connection's topic cap first, so a gate that records a granted open (CV3: "opened the chat of t3")
+          // never writes one for a subscription the cap then refuses.
+          if (!c.topics.has(name) && c.topics.size >= MAX_TOPICS_PER_CONN) {
+            this.kill(c, 1008, "too many topics");
+            return;
+          }
           const verdict = this.mayRead(c.client, name, c.topics.has(name) ? "resub" : "sub");
           if (verdict !== true) {
             // One frame draws at most MAX_TOPICS_PER_CONN refusals, as it could hold at most that many topics.
@@ -320,10 +326,6 @@ export class Hub {
             }
             this.refuse(c, name, verdict === false ? "forbidden" : verdict);
             continue;
-          }
-          if (!c.topics.has(name) && c.topics.size >= MAX_TOPICS_PER_CONN) {
-            this.kill(c, 1008, "too many topics");
-            return;
           }
           this.subscribe(c, name);
         }
