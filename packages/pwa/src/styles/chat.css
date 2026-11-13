@@ -91,3 +91,78 @@
 .chat-foot-keys .chat-ro{padding:0 16px}
 .chat-foot-keys.chat-foot-out{padding:14px 0 var(--sab)}
 .chat-foot-keys.chat-foot-out .chat-out,.chat-foot-keys.chat-foot-out .chat-out-how{padding:0 16px}
+/* Chat view (CV4), after design/PhoneChatView. */
+.chat-vnotice{align-items:flex-start;gap:8px;margin:8px 12px 0;padding:10px 12px;border-radius:8px;background:var(--t-background);border:1px solid var(--t-border);font-size:13px;line-height:1.4}
+.chat-vnotice-ic{margin-top:1px;color:var(--t-muted)}
+.chat-vnotice-t{gap:1px}
+.chat-vnotice-b{color:var(--t-muted)}
+.hd .chat-vnotice-x{width:32px;height:32px;margin:-6px -6px 0 0;justify-content:center;color:var(--t-dim)}
+.cv-main{min-height:0}
+.cv-scroll{min-height:0;overflow:hidden auto;overscroll-behavior:contain;justify-content:flex-start}
+.cv-scroll:focus-visible{outline:1px solid var(--t-accent);outline-offset:-1px}
+.cv-list{margin-top:auto;padding:14px 16px 12px;gap:14px}
+.cv-item{min-width:0}
+.cv-divider{gap:10px;font-size:11.5px;color:var(--t-dim)}
+.cv-rule{height:1px;background:var(--t-border)}
+.cv-you{align-items:flex-end}
+.cv-bubble{max-width:82%;padding:9px 13px;border-radius:16px 16px 4px 16px;background:var(--t-raised);font-size:14.5px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.cv-chip{padding:3px 10px;border-radius:12px;background:var(--t-background);border:1px solid var(--t-border);font-size:12.5px;color:var(--t-muted)}
+.cv-cut{font-size:11.5px;color:var(--t-dim)}
+.cv-agent{gap:5px}
+.cv-agent-label{gap:6px;font-size:12px;color:var(--t-dim)}
+.md{font-size:14.5px;line-height:1.5;color:var(--t-foreground);overflow-wrap:anywhere}
+.md>*:first-child{margin-top:0}.md>*:last-child{margin-bottom:0}
+.md p{margin:6px 0 0}
+.md .md-h{margin:10px 0 0;font-weight:600}
+.md .md-list{margin:6px 0 0;padding-left:20px}
+.md .md-list li{margin:2px 0}
+.md .md-list .md-list{margin-top:2px}
+.md code{font-family:'JetBrains Mono',ui-monospace,monospace;padding:1px 5px;border-radius:4px;background:#ffffff0a;border:1px solid var(--t-border);font-size:12.5px}
+.md .md-pre{margin:8px 0 0;padding:10px 12px;border-radius:8px;background:var(--t-raised);border:1px solid var(--t-border);overflow-x:auto}
+.md .md-pre code{padding:0;border:0;background:none;font-size:12px;line-height:1.5;white-space:pre}
+.md .md-quote{margin:6px 0 0;padding-left:12px;border-left:2px solid var(--t-input);color:var(--t-muted)}
+.md .md-hr{margin:10px 0;border:0;border-top:1px solid var(--t-border)}
+.md .md-table{margin-top:8px;overflow-x:auto}
+.md table{border-collapse:collapse;font-size:13px}
+.md th,.md td{padding:4px 10px;border:1px solid var(--t-border);text-align:left;white-space:nowrap}
+.md a{color:var(--t-accent);text-decoration:underline;text-underline-offset:2px}
+.cv-tools-wrap{align-items:flex-start;gap:6px}
+.hd .cv-tools{height:34px;gap:8px;padding:0 10px;border-radius:8px;border:1px solid var(--t-border);background:var(--t-background);font-size:13px;color:var(--t-muted)}
+/* The tool dot is painted, not a glyph: no bundled font has ⏺, so its size and advance came from the host's fallback
+   font and moved the label on other hosts. The box is the board's glyph advance (0.6em at 12px, as laid out), and the
+   soft stop stands in for its antialiased edge. */
+.cv-dot{display:inline-block;flex:none;width:7.22px;height:16.8px;color:var(--t-dim);background:radial-gradient(circle 3.4px at 3.7px 7.8px,currentColor 2.4px,transparent 3.4px)}
+.cv-chev{color:var(--t-dim)}
+.cv-chev-open{display:inline-block;transform:rotate(90deg)}
+.hd .cv-tools-failed{border-color:#514028;color:var(--dock-need)}
+.hd .cv-tools-failed .cv-dot{color:var(--dock-need)}
+.cv-tool-names{margin:0;padding:0 0 0 12px;list-style:none;font-size:12.5px;line-height:1.5;color:var(--t-muted)}
+.cv-status{gap:8px;font-size:13px;color:var(--t-working)}
+.cv-asked{gap:8px;min-height:34px;font-size:13px;color:var(--t-muted)}
+.cv-ask{gap:4px;padding:10px 12px;border-radius:8px;border:1px solid var(--t-border);background:var(--t-background);font-size:13.5px}
+.cv-ask-head{font-size:11.5px;color:var(--t-dim)}
+.cv-ask-q{margin:0;color:var(--t-foreground)}
+.cv-ask-opts{margin:2px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.cv-ask-opts li{display:flex;flex-direction:column}
+.cv-ask-d{font-size:12px;color:var(--t-dim)}
+.cv-older{justify-content:center}
+.hd .cv-older-pill{height:36px;padding:0 14px;gap:6px;border-radius:18px;border:1px solid var(--t-border);background:var(--t-background);font-size:12.5px;color:var(--t-muted)}
+.cv-empty{align-items:center;justify-content:center;gap:8px;padding:22px 24px 24px;text-align:center;color:var(--t-dim)}
+.cv-empty svg{width:31px;height:31px;margin-bottom:8px}
+.cv-empty-t{font-size:15px;font-weight:500;color:var(--t-foreground)}
+.cv-empty-b{max-width:260px;font-size:13.5px;line-height:1.45;color:var(--t-muted)}
+.hd .cv-jump{position:absolute;right:16px;bottom:12px;z-index:2;height:40px;padding:0 14px;gap:6px;border-radius:20px;background:var(--t-popover);border:1px solid #ffffff1f;box-shadow:0 8px 24px #00000080;font-size:13px;color:var(--t-foreground)}
+.cv-jump-dot{width:6px;height:6px;border-radius:3px;background:#e5c07b}
+.cv-jump-arrow{color:var(--t-muted)}
+.cv-foot{border-top:1px solid var(--t-border)}
+.cv-foot:has(.chat-form){border-top:0}
+.chat-form-chat{padding-top:8px}
+.cv-ro{font-size:15px;line-height:1.4;color:var(--t-foreground)}
+/* Demo boards only: the slot CV5's strip fills (a 36 px row, 6 px below, a rule). */
+.chat-head-roomy{padding-top:calc(var(--sat) + 14px)}
+.cv-strip-demo{height:43px;border-bottom:1px solid var(--t-border)}
+.chat-foot.cv-foot{min-height:0}
+.chat-foot-on.cv-foot{min-height:0}
+.cv-foot .chat-form{padding:8px 12px calc(var(--sab) + 4px)}
+.cv-foot .chat-expiry{padding-top:8px}
+.chat-head-roomy .hn{width:14px;height:14px}

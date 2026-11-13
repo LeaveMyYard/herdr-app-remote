@@ -105,6 +105,11 @@ export class InboxTopicDriver {
   private readonly shows = new Map<string, ShowEntry>();
   private wanted: ReadonlyMap<string, number> = new Map();
   private readonly tokens = new Map<string, string>();
+  /**
+   * The `ask_operator` call's `tool_use_id` per group row key (app-feed-v1 minor 1), shape-checked only. Kept on
+   * the bridge: the `inbox` topic doesn't carry it; the timeline uses it only after checking the asker's transcript.
+   */
+  private toolUseIds = new Map<string, string>();
   private marks: { question_id: number; alert_id: number; seen: Set<number> } | undefined;
   private readonly newUntil = new Map<string, number>();
   private timer: NodeJS.Timeout | undefined;
@@ -143,6 +148,11 @@ export class InboxTopicDriver {
   /** The row token the feed (or `app show`) gave for a key. For the answer slice; it never leaves the bridge. */
   tokenFor(key: string): string | undefined {
     return this.tokens.get(key);
+  }
+
+  /** The `tool_use_id` the feed (or `app show`) gave for a group row, if any; as of the last publish. */
+  toolUseIdOf(key: string): string | undefined {
+    return this.toolUseIds.get(key);
   }
 
   /** Overlapping calls share one run. */
@@ -331,13 +341,22 @@ export class InboxTopicDriver {
     const shown = new Map<string, Obj>();
     const extra: Obj[] = [];
     this.tokens.clear();
+    const toolUseIds = new Map<string, string>();
+    const takeId = (e: Obj): void => {
+      const id = e.tool_use_id;
+      if (e.kind === "group" && typeof id === "string" && bridgeApi.TOOL_USE_ID.test(id)) toolUseIds.set(String(e.key), id);
+      // A row that names no id (an `app show` row may leave the field out) keeps the feed's; a bad one has none.
+      else if ("tool_use_id" in e) toolUseIds.delete(String(e.key));
+    };
     if (feed) {
+      for (const e of feed.entries) takeId(e);
       for (const e of feed.entries) if (typeof e.token === "string") this.tokens.set(String(e.key), e.token);
       const shownAt = new Map<string, number>();
       for (const [k, s] of this.shows) {
         if (!s.row) continue;
         if (k.startsWith("cut:")) shown.set(String(s.row.key), s.row);
         else extra.push(s.row);
+        takeId(s.row);
         if (typeof s.row.token === "string") this.tokens.set(String(s.row.key), s.row.token);
         shownAt.set(String(s.row.key), s.at);
       }
@@ -387,6 +406,7 @@ export class InboxTopicDriver {
     }
     // Bound before it is sent: a phone can act only on a rev it was published.
     this.bound = new Map(r.data.entries.map((row) => [row.key, { rev: row.rev, token: this.tokens.get(row.key), row }]));
+    this.toolUseIds = toolUseIds;
     for (const rev of this.refusedRevs) if (![...this.bound.values()].some((b) => b.rev === rev)) this.refusedRevs.delete(rev);
     hub.publish(INBOX_TOPIC, r.data as unknown as Json);
   }

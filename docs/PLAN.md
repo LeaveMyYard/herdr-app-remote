@@ -445,6 +445,9 @@ Defaults taken until the operator says otherwise:
 
 ## 8. Unverified risks
 
+- **Deferred (CV5 follow-ups from the #48 final review):**
+  - **M2, stale sources.** `TimelineTopicDriver.refresh` never checks `hub.isStale` for `host`, `inbox` or `panorama`. A stale `host` still decides which herdr-tui askers belong to t and which agent the strip joins. A stale `inbox` still publishes rows with live answer buttons; the acts are refused server-side, but the phone gets no stale signal. Fix: treat a hub-stale `host` as null (no herdr-tui match, no strip) and a hub-stale `panorama` as no strip, and either drop inbox items while `inbox` is stale or pass `stale` through to `timeline:<t>`.
+  - **L2, parse per timeline.** `refreshAll` re-parses the full `inbox`, `panorama` and `host` values once per open timeline on every change to any of them. Parse once per `refreshAll` and pass the parsed values in.
 - **Deferred (known tech debt, not a risk; #33 follow-up):** the bridge's `--panes` label, empty-key handling and cwd differ from the desktop agent-usage panel, so per-pane shares can differ. The operator chose "defer as tech debt" (Q473); it is recorded here instead of a GitHub issue.
 - **hc:** `hc events` hasn't been tested against a live core. `hc send` was checked in the rig (S16, hc 0.1.19): it pastes text and presses Enter, and has no special keys, so the key bar's own keys are text-only: ⏎ and `/`. Special keys are `hc keys` (S16b, also checked in the rig): it accepts single printable characters too, so the bridge allows only a strict subset of key tokens, from the desktop's key menu, each sending a control byte or an ESC-prefixed sequence (an `alt` letter is ESC then the letter). Refusals come as JSON on stderr.
 - **Tailscale serve:**

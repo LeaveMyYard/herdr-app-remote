@@ -1,0 +1,19 @@
+{
+  "terminal": "term-1",
+  "items": [
+    {
+      "key": "someplugin:1",
+      "plugin": "someplugin",
+      "kind": "someplugin.note",
+      "at": null,
+      "anchor": null,
+      "title": "Note Title 1",
+      "line": "A plain row from a kind this phone doesn't know.",
+      "href": null,
+      "data": {
+        "anything": true
+      }
+    }
+  ],
+  "strip": []
+}

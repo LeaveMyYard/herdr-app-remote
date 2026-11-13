@@ -1,0 +1,31 @@
+{
+  "terminal": "t3",
+  "harness": "claude",
+  "state": "ok",
+  "items": [
+    {
+      "id": "a1000000-0000-4000-8000-000000000019",
+      "role": "ask",
+      "at": "2026-01-02T10:01:30.000Z",
+      "ask": {
+        "via": "claude",
+        "question": "Question Title 123?",
+        "header": "Choice",
+        "multi": false,
+        "options": [
+          {
+            "label": "Option A",
+            "description": "First"
+          }
+        ]
+      },
+      "tool_use_id": "toolu_01FakeAskOperator123"
+    }
+  ],
+  "older": false,
+  "rev": "5f2c0a9e1b7d4c36",
+  "status": {
+    "state": "idle",
+    "since": null
+  }
+}

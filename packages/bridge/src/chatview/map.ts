@@ -141,15 +141,12 @@ const KINDS: ReadonlyMap<string, ToolKind> = new Map([
   ["Agent", "subagent"],
 ]);
 /**
- * herdr-inbox's question tool, under any MCP server or plugin prefix it is installed with. Plain string tests, no
- * regex with two open-ended runs around a literal (that one was quadratic on a long name).
+ * herdr-inbox's question tool, by its exact names only: installed as the plugin (herdr-inbox README), or as the MCP
+ * server `herdr-inbox` added by hand (`claude mcp add herdr-inbox`). Another server whose name merely contains
+ * "herdr-inbox" is not it.
  */
-const isInboxAsk = (name: string): boolean =>
-  name.length <= 256 &&
-  name.startsWith("mcp__") &&
-  name.endsWith("__ask_operator") &&
-  (name.includes("herdr-inbox") || name.includes("herdr_inbox")) &&
-  /^[A-Za-z0-9_-]+$/.test(name);
+const INBOX_ASK_TOOLS: ReadonlySet<string> = new Set(["mcp__plugin_herdr-inbox_herdr-inbox__ask_operator", "mcp__herdr-inbox__ask_operator"]);
+const isInboxAsk = (name: string): boolean => INBOX_ASK_TOOLS.has(name);
 const ASK_USER = "AskUserQuestion";
 const NAME_MAX = 64;
 const BASE_MAX = 120;
@@ -412,7 +409,9 @@ export function mapMessages(messages: readonly ClaudeMessage[], o: MapOptions = 
       }
       if (isInboxAsk(b.name)) {
         run = null;
-        push({ id: nextId(), role: "ask", at: m.at, ask: { via: "inbox", question: null, header: null, multi: false, options: [] } });
+        // The call's id lets the inbox's own row take this place (CV5); an id of another shape is left off.
+        const tid = bridgeApi.TOOL_USE_ID.test(b.id) ? { tool_use_id: b.id } : {};
+        push({ id: nextId(), role: "ask", at: m.at, ask: { via: "inbox", question: null, header: null, multi: false, options: [] }, ...tid });
         continue;
       }
       if (calls.has(b.id)) continue;

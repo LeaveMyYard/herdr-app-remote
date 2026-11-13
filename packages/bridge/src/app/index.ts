@@ -12,6 +12,7 @@ import { randomBytes } from "node:crypto";
 import { CHAT_READ_TIMEOUT_MS, ChatTopicDriver } from "../chat/topic.js";
 import { ChatviewTopicDriver } from "../chatview/topic.js";
 import { chatviewRoute } from "../chatview/route.js";
+import { TimelineTopicDriver } from "../timeline/topic.js";
 import { ClaudeHistory, type ReaderPoolOptions } from "../claude/index.js";
 import { HostTopic } from "../host.js";
 import { InboxTopicDriver } from "../inbox/topic.js";
@@ -263,6 +264,13 @@ export async function startApp(o: AppOptions): Promise<App> {
     },
   });
   promptSourceRef.current = chatview.promptSource;
+  // Plugin items inline in the chat view (CV5): inbox rows of the terminal, anchored only on its own transcript.
+  const timeline = new TimelineTopicDriver({
+    hub,
+    asks: (t) => chatview.inboxAsks(t),
+    toolUseIdOf: (key) => inbox.toolUseIdOf(key),
+    onInvalid: (topic, error) => log({ event: "invalid_topic", topic, error }),
+  });
   const chatviewPages = chatviewRoute({
     gate: {
       requestDevice: (req, needs) => security.requestDevice(req, needs),
@@ -377,6 +385,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     usage.start();
     chat.start();
     chatview.start();
+    timeline.start();
     // Last: its first look seeds the triggers from the topics as they are now, so nothing already there is announced.
     pushService.start();
   } catch (e) {
@@ -385,6 +394,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     panel.stop();
     // Each stop is safe on a driver that never started.
     await setup?.close();
+    timeline.stop();
     chatview.stop();
     history?.close();
     chat.stop();
@@ -434,6 +444,7 @@ export async function startApp(o: AppOptions): Promise<App> {
       // handler herdr created but no longer knows is its own.
       await setup?.close();
       usage?.stop();
+      timeline.stop();
       chatview.stop();
       history?.close();
       chat.stop();

@@ -3,6 +3,8 @@ import { bridgeApi } from "@herdr-remote/protocol";
 import { useHostName } from "../bridge/host-name";
 import { KeysButton, type KeysInput } from "./KeysSheet";
 import * as W from "./keys-words";
+import { useReportBusy } from "../chatview/busy";
+import { composerPlaceholder, LOCKED } from "../chatview/words";
 
 /** The bridge's answer to `terminal.send`. */
 export interface SendOutcome {
@@ -119,13 +121,17 @@ const CLOCK = (
  * bar's own keys are ⏎ (Enter alone) and `/`, which only types a slash into the composer. Esc, Tab, Shift-Tab,
  * Ctrl-C and the arrows are in the Keys sheet (S16b), opened from the bar so none is tapped by accident.
  */
-export function ChatComposer({ terminal, agentName, input, now = Date.now, demoSheet }: {
+export function ChatComposer({ terminal, agentName, input, now = Date.now, demoSheet, variant = "text", locked = false }: {
   terminal: string;
   agentName: string;
   input: ChatInput;
   now?: () => number;
   /** Demo data only: see Chat's `demoSheet`. */
   demoSheet?: { open: boolean; pressed: string | null };
+  /** `chat`: the chat view's composer (text only, no key bar, no Keys menu). */
+  variant?: "text" | "chat";
+  /** Chat view only: a native prompt is open (CV7), so typing waits. */
+  locked?: boolean;
 }) {
   const host = useHostName();
   useMinuteTick(input.until !== null, now);
@@ -200,7 +206,8 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
     if (text !== "") submit(text.replace(/\r\n?/g, "\n"));
   };
 
-  const busy = sending || asking !== null;
+  const busy = sending || asking !== null || locked;
+  useReportBusy("draft", text !== "" || asking !== null);
   return (
     <>
       {asking !== null ? (
@@ -230,6 +237,7 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
           <span>{line.text}</span>
         </div>
       ) : null}
+      {variant === "text" ? (
       <div role="toolbar" aria-label="Keys" className="mono row nf chat-keys">
         <button type="button" className="nf chat-key" aria-label="Enter" disabled={busy} onClick={() => submit("")}>
           ⏎
@@ -240,7 +248,8 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
         <span className="f1" />
         <KeysButton key={terminal} agentName={agentName} host={host} keys={input.keys} demoSheet={demoSheet} />
       </div>
-      <form className="row nf chat-form" onSubmit={onSubmit}>
+      ) : null}
+      <form className={`row nf chat-form${variant === "chat" ? " chat-form-chat" : ""}`} onSubmit={onSubmit}>
         <label htmlFor="chat-msg" className="chat-sr">
           Message to the agent
         </label>
@@ -249,7 +258,7 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
           ref={box}
           rows={1}
           className="f1 chat-text"
-          placeholder="Type to the terminal…"
+          placeholder={locked ? LOCKED : variant === "chat" ? composerPlaceholder(agentName) : "Type to the terminal…"}
           value={text}
           // Frozen while a send is asked about or running: the confirmation is for exactly the text on screen.
           readOnly={busy}

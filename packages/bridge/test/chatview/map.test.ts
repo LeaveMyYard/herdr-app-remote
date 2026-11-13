@@ -174,8 +174,19 @@ describe("chat items (§3)", () => {
 
   it("a herdr-inbox ask_operator call is an ask item with no text", () => {
     const items = map([agent(1, [tool("i1", "mcp__plugin_herdr-inbox_herdr-inbox__ask_operator", { question: "Question Title 123 body" })])]);
-    expect(items).toEqual([{ id: U(1), role: "ask", at: AT(1), ask: { via: "inbox", question: null, header: null, multi: false, options: [] } }]);
+    expect(items).toEqual([{ id: U(1), role: "ask", at: AT(1), ask: { via: "inbox", question: null, header: null, multi: false, options: [] }, tool_use_id: "i1" }]);
     expect(map([agent(1, [tool("i1", "mcp__herdr-inbox__ask_operator", {})])])[0]).toMatchObject({ role: "ask" });
+    // Only its exact names: a look-alike server whose name merely contains herdr-inbox is a plain tool call.
+    for (const name of ["mcp__evil-herdr-inbox__ask_operator", "mcp__herdr-inbox-x__ask_operator", "mcp__plugin_evil_herdr-inbox__ask_operator", "mcp__herdr_inbox__ask_operator"]) {
+      expect(map([agent(1, [tool("i1", name, {})])])[0], name).toMatchObject({ role: "tools" });
+    }
+    // CV5: an id of another shape is left off (the item stays, with nothing to anchor on).
+    const odd = map([agent(1, [tool("bad id!", "mcp__herdr-inbox__ask_operator", {})])])[0]!;
+    expect(odd).toMatchObject({ role: "ask" });
+    expect("tool_use_id" in odd).toBe(false);
+    // Only inbox asks carry it: an AskUserQuestion or a tool row never does.
+    const ask = map([agent(1, [tool("q1", "AskUserQuestion", { questions: [{ question: "Q?", options: [{ label: "A" }] }] })])])[0]!;
+    expect("tool_use_id" in ask).toBe(false);
     expect(map([agent(1, [tool("i1", "mcp__other__ask_operator", {})])])[0]).toMatchObject({ role: "tools" });
   });
 

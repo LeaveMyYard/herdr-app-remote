@@ -119,6 +119,8 @@ export const TOPIC_REFUSAL_LOG_LIMIT: Limit = { max: 4, windowMs: 60_000 };
 const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send", "terminal.keys", "prompt.answer"]);
 /** Kinds the security layer answers itself, never handed to the inner handler. */
 const LOCAL_KINDS: ReadonlySet<string> = new Set(["pair.transfer"]);
+/** What Activity calls each transcript topic ("Phone 1 opened the chat of t3"). A new prefix must be named here. */
+const TOPIC_WHAT: Readonly<Record<(typeof bridgeApi.TRANSCRIPT_TOPIC_PREFIXES)[number], string>> = { "chatview:": "the chat", "timeline:": "the timeline" };
 /** setTimeout's ceiling (about 24.8 days); a later expiry is re-armed when this fires. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
@@ -834,15 +836,18 @@ export class Security {
     const d = id !== undefined ? this.store.get(id) : undefined;
     if (this.dropped.has(client) || !this.mayView(d)) return false;
     const now = this.now();
-    const sep = topic.indexOf(":");
-    const chat = topic.slice(0, sep) === "chatview";
-    const term = safeId(topic.slice(sep + 1)) ?? "a terminal";
+    const prefix = bridgeApi.TRANSCRIPT_TOPIC_PREFIXES.find((p) => topic.startsWith(p));
+    // Only the transcript topics have caps; anything else that did is refused rather than named after one of them.
+    if (prefix === undefined) return false;
+    const what = TOPIC_WHAT[prefix];
+    const term = safeId(topic.slice(prefix.length)) ?? "a terminal";
     if (needs.every((c) => hasCap(d.caps, c, now))) {
-      // CV3: a granted chat open is in Activity once per subscription (not for a re-`sub` of the one it holds, nor a
-      // recheck). Its audit line is its safeguard, as for `terminal.send`: if Activity can't record it, it is refused.
-      if (chat && mode === "sub") {
+      // CV3/CV5: a granted chat or timeline open is in Activity once per subscription (not for a re-`sub` of the one
+      // it holds, nor a recheck). Its audit line is its safeguard, as for `terminal.send`: if Activity can't record
+      // it, it is refused.
+      if (mode === "sub") {
         try {
-          this.audit({ event: "topic", device: d.name, text: `${d.name} opened the chat of ${term}`, ok: true });
+          this.audit({ event: "topic", device: d.name, text: `${d.name} opened ${what} of ${term}`, ok: true });
         } catch {
           return "audit_unavailable";
         }
@@ -851,7 +856,6 @@ export class Security {
     }
     // A recheck follows a switch the desktop just turned off, which Activity already says ("Phone 1: transcript.read off").
     if (mode !== "recheck" && this.topicRefusals.take(d.id).ok) {
-      const what = chat ? "the chat" : "the timeline";
       this.bestEffort(() => this.audit({ event: "topic", device: d.name, text: `${d.name} opened ${what} of ${term}: refused, chat history is off`, ok: false, code: "forbidden" }));
     }
     return false;

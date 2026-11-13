@@ -1,0 +1,171 @@
+{
+  "terminal": "term-1",
+  "items": [
+    {
+      "key": "failed:119",
+      "plugin": "herdr-inbox",
+      "kind": "inbox.failed",
+      "at": "2026-01-02T10:00:00.000Z",
+      "anchor": null,
+      "title": "Answer to Q119 not delivered",
+      "line": "Delivery failed.",
+      "href": "#/inbox",
+      "data": {
+        "key": "failed:119",
+        "rev": "rev-f119",
+        "actions": [
+          "retry",
+          "stop-showing"
+        ],
+        "new": false,
+        "kind": "failed",
+        "question_id": 119,
+        "group": 119,
+        "header": null,
+        "question": "Question Title 119",
+        "asked_by": "agent-1",
+        "answer": "Option B",
+        "answered_at": "2026-01-02T10:00:00+00:00",
+        "retries": 0,
+        "cut": false,
+        "asker": {
+          "host": "herdr-core",
+          "pane": null,
+          "terminal": "term-1",
+          "tab_label": null,
+          "cwd": null
+        },
+        "delivery": {
+          "state": "failed",
+          "known": true,
+          "line": "Delivery failed.",
+          "warn": true,
+          "attempts": 2,
+          "pending_since": null,
+          "auto_retry": false
+        },
+        "retry_label": "Retry delivery"
+      }
+    },
+    {
+      "key": "alert:456",
+      "plugin": "herdr-inbox",
+      "kind": "inbox.alert",
+      "at": "2026-01-02T11:00:00.000Z",
+      "anchor": null,
+      "title": "Alert Title 456",
+      "line": "",
+      "href": "#/inbox",
+      "data": {
+        "key": "alert:456",
+        "rev": "rev-a456",
+        "actions": [
+          "ack"
+        ],
+        "new": false,
+        "kind": "alert",
+        "id": 456,
+        "alert_kind": "agent",
+        "severity": "urgent",
+        "title": "Alert Title 456",
+        "message": null,
+        "asked_by": "agent-1",
+        "created_at": "2026-01-02T11:00:00+00:00",
+        "asker": {
+          "host": "herdr-core",
+          "pane": null,
+          "terminal": "term-1",
+          "tab_label": null,
+          "cwd": null
+        }
+      }
+    },
+    {
+      "key": "group:123",
+      "plugin": "herdr-inbox",
+      "kind": "inbox.question",
+      "at": "2026-01-02T12:00:03.000Z",
+      "anchor": {
+        "tool_use_id": "toolu_01FakeAskOperator123"
+      },
+      "title": "Question Title 123",
+      "line": "Question Text 123: pick one option.",
+      "href": "#/inbox/q/group%3A123/123",
+      "data": {
+        "key": "group:123",
+        "rev": "rev-g123",
+        "actions": [
+          "answer",
+          "draft",
+          "dismiss"
+        ],
+        "new": false,
+        "kind": "group",
+        "group": 123,
+        "title": "Question Title 123",
+        "created_at": "2026-01-02T12:00:03+00:00",
+        "asker": {
+          "host": "herdr-core",
+          "pane": null,
+          "terminal": "term-1",
+          "tab_label": null,
+          "cwd": null
+        },
+        "questions": [
+          {
+            "id": 123,
+            "header": null,
+            "question": "Question Text 123: pick one option.",
+            "options": [
+              {
+                "label": "Option A",
+                "description": "First test choice",
+                "preview": null
+              },
+              {
+                "label": "Option B",
+                "description": "Second test choice",
+                "preview": null
+              }
+            ],
+            "multi_select": false,
+            "context": null,
+            "asked_by": "agent-1",
+            "draft": null,
+            "cut": false
+          }
+        ]
+      }
+    }
+  ],
+  "strip": [
+    {
+      "key": "panorama.swarm:[\"root\",\"herdr-core\",\"term-1\"]",
+      "plugin": "herdr-panorama",
+      "kind": "panorama.swarm",
+      "label": "6 subagents",
+      "tone": "warn",
+      "href": "#/swarm/space-1",
+      "data": {
+        "root_key": "[\"root\",\"herdr-core\",\"term-1\"]",
+        "space_id": "space-1",
+        "counts": [
+          {
+            "code": "run",
+            "n": 2
+          },
+          {
+            "code": "done",
+            "n": 3
+          },
+          {
+            "code": "wait",
+            "n": 1
+          }
+        ],
+        "total": 6,
+        "needs": "n6"
+      }
+    }
+  ]
+}

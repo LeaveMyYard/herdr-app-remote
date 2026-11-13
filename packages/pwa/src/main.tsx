@@ -19,6 +19,7 @@ import { boardData, host as demoHost } from "./fixtures";
 import { registerServiceWorker } from "./sw-register";
 import { installIosVpFix } from "./ios-vp-fix";
 import { PromptCardsBoard } from "./chatview/prompt/fixtures";
+import { TimelineBoard } from "./timeline/TimelineBoard";
 
 const STATUSES: readonly ConnectionStatus[] = ["online", "connecting", "offline", "stale", "unpaired", "refused", "paused", "unavailable"];
 const isStatus = (s: string): s is ConnectionStatus => (STATUSES as readonly string[]).includes(s);
@@ -65,6 +66,9 @@ if (fixture === "pair") {
   // CV7: the prompt cards alone, where the PhoneChatView board draws them (visual harness).
   const top = Number(params.get("top"));
   app = <PromptCardsBoard state={params.get("state")} {...(params.get("top") !== null && Number.isFinite(top) ? { top } : {})} />;
+} else if (fixture === "timeline") {
+  // CV5: the timeline parts of PhoneChatView where the board draws them (`&state=off` the question, `history` the alert).
+  app = <TimelineBoard state={params.get("state")} />;
 } else if (fixture !== null) {
   const banner = params.get("banner");
   const connection = banner !== null && isStatus(banner) ? { status: banner } : undefined;
