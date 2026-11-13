@@ -110,18 +110,45 @@ export class UsageTopicDriver {
   private generation = 0;
   private unwatch: (() => void) | undefined;
   private polling = false;
+  private subscribers = 0;
+  private holds = 0;
 
   constructor(opts: UsageTopicOptions) {
     this.o = opts;
   }
 
   start(): void {
-    this.unwatch = this.o.hub.watchSubscribers(USAGE_TOPIC, (n) => (n > 0 ? this.startPolling() : this.stopPolling()));
+    this.unwatch = this.o.hub.watchSubscribers(USAGE_TOPIC, (n) => {
+      this.subscribers = n;
+      this.sync();
+    });
+  }
+
+  /**
+   * Keeps the topic collecting without a subscriber, for a reader inside the bridge (the chat view's strip, CV6) that
+   * needs the report while it is open. Returns the release; calling it twice is harmless.
+   */
+  hold(): () => void {
+    let held = true;
+    this.holds += 1;
+    this.sync();
+    return () => {
+      if (!held) return;
+      held = false;
+      this.holds -= 1;
+      this.sync();
+    };
+  }
+
+  private sync(): void {
+    if (this.subscribers > 0 || this.holds > 0) this.startPolling();
+    else this.stopPolling();
   }
 
   stop(): void {
     this.unwatch?.();
     this.unwatch = undefined;
+    this.subscribers = 0;
     this.stopPolling();
   }
 

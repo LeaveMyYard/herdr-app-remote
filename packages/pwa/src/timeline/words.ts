@@ -5,5 +5,7 @@
 export const MORE_OPTIONS = "More options…";
 /** PhoneChatView board, History state: an alert's second line when it has no message of its own. */
 export const NEEDS_NO_ANSWER = "Needs no answer.";
+/** COPY.md "Strip": "Account 2 · 38% used" (the account label is the bridge's; the dot is the window's band). */
+export const PERCENT_USED = "used";
 /** COPY.md "Strip": "6 subagents ›" (the count is the bridge's label). */
 export const STRIP_CHEVRON = "›";

@@ -5,7 +5,7 @@ import type { ActFn, ActResult } from "../src/inbox/act";
 import { GRACE_MS, ROW_ARM_MS, VIEW_ARM_MS } from "../src/inbox/arm";
 import { placeTimeline } from "../src/timeline/model";
 import { TimelineRow, TimelineStrip } from "../src/timeline/Timeline";
-import { boardAlert, boardFailed, boardQuestion, boardStrip } from "../src/timeline/TimelineBoard";
+import { boardAccount, boardAlert, boardFailed, boardQuestion, boardStrip } from "../src/timeline/TimelineBoard";
 
 let clock = 0;
 beforeEach(() => {
@@ -45,6 +45,7 @@ const tl = (key: string, m: number | null, anchor?: string): Item => ({ ...board
 it("the board's fake items are valid topic items", () => {
   for (const i of [boardQuestion, boardAlert, boardFailed]) expect(bridgeApi.TimelineItem.safeParse(i).success).toBe(true);
   expect(bridgeApi.StripItem.safeParse(boardStrip).success).toBe(true);
+  expect(bridgeApi.StripItem.safeParse(boardAccount).success).toBe(true);
 });
 
 describe("placeTimeline", () => {
@@ -279,6 +280,24 @@ describe("the strip", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("draws the account chip beside it: the label and the use, linked to Usage, with the band's tone", () => {
+    const { container } = render(<TimelineStrip strip={[boardStrip, boardAccount]} />);
+    const chip = container.querySelector("a.tl-chip")!;
+    expect(chip).toHaveAttribute("href", "#/usage");
+    expect(chip).toHaveAttribute("data-tone", "ok");
+    expect(chip).toHaveTextContent("Account 2· 38% used");
+    expect(container.querySelector("a.tl-strip-link")).toHaveAttribute("href", "#/swarm/space-1");
+  });
+
+  it("draws the account alone when it has no window, and falls back to the label when its data is wrong", () => {
+    const none = { ...boardAccount, tone: "muted" as const, data: { provider_id: "claude-2", account: "Account 2", used_percent: null, window: null } };
+    const { container, rerender } = render(<TimelineStrip strip={[none]} />);
+    expect(container.querySelector(".tl-chip")).toHaveTextContent(/^Account 2$/);
+    rerender(<TimelineStrip strip={[{ ...boardAccount, data: { account: 5 } }]} />);
+    expect(container.querySelector(".tl-chip")).toBeNull();
+    expect(container.querySelector("a.tl-strip-link")).toHaveTextContent("Account 2 · 38% used");
   });
 
   it("draws nothing without strip items", () => {

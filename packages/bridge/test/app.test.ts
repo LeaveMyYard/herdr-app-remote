@@ -361,6 +361,21 @@ describe("startApp: topics over the link", () => {
     expect(calls.find((c) => c.cmd === "/usr/bin/env")!.args[1]).toBe(`${home}/.local/bin/usagebar`);
   });
 
+  it("an open timeline keeps usage collecting with no usage subscriber, and its chip follows the report (CV6)", async () => {
+    await start();
+    const cookie = await paired();
+    app!.security.setCap(app!.security.devices()[0]!.id, "transcript.read", true);
+    const p = await phone(cookie);
+    send(p, { type: "hello", api: 1 });
+    expect(calls.some((c) => c.cmd === "/usr/bin/env" && c.args.includes("collect"))).toBe(false);
+    send(p, { type: "sub", topics: ["timeline:p1"] });
+    await p.until(snapOf("timeline:p1"));
+    // The fixture report lists pane `p1` under claude-1 (profile "claude-1", 85% used of the 7d window).
+    await p.until((m) => m.type === "patch" && m.topic === "timeline:p1" || (m.type === "snap" && m.topic === "timeline:p1" && JSON.stringify(m.data).includes("usage.account")));
+    expect(calls.some((c) => c.cmd === "/usr/bin/env" && c.args.includes("collect"))).toBe(true);
+    expect(JSON.stringify(app!.hub.get("timeline:p1"))).toContain("usage.account:claude-1");
+  });
+
   it("builds --panes from the mod's agents the way the desktop panel does (program key, not the app name), for both filters", async () => {
     await start();
     const mod = await linkMod();

@@ -444,6 +444,7 @@ Defaults taken until the operator says otherwise:
 
 ## 8. Unverified risks
 
+- **Deferred (CV6 follow-up, for the slice that wires `TimelineStrip` into the chat screen):** the Codex/fallback text view has no strip, so no account chip there (the board draws `Aa` where the chip would be); decide with the board whether the text view shows the chip. A pane that used no account in the report's window has no chip, so a fresh session shows none until it has been used.
 - **Deferred (CV5 follow-ups from the #48 final review):**
   - **M2, stale sources.** `TimelineTopicDriver.refresh` never checks `hub.isStale` for `host`, `inbox` or `panorama`. A stale `host` still decides which herdr-tui askers belong to t and which agent the strip joins. A stale `inbox` still publishes rows with live answer buttons; the acts are refused server-side, but the phone gets no stale signal. Fix: treat a hub-stale `host` as null (no herdr-tui match, no strip) and a hub-stale `panorama` as no strip, and either drop inbox items while `inbox` is stale or pass `stale` through to `timeline:<t>`.
   - **L2, parse per timeline.** `refreshAll` re-parses the full `inbox`, `panorama` and `host` values once per open timeline on every change to any of them. Parse once per `refreshAll` and pass the parsed values in.

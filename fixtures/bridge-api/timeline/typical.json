@@ -166,6 +166,20 @@
         "total": 6,
         "needs": "n6"
       }
+    },
+    {
+      "key": "usage.account:claude-2",
+      "plugin": "herdr-agent-usage",
+      "kind": "usage.account",
+      "label": "Account 2 · 38% used",
+      "tone": "ok",
+      "href": "#/usage",
+      "data": {
+        "provider_id": "claude-2",
+        "account": "Account 2",
+        "used_percent": 38,
+        "window": "5h"
+      }
     }
   ]
 }

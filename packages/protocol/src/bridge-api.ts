@@ -217,6 +217,12 @@ export const UsageProvider = z.object({
   /** False: nothing on this machine; hosts hide these. */
   inUse: z.boolean().nullish(),
   windows: z.array(UsageWindow),
+  /**
+   * The panes that used this account in the last window (collect-v1 `paneActivity.panes`), kept as pane ids only: the
+   * chat view's strip (`usage.account`, CV6) finds a terminal's account by them. `paneId` is what the bridge passed in
+   * `--panes` (the terminal id).
+   */
+  paneActivity: z.object({ panes: z.array(z.object({ paneId: z.string() })) }).nullish(),
 });
 export type UsageProvider = z.infer<typeof UsageProvider>;
 
@@ -807,7 +813,22 @@ const TIMELINE_DATA: Record<string, z.ZodTypeAny> = {
   "inbox.alert": InboxAlertRow,
   "inbox.failed": InboxFailedRow,
 };
-const STRIP_DATA: Record<string, z.ZodTypeAny> = { "panorama.swarm": SwarmStripData };
+/** Strip data of `usage.account`: the pane's account as the Usage screen names it, and its first window's use. */
+export const UsageStripData = z
+  .object({
+    /** The `providerId` of the account's entry in the `usage` report (the Usage screen's row). */
+    provider_id: z.string().min(1),
+    /** The account's label: its profile name, else its account label, else the provider's own label. */
+    account: z.string().min(1).max(200),
+    /** The primary window's use, 0 to 100 and rounded, whichever way the report counts; null when it has no window. */
+    used_percent: z.number().int().min(0).max(100).nullable(),
+    /** The primary window's tag (`5h`, `7d`...), null with no window. */
+    window: z.string().min(1).max(40).nullable(),
+  })
+  .strict();
+export type UsageStripData = z.infer<typeof UsageStripData>;
+
+const STRIP_DATA: Record<string, z.ZodTypeAny> = { "panorama.swarm": SwarmStripData, "usage.account": UsageStripData };
 
 const checkData =
   (table: Record<string, z.ZodTypeAny>) =>

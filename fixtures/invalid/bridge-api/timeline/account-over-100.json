@@ -1,0 +1,15 @@
+{
+  "terminal": "term-1",
+  "items": [],
+  "strip": [
+    {
+      "key": "usage.account:claude-2",
+      "plugin": "herdr-agent-usage",
+      "kind": "usage.account",
+      "label": "Account 2 · 140% used",
+      "tone": "ok",
+      "href": "#/usage",
+      "data": { "provider_id": "claude-2", "account": "Account 2", "used_percent": 140, "window": "5h" }
+    }
+  ]
+}

@@ -4,13 +4,14 @@ import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
 
 /**
  * CV5: the timeline parts of design/PhoneChatView, each compared where the board draws it (`clip`): the inline
- * question ("Typing off"), the alert row ("History") and the strip's subagent link (every state). The chat around
- * them is CV4's screen; the Account chip beside the strip is CV6. Animated tiles are masked in both images.
+ * question ("Typing off"), the alert row ("History") and the strip's subagent link and account chip (every state). The
+ * chat around them is CV4's screen. Animated tiles are masked in both images.
  */
 const PARTS: readonly { name: string; ref: string; state: string; clip: Rect }[] = [
   { name: "question", ref: "PhoneChatView-off", state: "off", clip: { x: 16, y: 488, width: 358, height: 253 } },
   { name: "alert", ref: "PhoneChatView-history", state: "history", clip: { x: 16, y: 565, width: 358, height: 54 } },
   { name: "strip", ref: "PhoneChatView-chat", state: "off", clip: { x: 16, y: 114, width: 180, height: 36 } },
+  { name: "account", ref: "PhoneChatView-chat", state: "off", clip: { x: 214, y: 116, width: 160, height: 32 } },
 ];
 
 for (const part of PARTS) {

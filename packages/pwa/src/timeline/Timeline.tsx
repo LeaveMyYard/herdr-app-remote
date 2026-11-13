@@ -9,8 +9,8 @@ import { GRACE_MS, ROW_ARM_MS, useArmed, VIEW_ARM_MS } from "../inbox/arm";
 import { age, groupTitle, type Of } from "../inbox/model";
 import { ANSWER, answerNotDelivered, dismissWhat } from "../inbox/words";
 import { Tile } from "../components/StateMarks";
-import { alertRow, failedRow, peekHref, questionRow, safeHref, swarmData } from "./model";
-import { MORE_OPTIONS, NEEDS_NO_ANSWER, STRIP_CHEVRON } from "./words";
+import { alertRow, failedRow, peekHref, questionRow, safeHref, swarmData, usageData } from "./model";
+import { MORE_OPTIONS, NEEDS_NO_ANSWER, PERCENT_USED, STRIP_CHEVRON } from "./words";
 import "./timeline.css";
 
 type TimelineItem = bridgeApi.TimelineItem;
@@ -247,13 +247,40 @@ export function TimelineStrip({ strip }: { strip: readonly bridgeApi.StripItem[]
   );
 }
 
+/** The account chip ("Account 2 · 38% used"), linked to Usage. Its dot follows the window's band. */
+function AccountChip({ item, data }: { item: bridgeApi.StripItem; data: bridgeApi.UsageStripData }) {
+  const href = safeHref(item.href);
+  const body = (
+    <>
+      <span className="nf tl-chip-dot" aria-hidden="true" />
+      {data.account}
+      {data.used_percent !== null && (
+        <span className="tl-chip-used">
+          · {data.used_percent}% {PERCENT_USED}
+        </span>
+      )}
+    </>
+  );
+  return href ? (
+    <a href={href} className="row nf tl-chip" data-tone={item.tone}>
+      {body}
+    </a>
+  ) : (
+    <span className="row nf tl-chip" data-tone={item.tone}>
+      {body}
+    </span>
+  );
+}
+
 function StripEntry({ item }: { item: bridgeApi.StripItem }) {
   const data = swarmData(item);
+  const account = usageData(item);
   const href = safeHref(item.href);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const long = useRef(false);
   // A long-press still pending when the strip goes away must not open Peek afterwards.
   useEffect(() => () => clearTimeout(timer.current), []);
+  if (account) return <AccountChip item={item} data={account} />;
   if (!data) {
     return href ? (
       <a href={href} className="row f1 tl-strip-link">

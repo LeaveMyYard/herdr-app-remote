@@ -235,6 +235,7 @@ export async function startApp(o: AppOptions): Promise<App> {
   // Plugin items inline in the chat view (CV5): inbox rows of the terminal, anchored only on its own transcript.
   const timeline = new TimelineTopicDriver({
     hub,
+    holdUsage: () => usage?.hold() ?? (() => {}),
     asks: (t) => chatview.inboxAsks(t),
     toolUseIdOf: (key) => inbox.toolUseIdOf(key),
     onInvalid: (topic, error) => log({ event: "invalid_topic", topic, error }),
