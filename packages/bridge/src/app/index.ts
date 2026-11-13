@@ -142,13 +142,14 @@ export async function startApp(o: AppOptions): Promise<App> {
 
   let usage: UsageTopicDriver | undefined = undefined;
   // `terminal.send` (S16): `hc send` only, under `terminal.input` (expiry, rate limit and audit in Security).
-  const terminal = terminalSendActor({ run, binaries });
+  // While a prompt answer runs in a terminal (CV7), typing and key presses there from any device are `busy`.
+  const terminal = terminalSendActor({ run, binaries, busy: (t) => prompts.answering(t) });
   const dataDir = join(o.appHome, "data/herdr-app-remote");
   // The key menu (S16b), from `keys.json` or the default; reported once the hub and security exist (below).
   let onKeysLoad: (l: KeysLoaded) => void = () => {};
   const keysMenu = new KeysMenu(dataDir, (l) => onKeysLoad(l));
   // `terminal.keys` (S16b): `hc keys` with a menu entry's tokens only, under `terminal.keys`.
-  const keys = terminalKeysActor({ run, binaries, menu: keysMenu });
+  const keys = terminalKeysActor({ run, binaries, menu: keysMenu, busy: (t) => prompts.answering(t) });
   let inboxDriver: InboxTopicDriver | undefined = undefined;
   let push: PushService | undefined = undefined;
   // `prompt.answer` (CV7): presses keys the bridge derives from a verified screen, for a card the chat view published.

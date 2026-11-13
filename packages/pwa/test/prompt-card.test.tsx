@@ -65,6 +65,32 @@ describe("PromptCard", () => {
     expect(act).toHaveBeenCalledWith("prompt.answer", { terminal: "t1", prompt_id: ask1.prompt_id, rev: ask1.rev, choice: { other: "Project Alpha answer 1" } });
   });
 
+  it("N1: a double tap sends one act", async () => {
+    let release!: (r: { ok: boolean }) => void;
+    const act = vi.fn<PromptAct>(() => new Promise((r) => (release = r)));
+    render(<PromptCard item={perm} terminal="t1" agent="Agent 1" desk="desk-1" act={act} />);
+    const yes = screen.getByRole("button", { name: /^Yes$/ });
+    // Two taps in the same render: the second must not reach the bridge.
+    rtlAct(() => {
+      fireEvent.click(yes);
+      fireEvent.click(yes);
+    });
+    expect(act).toHaveBeenCalledTimes(1);
+    await rtlAct(async () => release({ ok: true }));
+  });
+
+  it("Other text that starts with !, / or # can't be sent", () => {
+    mount(ask1);
+    const field = screen.getByPlaceholderText("Other: type your own answer…");
+    const answer = screen.getByRole("button", { name: "Answer" }) as HTMLButtonElement;
+    for (const v of ["/clear", "!ls", "# note", " /x"]) {
+      fireEvent.change(field, { target: { value: v } });
+      expect(answer.disabled, v).toBe(true);
+    }
+    fireEvent.change(field, { target: { value: "a / b" } });
+    expect(answer.disabled).toBe(false);
+  });
+
   it("question: a single pick sends its option", async () => {
     const { act } = mount(ask1);
     await click(screen.getByRole("button", { name: /^Option C/ }));

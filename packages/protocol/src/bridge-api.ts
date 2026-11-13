@@ -906,6 +906,8 @@ export const PROMPT_OTHER_MAX_CHARS = 2000;
  */
 // eslint-disable-next-line no-control-regex
 export const PROMPT_OTHER_UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+/** The composer's mode characters at the start of an Other answer (after spaces): refused (see {@link PromptChoice}). */
+export const PROMPT_OTHER_COMMAND = /^\s*[!/#]/;
 
 /**
  * The answer:
@@ -927,7 +929,10 @@ export const PromptChoice = z.union([
         .string()
         .refine((s) => s.trim().length > 0, { message: "an Other answer is not empty" })
         .refine((s) => [...s].length <= PROMPT_OTHER_MAX_CHARS, { message: `at most ${PROMPT_OTHER_MAX_CHARS} characters` })
-        .refine((s) => !PROMPT_OTHER_UNSAFE.test(s), { message: "one line, no control characters" }),
+        .refine((s) => !PROMPT_OTHER_UNSAFE.test(s), { message: "one line, no control characters" })
+        // If the desk answered the prompt while hc held the send (R6), the text lands in the composer, where these
+        // start a shell command (!), a slash command (/) or a memory note (#). Refused, so that can only be a message.
+        .refine((s) => !PROMPT_OTHER_COMMAND.test(s), { message: "an Other answer does not start with !, / or #" }),
     })
     .strict(),
 ]);

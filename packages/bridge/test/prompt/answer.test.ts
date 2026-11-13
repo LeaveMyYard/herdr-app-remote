@@ -5,10 +5,14 @@ import type { PendingTool } from "../../src/prompt/match.js";
 
 const fast = { sleep: async () => {}, postCheckMs: 50 };
 
+/** The actor's clock: real time plus `skew`, which a test bumps to stand for hc holding a press. */
+const clock = { skew: 0 };
+
 function setup(name: Screen, pending: PendingTool[], o: { blocked?: boolean } = {}) {
+  clock.skew = 0;
   const term = new FakeTerm(screen(name));
   const s = source(term, pending, o);
-  const actor = promptAnswerActor({ run: term.runner, source: s.src, binaries: { hc: "hc" } as never, ...fast });
+  const actor = promptAnswerActor({ run: term.runner, source: s.src, binaries: { hc: "hc" } as never, ...fast, now: () => Date.now() + clock.skew });
   const answer = async (choice: unknown, over: Record<string, unknown> = {}) =>
     (await actor(CLIENT(), "prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice, ...over }))!;
   return { term, s, actor, answer };
@@ -311,5 +315,109 @@ describe("prompt.answer: review round 1", () => {
     term.screen = screen("permission");
     term.answered = null;
     expect((await answer({ option: 0 })).ok).toBe(true);
+  });
+});
+
+describe("prompt.answer: final pass", () => {
+  /** hc holds a phase B press (Enter, or the Other send) for `ms` while the desk types; then it goes through. */
+  const holdPhaseB = (term: FakeTerm, ms: number) => {
+    const inner = term.runner;
+    term.runner = (async (c, a, op) => {
+      if ((a[0] === "keys" && a.includes("enter")) || a[0] === "send") clock.skew += ms;
+      return inner(c, a, op);
+    }) as typeof term.runner;
+  };
+
+  it("M1: an Enter that hc held for the desk is never 'answered': unknown_effect, and Activity says it was held", async () => {
+    const term = new FakeTerm(screen("permission"));
+    const s = source(term, [BASH]);
+    clock.skew = 0;
+    holdPhaseB(term, 3_000);
+    const actor = promptAnswerActor({ run: term.runner, source: s.src, binaries: { hc: "hc" } as never, ...fast, now: () => Date.now() + clock.skew });
+    const r = (await actor(CLIENT(), "prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { option: 0 } }))!;
+    expect(r).toMatchObject({ ok: false, code: "unknown_effect", unknown_effect: true });
+    expect(r.audit_label).toBe("a permission prompt\noption 1 of 4 (Yes), held 3 s while the desk was typing");
+    // The prompt left: the card is not shown again, and nothing is pressed again.
+    expect(s.state.answered).toEqual([s.card.promptId]);
+    expect(term.keys).toEqual([["enter"]]);
+  });
+
+  it("M1: a held Other send is unknown_effect too", async () => {
+    const term = new FakeTerm(screen("ask-single"));
+    const s = source(term, [ASK1]);
+    clock.skew = 0;
+    holdPhaseB(term, 2_000);
+    const actor = promptAnswerActor({ run: term.runner, source: s.src, binaries: { hc: "hc" } as never, ...fast, now: () => Date.now() + clock.skew });
+    const r = (await actor(CLIENT(), "prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { other: "Project Alpha" } }))!;
+    expect(r).toMatchObject({ ok: false, code: "unknown_effect", unknown_effect: true });
+  });
+
+  it("M1: a held first Enter on Submit is unknown_effect, with no second Enter", async () => {
+    const term = new FakeTerm(screen("ask-multi"));
+    const s = source(term, [ASKM]);
+    clock.skew = 0;
+    holdPhaseB(term, 2_000);
+    const actor = promptAnswerActor({ run: term.runner, source: s.src, binaries: { hc: "hc" } as never, ...fast, now: () => Date.now() + clock.skew });
+    const r = (await actor(CLIENT(), "prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { picks: [0] } }))!;
+    expect(r).toMatchObject({ ok: false, code: "unknown_effect", unknown_effect: true });
+    expect(term.keys.filter((k) => k[0] === "enter").length).toBe(1);
+  });
+
+  it("M1: Other text the composer would treat as a command is refused before anything runs", async () => {
+    const { term, answer } = setup("ask-single", [ASK1]);
+    for (const other of ["/clear", "!rm -rf build", "# remember this", "  /compact"]) expect((await answer({ other })).code, other).toBe("bad_args");
+    expect(term.calls).toEqual([]);
+    // In the middle is fine.
+    expect((await answer({ other: "use a / b # c !" })).ok).toBe(true);
+  });
+
+  it("L1: a tick that doesn't take (the desk un-ticked) stops before Submit, with no Enter", async () => {
+    const { term, answer } = setup("ask-multi", [ASKM]);
+    term.keysReply = (a) => (a.includes("space") ? { code: 0, stdout: "{}", stderr: "" } : undefined);
+    expect((await answer({ picks: [0] })).code).toBe("prompt_moved");
+    expect(term.keys.flat()).not.toContain("enter");
+  });
+
+  it("L1: a box un-ticked on the way to Submit: no Enter", async () => {
+    const { term, answer } = setup("ask-multi", [ASKM]);
+    const inner = term.runner;
+    term.runner = (async (c, a, op) => {
+      const r = await inner(c, a, op);
+      // Right after the cursor reaches Submit, the desk un-ticks Lint.
+      if (a[0] === "keys" && !a.includes("space") && !a.includes("enter")) term.screen = term.screen.replace("[✔] Lint", "[ ] Lint");
+      return r;
+    }) as typeof term.runner;
+    const actor = promptAnswerActor({ run: term.runner, source: source(term, [ASKM]).src, binaries: { hc: "hc" } as never, ...fast });
+    void answer;
+    const card = source(term, [ASKM]).card;
+    const r = (await actor(CLIENT(), "prompt.answer", { terminal: "t3", prompt_id: card.promptId, rev: "rev-1", choice: { picks: [0] } }))!;
+    expect(r.code).toBe("prompt_moved");
+    expect(term.keys.flat()).not.toContain("enter");
+  });
+
+  it("L1: a tick on the Other box (not recorded) refuses before any key", async () => {
+    const { term, answer } = setup("ask-multi", [ASKM]);
+    term.screen = term.screen.replace("[ ] Type something", "[✔] Type something");
+    expect((await answer({ picks: [0] })).code).toBe("prompt_changed");
+    expect(term.keys).toEqual([]);
+  });
+
+  it("L3: while an answer runs in a terminal, the actor says so", async () => {
+    const term = new FakeTerm(screen("permission"));
+    const s = source(term, [BASH]);
+    let seen = false;
+    const actor = promptAnswerActor({
+      run: async (c, a, op) => {
+        if (a[0] === "keys") seen = actor.answering("t3") && !actor.answering("t4");
+        return term.runner(c, a, op);
+      },
+      source: s.src,
+      binaries: { hc: "hc" } as never,
+      ...fast,
+    });
+    expect(actor.answering("t3")).toBe(false);
+    await actor(CLIENT(), "prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { option: 0 } });
+    expect(seen).toBe(true);
+    expect(actor.answering("t3")).toBe(false);
   });
 });

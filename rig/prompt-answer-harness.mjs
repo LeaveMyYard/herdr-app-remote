@@ -204,6 +204,44 @@ const forcedSince = (i) => calls.slice(i).filter((a) => a.includes('--force'));
   const r = await p.answer({ option: 1 });
   check('desk-first: refused as already answered (prompt_gone or prompt_changed), no key pressed', (r.code === 'prompt_gone' || r.code === 'prompt_changed') && !calls.slice(i).some((a) => a[0] === 'keys' || a[0] === 'send'), { r, calls: calls.slice(i) });
 }
+// ---- R6 (final pass M1): the desk answers while hc holds the phone's Enter: never reported as answered ----
+{
+  const t = launch(['--permission-mode', 'default']);
+  await untilScreen(t, /^❯/m, 20000);
+  await sleep(1000);
+  hc('send', t, 'H0-PERM please');
+  await untilScreen(t, /Do you want to proceed\?/);
+  await sleep(700);
+  const T = pending();
+  const m = P.matchPrompt(T, read(t));
+  let pub = { match: m, rev: 'rev-1' };
+  const answered = new Set();
+  const source = { current: () => pub, fresh: async () => ({ pending: pending(), blocked: true }), answered: (_t, id) => { answered.add(id); pub = undefined; }, isAnswered: (_t, id) => answered.has(id) };
+  const desk = spawn('script', ['-qfec', `hc attach ${t}`, '/dev/null'], { stdio: ['pipe', 'ignore', 'ignore'] });
+  await sleep(1500);
+  let deskDone = false;
+  // Right before the phone's Enter: the desk presses Enter itself (it answers "No", where phase A put the cursor),
+  // then types a key and deletes it in the composer, so hc holds the phone's Enter for the desk to go quiet.
+  const heldRun = async (cmd, args, o) => {
+    if (!deskDone && args[0] === 'keys' && args.includes('enter')) {
+      deskDone = true;
+      desk.stdin.write('\r');
+      await sleep(600);
+      desk.stdin.write('x');
+      await sleep(80);
+      desk.stdin.write('\u007f');
+      await sleep(80);
+    }
+    return run(cmd, args, o);
+  };
+  const actor = P.promptAnswerActor({ run: heldRun, source, binaries: { hc: 'hc' } });
+  const started = Date.now();
+  const r = await actor(client, 'prompt.answer', { terminal: t, prompt_id: m.promptId, rev: 'rev-1', choice: { option: 3 } });
+  check('desk-held: the desk answered while hc held the phone\'s Enter: unknown_effect, not ok', r.ok === false && r.unknown_effect === true && /held \d+ s while the desk was typing/.test(r.audit_label ?? ''), { r, ms: Date.now() - started });
+  desk.stdin.write('\u001c');
+  await sleep(300);
+  try { process.kill(desk.pid); } catch { /* exited */ }
+}
 // ---- hc send --force still waits for an unfinished desk draft (S16's quiet rule) ----
 {
   const p = await prompt('draft', ['--permission-mode', 'default'], 'H0-ASK1 please', /Question Title 123/);

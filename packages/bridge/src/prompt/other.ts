@@ -14,7 +14,7 @@
 //
 // Composer sends (`terminal.send`), option presses, Stop and every refusal never reach here; tests pin that.
 import { bridgeApi } from "@herdr-remote/protocol";
-import { matchPrompt, OTHER_SINGLE, CHAT_ABOUT, type PendingTool } from "./match.js";
+import { matchPrompt, OTHER_SINGLE, type PendingTool } from "./match.js";
 
 /** A confirmation older than this is refused: the screen it vouches for is too old. */
 export const OTHER_CONFIRM_MAX_MS = 3_000;
@@ -42,16 +42,16 @@ export function confirmOtherField(
   now: number,
 ): OtherFieldConfirmation | null {
   const m = matchPrompt(expected.pending, screen);
-  if (m.kind !== "question" || m.multi || m.toolUseId !== expected.toolUseId || m.promptId !== expected.promptId) return null;
+  // A multi-select never gets here: its card has no Other row (`otherRow` null, below), pinned in match.test.ts.
+  if (m.kind !== "question" || m.toolUseId !== expected.toolUseId || m.promptId !== expected.promptId) return null;
   const p = m.prompt;
   if (!p || m.otherRow === null) return null;
   const k = m.buttons.length;
-  // The H0 shape: Other is row k (right after the k options), the cursor is on it, "Chat about this" follows below a rule.
+  // The H0 shape: Other is row k (right after the k options) and the cursor is on it. "Chat about this" below a rule as
+  // the last row is already required by match.ts's question() (pinned there), so it is not checked twice here.
   if (m.otherRow !== k || p.cursor !== k) return null;
   const row = p.rows[k];
-  const chat = p.rows[k + 1];
   if (!row || row.label !== OTHER_SINGLE || row.n !== k + 1 || row.check !== null || row.belowRule) return null;
-  if (!chat || chat.label !== CHAT_ABOUT || !chat.belowRule || p.rows.length !== k + 2) return null;
   if (!p.footer.some((f) => f.startsWith("Enter to select"))) return null;
   const c = Object.freeze({ terminal, promptId: expected.promptId, at: now }) as OtherFieldConfirmation;
   issued.add(c);

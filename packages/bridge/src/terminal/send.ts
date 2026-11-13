@@ -21,6 +21,8 @@ export interface TerminalSendOptions {
   run: Runner;
   binaries?: Binaries;
   timeoutMs?: number;
+  /** A prompt answer runs in this terminal (CV7): nothing is typed into it meanwhile (`busy`). */
+  busy?: (terminal: string) => boolean;
 }
 
 /**
@@ -74,6 +76,7 @@ export function terminalSendActor(o: TerminalSendOptions): TerminalSendActor {
     // Security.act only lets an approved device through, so there is always a principal; the fallback is for tests.
     const key = client.principal?.deviceId ?? "";
     const { terminal, text } = parsed.data;
+    if (o.busy?.(terminal)) return { ok: false, code: "busy" };
     const bin = (o.binaries ?? DEFAULT_BINARIES).hc;
     const r = await inFlight.run(key, (signal) => o.run(bin, sendArgs(terminal, text), { timeoutMs: o.timeoutMs ?? SEND_TIMEOUT_MS, signal }));
     return r === undefined ? { ok: false, code: "busy" } : readSend(r);

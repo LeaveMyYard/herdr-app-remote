@@ -105,7 +105,7 @@ export class FakeTerm {
   reads = 0;
   constructor(public screen: string) {}
 
-  readonly runner: Runner = async (_cmd, args) => {
+  runner: Runner = async (_cmd, args) => {
     this.calls.push(args);
     if (args[0] === "read") {
       this.beforeRead?.(this.reads++);

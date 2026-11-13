@@ -30,6 +30,12 @@ export const PRESS_TIMEOUT_MS = 15_000;
 export const READ_TIMEOUT_MS = 4_000;
 /** The post-check window (§3a.4 step 6). */
 export const POST_CHECK_MS = 2_000;
+/**
+ * A phase B press (Enter, or the Other send) that hc held longer than this waited for the desk (S16's quiet rule):
+ * the desk was typing, and may have answered the prompt meanwhile, so the press may have landed on what came next
+ * (the next prompt's option, or the composer). Such a press is never reported as answered: `unknown_effect` (R6).
+ */
+export const HELD_MS = 1_000;
 /** How long to wait for a redraw after a press before reading again. */
 export const SETTLE_MS = 150;
 
@@ -67,6 +73,8 @@ export interface PromptAnswerOptions {
   pressTimeoutMs?: number;
   readTimeoutMs?: number;
   postCheckMs?: number;
+  /** See {@link HELD_MS}. */
+  heldMs?: number;
 }
 
 /** The refusal or result codes of this act (bridge-api PROMPT_ANSWER_CODES, plus hc's own). */
@@ -110,6 +118,8 @@ class Aborted extends Error {}
  */
 export interface PromptAnswerActor extends Actor {
   cancel(deviceId?: string): void;
+  /** An answer runs in `terminal` now: typing and key presses there wait (`busy`) until it is done. */
+  answering(terminal: string): boolean;
 }
 
 export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
@@ -198,7 +208,17 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
   }
 
   /** The result of Enter (or the Other send): hc's verdict, then the post-check. */
-  async function settle(t: string, card: Match, r: RunResult, refused: Readonly<Record<string, string>>, label: string, signal: AbortSignal): Promise<ActResult> {
+  /** Runs one phase B press and says how long hc held it. */
+  async function timed(fn: () => Promise<RunResult>): Promise<{ r: RunResult; held: boolean; ms: number }> {
+    const t0 = now();
+    const r = await fn();
+    const ms = Math.max(0, now() - t0);
+    return { r, held: ms > (o.heldMs ?? HELD_MS), ms };
+  }
+  const heldLabel = (label: string, ms: number) => `${label}, held ${Math.round(ms / 1000)} s while the desk was typing`;
+
+  async function settle(t: string, card: Match, p: { r: RunResult; held: boolean; ms: number }, refused: Readonly<Record<string, string>>, label: string, signal: AbortSignal): Promise<ActResult> {
+    const r = p.r;
     const res = readHc(r, refused, "unknown_effect");
     if (!res.ok) {
       // A refusal before anything was pressed keeps its code; anything else may have reached the agent.
@@ -207,6 +227,8 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     try {
       if (await postCheck(t, card, signal)) {
         consume(t, card.promptId);
+        // Held by the desk: the prompt may have been answered at the desk and this press landed on what followed.
+        if (p.held) return { ok: false, code: "unknown_effect", unknown_effect: true, audit_label: heldLabel(label, p.ms) };
         return { ok: true, audit_label: label };
       }
     } catch (e) {
@@ -275,7 +297,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
         if (!at(await look(t, pending, signal), card.promptId, row)) return refuse();
       }
       // Phase B: Enter alone.
-      return settle(t, m, await keys(t, ["enter"], "B", signal), KEYS_REFUSED, label, signal);
+      return settle(t, m, await timed(() => keys(t, ["enter"], "B", signal)), KEYS_REFUSED, label, signal);
     }
 
     if ("picks" in c) {
@@ -308,9 +330,12 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
       const rows = v!.m.prompt!.rows;
       if (!m.buttons.every((i) => rows[i]!.check === want.has(i)) || rows[m.buttons.length]!.check !== false) return refuse();
       // Phase B, first Enter: Submit opens the review step (H0); nothing is decided yet.
-      const r1 = await keys(t, ["enter"], "B", signal);
+      const p1 = await timed(() => keys(t, ["enter"], "B", signal));
+      const r1 = p1.r;
       const r1res = readHc(r1, KEYS_REFUSED, "unknown_effect");
       if (!r1res.ok) return r1res.unknown_effect ? { ok: false, code: r1res.code ?? "unknown_effect", unknown_effect: true, audit_label: label } : { ok: false, code: r1res.code ?? "prompt_changed", audit_label: label };
+      // Held by the desk: that Enter may have landed elsewhere; never follow it with a second Enter.
+      if (p1.held) return { ok: false, code: "unknown_effect", unknown_effect: true, audit_label: heldLabel(label, p1.ms) };
       const picked = m.buttons.filter((i) => want.has(i)).map((i) => p.rows[i]!.label);
       // The review must list exactly the picks, with the cursor on "Submit answers".
       const end = now() + (o.postCheckMs ?? POST_CHECK_MS);
@@ -340,7 +365,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
       const reviewCard: Match = { ...m, promptId: matchPrompt([], review.text).promptId };
       pendingFor.set(reviewCard, []);
       // Phase B, second Enter: "Submit answers".
-      const r2 = await keys(t, ["enter"], "B", signal);
+      const r2 = await timed(() => keys(t, ["enter"], "B", signal));
       const res = await settle(t, reviewCard, r2, KEYS_REFUSED, label, signal);
       if (res.ok) consume(t, card.promptId);
       return res;
@@ -359,11 +384,12 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     if (conf === null) return refuse();
     check(signal);
     const argv = otherSendArgs(conf, t, card.promptId, c.other, now());
-    const r = await o.run(bin(), argv, { timeoutMs: o.pressTimeoutMs ?? PRESS_TIMEOUT_MS, signal });
+    const r = await timed(() => o.run(bin(), argv, { timeoutMs: o.pressTimeoutMs ?? PRESS_TIMEOUT_MS, signal }));
     return settle(t, m, r, SEND_REFUSED, label, signal);
   }
 
   return Object.assign(actor, {
+    answering: (terminal: string) => locks.has(terminal),
     cancel: (deviceId?: string) => {
       for (const [d, set] of inflight) if (deviceId === undefined || d === deviceId) for (const ac of set) ac.abort();
     },

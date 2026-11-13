@@ -5,8 +5,8 @@
 // retries and never names keys. A question answers only on its Answer button. After a refusal that means the prompt
 // moved on (changed, gone) or an unknown effect, the card dims and offers no second press; the chat keeps that dimmed
 // card and its refusal below it (PromptTail) even once the bridge stops publishing it.
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { bridgeApi } from "@herdr-remote/protocol";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { bridgeApi } from "@herdr-remote/protocol";
 import * as W from "./words";
 import "../../styles/prompt-card.css";
 
@@ -90,6 +90,8 @@ export function resetPromptTails(): void {
 
 export function PromptCard({ item, terminal, agent, desk, act }: PromptCardProps) {
   const [pending, setPending] = useState(false);
+  // A second tap before React re-renders must not send a second act: the ref is set synchronously.
+  const sent = useRef<string | null>(null);
   const [res, setRes] = useState<{ id: string; r: PromptActResult } | null>(null);
   // A new prompt is a new card: what was refused for the old one doesn't carry over.
   const mine = res?.id === item.prompt_id ? res.r : null;
@@ -97,7 +99,8 @@ export function PromptCard({ item, terminal, agent, desk, act }: PromptCardProps
   const done = mine?.ok === true;
 
   const answer = async (choice: bridgeApi.PromptChoice) => {
-    if (pending || dim || done) return;
+    if (pending || dim || done || sent.current === item.prompt_id) return;
+    sent.current = item.prompt_id;
     setPending(true);
     let r: PromptActResult;
     try {
@@ -106,6 +109,8 @@ export function PromptCard({ item, terminal, agent, desk, act }: PromptCardProps
       r = { ok: false, code: "offline" };
     }
     setPending(false);
+    // A refusal that leaves the card live (busy, rate limited, forbidden…) lets the person try again by hand.
+    if (!r.ok && !r.unknown_effect && !DIMS(r.code)) sent.current = null;
     setRes({ id: item.prompt_id, r });
     if (!r.ok && (r.unknown_effect === true || DIMS(r.code))) keep(terminal, { item, code: r.code, unknown: r.unknown_effect === true });
   };
@@ -317,7 +322,9 @@ function Question(p: CardProps) {
   };
   // The act carries one question's choice: a card with several (never published by the bridge yet, H0 did not
   // record them) steps through them here but can't send.
-  const canSend = qs.length === 1 && (q.multi ? mine.length > 0 : mine.length === 1 || (q.other && other.trim() !== ""));
+  // Other text the composer would read as a command (!, /, #) is refused by the bridge: it can't be sent from here.
+  const otherOk = other.trim() !== "" && !bridgeApi.PROMPT_OTHER_COMMAND.test(other);
+  const canSend = qs.length === 1 && (q.multi ? mine.length > 0 : mine.length === 1 || (q.other && otherOk));
   const submit = () => {
     if (!last) return setAt(at + 1);
     if (!canSend) return;

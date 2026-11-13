@@ -74,6 +74,14 @@ describe("readKeys (recorded hc outputs)", () => {
 });
 
 describe("terminalKeysActor", () => {
+  it("is busy, pressing nothing, while a prompt answer runs in that terminal (CV7)", async () => {
+    const { calls, runner } = stub(() => res(0, fx("keys-ok.json")));
+    const actor = terminalKeysActor({ run: runner, menu, busy: (t) => t === "t3" });
+    expect(await actor(client(), "terminal.keys", { terminal: "t3", key: "esc", rev: REV })).toEqual({ ok: false, code: "busy" });
+    expect(calls).toHaveLength(0);
+    expect((await actor(client(), "terminal.keys", { terminal: "t4", key: "esc", rev: REV }))!.ok).toBe(true);
+  });
+
   it("leaves other kinds alone", async () => {
     const { calls, runner } = stub(() => res(0, fx("keys-ok.json")));
     const actor = terminalKeysActor({ run: runner, menu });

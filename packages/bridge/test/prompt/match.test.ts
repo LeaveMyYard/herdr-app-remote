@@ -78,6 +78,11 @@ describe("matchPrompt on the H0 recordings (T + V)", () => {
     expect(matchPrompt([ASKM], screen("ask-multi-after-down-enter")).promptId).toBe(m.promptId);
   });
 
+  it("a row after Chat about this is not the recorded question shape: read-only", () => {
+    const extra = screen("ask-single").replace("  5. Chat about this", "  5. Chat about this\n  6. Something else");
+    expect(matchPrompt([ASK1], extra).kind).toBe("unparsed");
+  });
+
   it("two questions in one call were never recorded: read-only", () => {
     const two = { ...ASK1, input: { questions: [(ASK1.input as { questions: unknown[] }).questions[0], (ASK1.input as { questions: unknown[] }).questions[0]] } };
     expect(matchPrompt([two], screen("ask-single")).kind).toBe("unparsed");

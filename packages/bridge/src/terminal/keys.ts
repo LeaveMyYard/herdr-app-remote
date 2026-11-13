@@ -21,6 +21,8 @@ export interface TerminalKeysOptions {
   menu: KeysMenu;
   binaries?: Binaries;
   timeoutMs?: number;
+  /** A prompt answer runs in this terminal (CV7): no key is pressed into it meanwhile (`busy`). */
+  busy?: (terminal: string) => boolean;
 }
 
 /** The argv for one press. `--` ends hc's options; every token already passed {@link bridgeApi.isKeyToken}. */
@@ -73,6 +75,7 @@ export function terminalKeysActor(o: TerminalKeysOptions): TerminalKeysActor {
     const parsed = bridgeApi.TerminalKeysArgs.safeParse(args);
     if (!parsed.success) return { ok: false, code: "bad_args" };
     const { terminal, key, rev } = parsed.data;
+    if (o.busy?.(terminal)) return { ok: false, code: "busy" };
     const menu = o.menu.current();
     if (menu.rev !== rev) return { ok: false, code: "keys_changed" };
     const entry = menu.keys.find((e) => e.id === key);
