@@ -3,6 +3,7 @@ import type { bridgeApi } from "@herdr-remote/protocol";
 import claudeIcon from "../assets/claude.svg";
 import codexIcon from "../assets/codex.svg";
 import { AnsiText } from "../components/AnsiText";
+import { DiagnosticsOverlay, useTapGesture } from "../components/Diagnostics";
 import type { AgentStatus } from "../model";
 import { useHostName } from "../bridge/host-name";
 import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
@@ -146,14 +147,18 @@ function Status({ status }: { status: AgentStatus }) {
 
 /** The header both views share: back, the agent, its status mark, and `right` (the text view's Aa). */
 export function ChatHead({ agent, backHref, right, roomy }: { agent: ChatAgent; backHref: string; right?: ReactNode; roomy?: boolean | undefined }) {
+  // Hidden, as on the Agents header: five taps on the title open the viewport diagnostics, here with the footer's boxes.
+  const [diag, setDiag] = useState(false);
+  const tap = useTapGesture(() => setDiag(true));
   return (
+    <>
     <header className={`row nf chat-head${roomy ? " chat-head-roomy" : ""}`}>
       <a href={backHref} aria-label="Back" className="row nf chat-back">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <path d="M15 5l-7 7 7 7" />
         </svg>
       </a>
-      <div className="z row f1 chat-title">
+      <div className="z row f1 chat-title" onClick={tap}>
         <img className="hn" src={HARNESS_ICON[agent.harness]} alt="" width={14} height={14} />
         <span className="nf tr chat-name">{agent.name}</span>
         <span className="f1 tr chat-folder">{agent.folder}</span>
@@ -162,6 +167,8 @@ export function ChatHead({ agent, backHref, right, roomy }: { agent: ChatAgent; 
       </div>
       {right}
     </header>
+    {diag ? <DiagnosticsOverlay onClose={() => setDiag(false)} /> : null}
+    </>
   );
 }
 

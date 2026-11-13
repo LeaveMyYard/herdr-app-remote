@@ -46,6 +46,46 @@ function insets(): Row[] {
   return rows;
 }
 
+/** What is painted at (x, y), ignoring this overlay: the first element under the point that is not inside it. */
+function hitRow(label: string, x: number, y: number): Row {
+  const key = `hit ${label} (x ${n(x)} y ${n(y)})`;
+  if (typeof document.elementsFromPoint !== "function") return [key, "n/a"];
+  const at = document.elementsFromPoint(x, y).find((e) => !e.closest(".diag"));
+  return [key, at ? `${at.tagName.toLowerCase()}.${String(at.className).slice(0, 30)}` : "nothing (outside the layout viewport)"];
+}
+
+/** The chat screens' own boxes (empty elsewhere): where the footer and composer sit against the frame and the window, what is hit there, and whether the page has been scrolled. */
+function chatRows(): Row[] {
+  const foot = document.querySelector(".chat-foot");
+  if (!foot) return [];
+  const q = (s: string) => document.querySelector(s);
+  const form = q(".chat-form")?.getBoundingClientRect();
+  const send = q(".chat-send")?.getBoundingClientRect();
+  const ph = q(".ph")?.getBoundingClientRect();
+  const h = window.innerHeight;
+  const x = window.innerWidth / 2;
+  const probes: Row[] = [
+    ...(form ? [hitRow("composer top", x, form.top + 1), hitRow("composer middle", x, form.top + form.height / 2), hitRow("composer bottom", x, form.bottom - 1)] : []),
+    ...(send ? [hitRow("send centre", send.left + send.width / 2, send.top + send.height / 2)] : []),
+    hitRow("just above innerHeight", x, h - 1),
+    ...(ph && ph.bottom > h ? [hitRow("between innerHeight and .ph bottom", x, (h + ph.bottom) / 2)] : []),
+  ];
+  return [
+    rect(".ph > :last-child", q(".ph")?.lastElementChild ?? null),
+    rect(".chat-main / .cv-main", q(".cv-main") ?? q(".chat-main")),
+    rect(".chat-foot", foot),
+    rect(".chat-form", q(".chat-form")),
+    rect(".chat-text", q(".chat-text")),
+    rect(".chat-send", q(".chat-send")),
+    [".ph top", ph ? n(ph.top) : "not found"],
+    ["window.scrollY", n(window.scrollY)],
+    ["scrollingElement.scrollTop", n(document.scrollingElement?.scrollTop)],
+    ["html.scrollTop", n(document.documentElement.scrollTop)],
+    ["body.scrollTop", n(document.body.scrollTop)],
+    ...probes,
+  ];
+}
+
 export function collect(): Row[] {
   const q = (s: string) => document.querySelector(s);
   const vv = window.visualViewport;
@@ -74,6 +114,7 @@ export function collect(): Row[] {
     rect(".screen", q(".screen")),
     rect(".tabbar", tabbar),
     [".tabbar padding-bottom", tabbar ? getComputedStyle(tabbar).paddingBottom : "not found"],
+    ...chatRows(),
     ["userAgent", navigator.userAgent],
   ];
 }
