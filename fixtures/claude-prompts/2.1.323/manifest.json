@@ -20,10 +20,14 @@
     "stop-idle-after-double-esc": "then Esc Esc in one hc keys call with no history: unchanged",
     "stop-working-stream": "working while a reply streams (\"H0-SLOW\"): spinner line, footer \"⏸ manual mode on · esc to interrupt · ← for agents\"; hc get says status.state \"working\"",
     "stop-stream-after-esc": "one Esc while streaming: \"⎿  Interrupted · What should Claude do instead?\", footer back to \"? for shortcuts\"",
-    "stop-after-stop-double-esc": "Esc, then Esc 300 ms later, right after an interrupt (idle with a history): the Rewind menu opens. Why Stop has a 3 s cooldown",
+    "stop-after-stop-double-esc": "two Escs 300 ms apart, 2 s after an interrupt (idle with a history): the Rewind menu opens (Claude Code’s double-Esc)",
     "stop-working-tool": "working while a Bash call runs (\"H0-TOOL\", allowed): footer \"esc to interrupt\"; hc get \"working\"",
     "stop-tool-after-esc": "one Esc while the tool runs: the call gets an error result, \"Interrupted · What should Claude do instead?\"",
-    "stop-permission-after-esc": "one Esc on a permission prompt: the prompt is cancelled (call rejected, turn interrupted). Why Stop refuses while a prompt is open"
+    "stop-permission-after-esc": "one Esc on a permission prompt: the prompt is cancelled (call rejected, turn interrupted). Why Stop refuses while a prompt is open",
+    "stop-second-esc-300ms": "one second Esc 300 ms after the Esc that interrupted the agent: no Rewind (nor at 1 s, 2 s, 3.5 s: manifest stop.secondEsc)",
+    "stop-second-esc-3500ms": "the same, 3.5 s after: no Rewind",
+    "stop-working-draft": "working, with a desk draft \"draft\" in the composer: herdr-core \"working\", but the footer drops \"esc to interrupt\" (just \"⏸ manual mode on\")",
+    "stop-draft-after-esc": "one Esc with that draft: the agent is interrupted and the draft stays in the composer"
   },
   "keys": {
     "multiSelectToggle": "space or enter toggles the row under the cursor; down moves; Submit is the row after Other; Enter on it opens a review step with 1. Submit answers / 2. Cancel",
@@ -67,6 +71,25 @@
       "onPermissionPrompt": "the same as whileTool: Esc cancels the dialog and the call",
       "idle": "nothing is written"
     },
-    "doubleEsc": "a second Esc soon after an interrupt opens the Rewind menu (stop-after-stop-double-esc)"
+    "doubleEsc": "two Escs 300 ms apart on an idle agent with a history open the Rewind menu (stop-after-stop-double-esc); one second Esc 300 ms, 1 s, 2 s or 3.5 s after the interrupting one does not. Stop’s 3 s cooldown is a margin against pairing, not a measured window",
+    "secondEsc": [
+      {
+        "gapMs": 300,
+        "rewind": false
+      },
+      {
+        "gapMs": 1000,
+        "rewind": false
+      },
+      {
+        "gapMs": 2000,
+        "rewind": false
+      },
+      {
+        "gapMs": 3500,
+        "rewind": false
+      }
+    ],
+    "deskDraft": "a desk draft hides \"esc to interrupt\" from the footer while herdr still says working; one Esc interrupts and keeps the draft. Stop refuses (desk_draft)"
   }
 }

@@ -55,6 +55,9 @@ describe("recorded Claude Code prompt screens (H0)", () => {
     for (const n of ["stop-idle", "stop-stream-after-esc", "stop-tool-after-esc", "stop-permission-after-esc"]) expect(last(n)).not.toMatch(/esc to interrupt/);
     expect(screen("stop-stream-after-esc")).toMatch(/Interrupted · What should Claude do instead\?/);
     expect(screen("stop-after-stop-double-esc")).toMatch(/\n {3}Rewind\n/);
+    for (const n of ["stop-second-esc-300ms", "stop-second-esc-3500ms"]) expect(screen(n)).not.toMatch(/\n {3}Rewind\n/);
+    expect(JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")).stop.secondEsc.every((x: { rewind: boolean }) => !x.rewind)).toBe(true);
+    expect(last("stop-working-draft")).not.toMatch(/esc to interrupt/);
     const m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
     expect(m.stop.key).toMatch(/^esc, once/);
   });

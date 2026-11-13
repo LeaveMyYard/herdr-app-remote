@@ -214,9 +214,10 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
   };
 
   // CV8: while the agent works and nothing is typed, the send button is Stop (the board's working states). Typing
-  // brings Send back, so a message can still be queued.
+  // brings Send back, so a message can still be queued. (The first-send question always holds text, so an empty box
+  // already means none is open.)
   const [stopping, setStopping] = useState(false);
-  const stoppable = variant === "chat" && input.stop?.enabled === true && working && !locked && text === "" && asking === null;
+  const stoppable = variant === "chat" && input.stop?.enabled === true && working && !locked && text === "";
   const onStop = async () => {
     const stop = input.stop;
     if (!stop || stopping) return;

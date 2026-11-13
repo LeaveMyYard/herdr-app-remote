@@ -98,7 +98,8 @@ describe("Stop in the composer (CV8)", () => {
     for (const [r, words] of [
       [{ ok: false, code: "not_working" }, "Agent 1 already stopped."],
       [{ ok: false, code: "prompt_open" }, "Answer the prompt above first"],
-      [{ ok: false, code: "busy" }, "desk-1 is typing. Try again in a moment."],
+      [{ ok: false, code: "busy" }, "Another answer or Stop is running for Agent 1. Try again in a moment."],
+      [{ ok: false, code: "desk_draft" }, "desk-1 has unsent text in Agent 1's box. Nothing was pressed."],
       [{ ok: false, code: "cooldown" }, "Agent 1 was just stopped. Try again in a few seconds."],
       [{ ok: false, code: "unknown_effect", unknown_effect: true }, "Agent 1 may have been stopped. Look before you stop it again."],
       [{ ok: false, code: "timeout", unknown_effect: true }, "Agent 1 may have been stopped. Look before you stop it again."],

@@ -1,7 +1,7 @@
 // `agent.stop` (CV8): Esc once, only while working with no prompt, under the shared per-terminal lock, with a cooldown,
 // held-press timing and a post-check. Screens are the rig's recordings of the pinned Claude Code (stop-*).
 import { describe, expect, it } from "vitest";
-import { agentStopActor, interruptible, STOP_COOLDOWN_MS, type StopSource } from "../../src/prompt/stop.js";
+import { agentStopActor, composerDraft, interruptible, STOP_COOLDOWN_MS, type StopSource } from "../../src/prompt/stop.js";
 import { promptAnswerActor } from "../../src/prompt/answer.js";
 import { TerminalLocks } from "../../src/prompt/lock.js";
 import type { Runner, RunResult } from "../../src/plugins/exec.js";
@@ -45,7 +45,7 @@ function setup(o: { screen?: string; state?: ReturnType<StopSource["state"]>; ca
     hasCard: () => src.card,
   };
   const locks = o.locks ?? new TerminalLocks();
-  const stop = agentStopActor({ run: term.runner, source, locks, binaries: { hc: "hc" } as never, now: () => clock.now, sleep: async (ms) => void (clock.now += ms), postCheckMs: 1000 });
+  const stop = agentStopActor({ run: term.runner, source, locks, binaries: { hc: "hc" } as never, now: () => clock.now, sleep: async (ms) => void (clock.now += ms), postCheckMs: 1000, holdMs: 20 });
   const act = (args: Record<string, unknown> = { terminal: "t3" }, client = CLIENT()) => stop(client as never, "agent.stop", args);
   return { term, clock, src, states, locks, stop, act };
 }
@@ -68,6 +68,18 @@ describe("interruptible: Claude Code's own footer, and no prompt block", () => {
     expect(interruptible(inText)).toBe(false);
     // A working footer under a prompt block: the prompt wins.
     expect(interruptible(screen("permission").replace(/Esc to cancel · Tab to amend\s*$/, "Esc to cancel · esc to interrupt\n"))).toBe(false);
+  });
+});
+
+describe("composerDraft: text between the composer's two rules", () => {
+  it("reads the recorded screens", () => {
+    expect(composerDraft(screen("stop-working-draft"))).toBe(true);
+    for (const n of ["stop-working-stream", "stop-working-tool", "stop-idle", "stop-stream-after-esc"] as const) expect(composerDraft(screen(n)), n).toBe(false);
+    expect(composerDraft(screen("stop-draft-after-esc"))).toBe(true);
+  });
+  it("is null (refuse) without a composer box", () => {
+    expect(composerDraft("")).toBeNull();
+    expect(composerDraft("● Agent 1\n  ⏸ manual mode on · esc to interrupt\n")).toBeNull();
   });
 });
 
@@ -121,6 +133,12 @@ describe("agent.stop", () => {
     }
   });
 
+  it("a working footer with no composer box found is not_working (fail closed), after the read only", async () => {
+    const { term, act } = setup({ screen: "● Agent 1 is working on Project Alpha.\n\n  ⏸ manual mode on · esc to interrupt · ← for agents\n" });
+    expect(await act()).toEqual({ ok: false, code: "not_working" });
+    expect(term.pressed).toEqual([]);
+  });
+
   it("an unreadable screen presses nothing", async () => {
     const { term, act } = setup();
     term.readFails = true;
@@ -168,12 +186,43 @@ describe("agent.stop", () => {
     const a = setup();
     a.term.keysReply = () => ({ code: null, stdout: "", stderr: "", error: "timeout" });
     expect(await a.act()).toEqual({ ok: false, code: "timeout", unknown_effect: true });
+    await new Promise((r) => setTimeout(r, 40));
     expect(await a.act()).toEqual({ ok: false, code: "cooldown" });
     const b = setup();
     b.term.keysReply = () => ({ code: 1, stdout: "", stderr: '{"error":{"kind":"not_found"}}' });
     expect(await b.act()).toEqual({ ok: false, code: "not_working" });
     b.term.keysReply = null;
     expect(await b.act()).toEqual({ ok: true });
+  });
+
+  it("a timed-out or killed press keeps the terminal locked while hc is still being killed (review L1)", async () => {
+    for (const reply of [
+      { code: null, stdout: "", stderr: "", error: "timeout" as const },
+      { code: null, stdout: "", stderr: "", error: "aborted" as const },
+    ]) {
+      const { term, locks, act } = setup();
+      term.keysReply = () => reply;
+      expect((await act())!.unknown_effect).toBe(true);
+      expect(locks.has("t3")).toBe(true);
+      expect(await act()).toEqual({ ok: false, code: "busy" });
+      await new Promise((r) => setTimeout(r, 40));
+      expect(locks.has("t3")).toBe(false);
+    }
+    // Any other outcome releases at once.
+    const { locks, act } = setup();
+    expect(await act()).toEqual({ ok: true });
+    expect(locks.has("t3")).toBe(false);
+  });
+
+  it("a desk draft in the composer is desk_draft, after the read only (rig: the footer hides the hint, hc would hold the press)", async () => {
+    const { term, act } = setup({ screen: screen("stop-working-draft") });
+    expect(await act()).toEqual({ ok: false, code: "desk_draft" });
+    expect(term.calls).toEqual([READ]);
+    // The same draft under a footer that still says "esc to interrupt": the draft wins.
+    const forged = screen("stop-working-draft").replace(/⏸ manual mode on\s*$/, "⏸ manual mode on · esc to interrupt · ← for agents\n");
+    const b = setup({ screen: forged });
+    expect(await b.act()).toEqual({ ok: false, code: "desk_draft" });
+    expect(b.term.pressed).toEqual([]);
   });
 
   it("hc's refusals keep nothing-pressed codes; anything else is an unknown effect", async () => {

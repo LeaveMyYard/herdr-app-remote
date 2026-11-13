@@ -26,11 +26,9 @@ import { PushService, type PushOptions } from "../push/service.js";
 import { hostName } from "../security/host-name.js";
 import { Security, type DeviceView, type ServeIdentity } from "../security/security.js";
 import { createBridgeServer, type BridgeServer, type GuardVerdict } from "../server.js";
-import { terminalSendActor } from "../terminal/send.js";
-import { terminalKeysActor } from "../terminal/keys.js";
-import { promptAnswerActor, type PromptSource } from "../prompt/answer.js";
-import { TerminalLocks } from "../prompt/lock.js";
-import { agentStopActor, type StopSource } from "../prompt/stop.js";
+import type { PromptSource } from "../prompt/answer.js";
+import type { StopSource } from "../prompt/stop.js";
+import { pressActors } from "./presses.js";
 import { PROMPT_READ_LINES } from "../prompt/screen.js";
 import { KeysMenu, type Loaded as KeysLoaded, type LoadState as KeysLoadState } from "../terminal/keys-config.js";
 import { UsageTopicDriver } from "../usage.js";
@@ -143,43 +141,19 @@ export async function startApp(o: AppOptions): Promise<App> {
   const invalid = (topic: string) => (error: string) => log({ event: "invalid_topic", topic, error });
 
   let usage: UsageTopicDriver | undefined = undefined;
-  // `terminal.send` (S16): `hc send` only, under `terminal.input` (expiry, rate limit and audit in Security).
-  // While a prompt answer runs in a terminal (CV7), typing and key presses there from any device are `busy`.
-  // So does a Stop (CV8): the two share one per-terminal lock.
-  const pressLocks = new TerminalLocks();
-  const terminal = terminalSendActor({ run, binaries, busy: (t) => pressLocks.has(t) });
   const dataDir = join(o.appHome, "data/herdr-app-remote");
   // The key menu (S16b), from `keys.json` or the default; reported once the hub and security exist (below).
   let onKeysLoad: (l: KeysLoaded) => void = () => {};
   const keysMenu = new KeysMenu(dataDir, (l) => onKeysLoad(l));
-  // `terminal.keys` (S16b): `hc keys` with a menu entry's tokens only, under `terminal.keys`.
-  const keys = terminalKeysActor({ run, binaries, menu: keysMenu, busy: (t) => pressLocks.has(t) });
   let inboxDriver: InboxTopicDriver | undefined = undefined;
   let push: PushService | undefined = undefined;
-  // `prompt.answer` (CV7): presses keys the bridge derives from a verified screen, for a card the chat view published.
+  // The actors that press into a terminal (presses.ts): `terminal.send` (S16, `hc send` only), `terminal.keys` (S16b,
+  // a menu entry's tokens only), `prompt.answer` (CV7, keys derived from a verified screen) and `agent.stop` (CV8,
+  // Esc once). While an answer or a Stop runs in a terminal, the others into it are `busy` (one shared lock).
   const promptSourceRef: { current?: PromptSource } = {};
-  const prompts = promptAnswerActor({
-    run,
-    binaries,
-    source: {
-      current: (t) => promptSourceRef.current?.current(t),
-      fresh: (t) => promptSourceRef.current?.fresh(t) ?? Promise.resolve(null),
-      answered: (t, id) => promptSourceRef.current?.answered(t, id),
-      isAnswered: (t, id) => promptSourceRef.current?.isAnswered(t, id) ?? false,
-    },
-    locks: pressLocks,
-  });
-  // `agent.stop` (CV8): Esc once in a working Claude agent whose chat view is open; under `prompt.answer`, same lock.
   const stopSourceRef: { current?: StopSource } = {};
-  const stopper = agentStopActor({
-    run,
-    binaries,
-    locks: pressLocks,
-    source: {
-      state: (t) => stopSourceRef.current?.state(t) ?? null,
-      hasCard: (t) => stopSourceRef.current?.hasCard(t) ?? false,
-    },
-  });
+  const presses = pressActors({ run, binaries, menu: keysMenu, promptSource: () => promptSourceRef.current, stopSource: () => stopSourceRef.current });
+  const { terminal, keys, prompts, stopper } = presses;
   const actors: Actor[] = [
     ...(o.actors ?? []),
     (_c, kind, args) => usage?.act(kind, args),
@@ -212,15 +186,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     },
     // A device that may no longer type has its `hc send` in flight killed (hc holds one while the desktop is typed on),
     // and its `hc keys` likewise; losing just one of the two capabilities kills just that one.
-    onCut: (id, cap) => {
-      if (cap === undefined || cap === "terminal.input") terminal.cancel(id ?? undefined);
-      if (cap === undefined || cap === "terminal.keys") keys.cancel(id ?? undefined);
-      // Losing `prompt.answer` stops only that device's own answer in flight (§5.1).
-      if (cap === undefined || cap === "prompt.answer") {
-        prompts.cancel(id ?? undefined);
-        stopper.cancel(id ?? undefined);
-      }
-    },
+    onCut: (id, cap) => presses.cut(id ?? undefined, cap),
     onAuditHealth: (h) => log({ event: "audit_health", ok: h.ok, failures: h.failures }),
     // Chat history turned off (CV1): its open `chatview:<t>` / `timeline:<t>` subscriptions end now.
     onTopicsCut: (id) => hubRef.current?.recheck(id),

@@ -26,7 +26,11 @@ export type Screen =
   | "stop-after-stop-double-esc"
   | "stop-working-tool"
   | "stop-tool-after-esc"
-  | "stop-permission-after-esc";
+  | "stop-permission-after-esc"
+  | "stop-second-esc-300ms"
+  | "stop-second-esc-3500ms"
+  | "stop-working-draft"
+  | "stop-draft-after-esc";
 export const screen = (name: Screen): string => readFileSync(join(DIR, `${name}.txt`), "utf8");
 
 /** The tool calls the rig's fake API made for each recording (rig/fake-anthropic.mjs), as pending calls. */

@@ -127,13 +127,50 @@ const rec = {};
   await sleep(2000);
   save('stop-stream-after-esc', read(t));
   rec.stream = after('rec-stream');
-  // A second Esc, at once, now that it is idle with a history.
+  // Two Escs 300 ms apart, 2 s after the interrupt (idle with a history): Claude Code's double-Esc opens Rewind. A
+  // single second Esc is recorded below at 0.3 to 3.5 s.
   keys(t, 'esc');
   await sleep(300);
   keys(t, 'esc');
   await sleep(1000);
   save('stop-after-stop-double-esc', read(t));
   keys(t, 'esc');
+}
+const REWIND = /^ {3}Rewind$/m;
+/** A second, single Esc `gap` ms after the Esc that interrupted a working agent: does Rewind open? (review M1) */
+{
+  const t = launch();
+  await ready(t);
+  rec.secondEsc = [];
+  for (const gap of [3500, 2000, 1000, 300]) {
+    hc('send', t, `H0-SLOW please (gap ${gap})`);
+    await untilScreen(t, WORKING, 20000);
+    await sleep(1500);
+    keys(t, 'esc');
+    await sleep(gap);
+    keys(t, 'esc');
+    await sleep(1200);
+    const sc = read(t);
+    const rewind = REWIND.test(sc);
+    rec.secondEsc.push({ gap, rewind });
+    if (gap === 300) save('stop-second-esc-300ms', sc);
+    if (gap === 3500) save('stop-second-esc-3500ms', sc);
+    if (rewind) { keys(t, 'esc'); }
+    await sleep(5000);
+  }
+}
+/** A draft in Claude's composer while it works: what does one Esc do? (review L3) */
+{
+  const t = await working('stream', 'rec-draft');
+  keys(t, 'd', 'r', 'a', 'f', 't');
+  await sleep(800);
+  save('stop-working-draft', read(t));
+  rec.draftStatus = status(t);
+  keys(t, 'esc');
+  await sleep(2000);
+  const sc = read(t);
+  save('stop-draft-after-esc', sc);
+  rec.draft = { interrupted: interrupted(after('rec-draft')), stillWorking: WORKING.test(sc), draftKept: /^❯\s*draft$/m.test(sc) };
 }
 {
   const t = await working('tool', 'rec-tool');
@@ -160,6 +197,8 @@ check('recorded: herdr-core says working while streaming and while a tool runs, 
 check('recorded: Esc while streaming writes "[Request interrupted by user]"', interrupted(rec.stream), rec.stream);
 check('recorded: Esc while a tool runs rejects the call and writes the tool-use marker', interrupted(rec.tool) && rec.tool.some((l) => Array.isArray(l.content) && l.content.some((b) => b.type === 'tool_result' && b.is_error)), rec.tool);
 check('recorded: Esc on a permission prompt cancels it (why Stop refuses on a prompt)', interrupted(rec.perm), rec.perm);
+check('recorded: one second Esc 300 ms, 1 s, 2 s or 3.5 s after the interrupting Esc does not open Rewind (only a double-Esc pair does)', rec.secondEsc.length === 4 && rec.secondEsc.every((x) => !x.rewind), rec.secondEsc);
+check('recorded: with a desk draft in the composer, herdr says working but the footer has no "esc to interrupt"; one Esc interrupts and keeps the draft', rec.draftStatus === 'working' && rec.draft.interrupted && rec.draft.draftKept, rec.draft);
 note({ rec });
 for (const t of terms) { try { hc('kill', t); } catch { /* already gone */ } }
 terms.length = 0;
@@ -230,8 +269,9 @@ async function mapped(tag) {
   const t = launch();
   await ready(t);
   hc('send', t, 'hello (act-idle)');
-  await sleep(3000);
-  const before = read(t);
+  await untilStatus(t, 'idle');
+  await sleep(1500);
+  const before = read(t).split('\n').slice(-4).join('\n');
   const i = calls.length;
   const r = await actorFor()(client, 'agent.stop', { terminal: t });
   check('idle: not_working, nothing read or pressed (S says idle)', r.code === 'not_working' && since(i).length === 0, { r, calls: since(i) });
@@ -239,7 +279,7 @@ async function mapped(tag) {
   const r2 = await actorFor('working')(client, 'agent.stop', { terminal: t });
   check('idle, S wrongly working: the screen has no "esc to interrupt": not_working, nothing pressed', r2.code === 'not_working' && pressedSince(j).length === 0, { r2, calls: since(j) });
   await sleep(500);
-  check('idle: the screen did not change', read(t) === before);
+  check('idle: the composer and footer did not change, and nothing was interrupted', read(t).split('\n').slice(-4).join('\n') === before && !interrupted(after('act-idle')));
 }
 // A permission prompt open: refused with nothing pressed, by S, and by V alone; the prompt is still there after.
 {
@@ -256,6 +296,16 @@ async function mapped(tag) {
   check('prompt, S wrongly working: the screen shows a prompt block: prompt_open, nothing pressed', r2.code === 'prompt_open' && pressedSince(j).length === 0, { r2, calls: since(j) });
   await sleep(500);
   check('prompt: the dialog is still open, nothing answered or cancelled', /Do you want to proceed\?/.test(read(t)) && !interrupted(after('act-perm')));
+  keys(t, 'esc');
+}
+// A desk draft in the composer while the agent works: refused with nothing pressed, the agent still working.
+{
+  const t = await working('stream', 'act-draft');
+  keys(t, 'd', 'r', 'a', 'f', 't');
+  await sleep(800);
+  const i = calls.length;
+  const r = await actorFor()(client, 'agent.stop', { terminal: t });
+  check('draft: desk_draft, nothing pressed, the agent still working with the draft kept', r.code === 'desk_draft' && pressedSince(i).length === 0 && status(t) === 'working' && /^❯\s*draft$/m.test(read(t)), { r, calls: since(i) });
   keys(t, 'esc');
 }
 // The desk types while hc holds the Esc (S16's quiet rule): never reported ok.

@@ -994,13 +994,14 @@ export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_moved", "prompt_go
 // ---- Stop (CV8): `agent.stop` (docs/chatview.md §3a.6) ----
 //
 // The phone names a terminal and nothing else. The bridge presses Esc once, only while the host says the agent is
-// working, no prompt card is open and a fresh screen shows no prompt block and Claude Code's own "esc to interrupt"
-// footer. Covered by `prompt.answer`; never `hc send`, never `--force`.
+// working, no prompt card is open and a fresh screen shows no prompt block, no desk draft in the composer and Claude
+// Code's own "esc to interrupt" footer. Covered by `prompt.answer`; never `hc send`, never `--force`.
 
 export const AGENT_STOP = "agent.stop";
 /**
- * After a Stop press in a terminal, another is refused for this long (`cooldown`): a second Esc in Claude Code opens
- * the rewind menu. Counted from the end of the press (hc may hold it while the desk types).
+ * After a Stop press in a terminal, another is refused for this long (`cooldown`), counted from the end of the press
+ * (hc may hold it while the desk types). A margin, not a measured window: in the rig two Escs 300 ms apart on an idle
+ * Claude Code open its Rewind menu, while one second Esc 0.3 to 3.5 s after an interrupt does not.
  */
 export const STOP_COOLDOWN_MS = 3_000;
 
@@ -1013,8 +1014,10 @@ export type AgentStopArgs = z.infer<typeof AgentStopArgs>;
  * - `not_working`: the host does not say working, or the screen has no "esc to interrupt" ("Agent 1 already stopped.");
  * - `prompt_open`: a prompt card is open, the host says blocked, or the screen shows a prompt block: Esc would cancel
  *   it ("Answer the prompt above first");
+ * - `desk_draft`: the composer on the desk holds unsent text (hc would hold the press for it, and the footer hides the
+ *   hint);
  * - `cooldown`: a Stop was pressed in this terminal less than {@link STOP_COOLDOWN_MS} ago;
- * - `busy`: an answer or another Stop runs for this terminal ("desk-1 is typing. Try again in a moment.");
+ * - `busy`: an answer or another Stop runs for this terminal (or ran into a timeout and is still being killed);
  * - `not_open`: no chat view of this terminal is open and bound (the phone shows Stop only in one);
  * - `screen_unreadable`: `hc read` failed, so nothing could be checked;
  * - `forbidden`, `audit_unavailable`, `rate_limited`, `bad_args`: as for every act.
@@ -1022,7 +1025,7 @@ export type AgentStopArgs = z.infer<typeof AgentStopArgs>;
  * it over 1 s for the desk, failed after it may have acted, or the footer still showed afterwards ("Agent 1 may have
  * been stopped. Look before you stop it again."). The phone never retries.
  */
-export const AGENT_STOP_CODES = ["not_working", "prompt_open", "cooldown", "busy", "not_open", "screen_unreadable", "forbidden", "audit_unavailable", "unknown_effect"] as const;
+export const AGENT_STOP_CODES = ["not_working", "prompt_open", "desk_draft", "cooldown", "busy", "not_open", "screen_unreadable", "forbidden", "audit_unavailable", "unknown_effect"] as const;
 
 // ---- terminal keys (S16b): the special-keys menu ----
 //

@@ -60,7 +60,10 @@ export function stopWords(r: { code?: string | undefined; unknown_effect?: boole
     case "prompt_open":
       return LOCKED;
     case "busy":
-      return `${o.desk} is typing. Try again in a moment.`;
+      // The terminal's lock: another answer or Stop runs there (a typing desk makes hc hold the press instead).
+      return `Another answer or Stop is running for ${o.agent}. Try again in a moment.`;
+    case "desk_draft":
+      return `${o.desk} has unsent text in ${o.agent}'s box. Nothing was pressed.`;
     case "cooldown":
       return `${o.agent} was just stopped. Try again in a few seconds.`;
     case "forbidden":

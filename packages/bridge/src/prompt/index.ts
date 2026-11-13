@@ -4,5 +4,5 @@ export { parseScreen, screenLines, PROMPT_READ_LINES, type PromptRow, type Scree
 export { matchPrompt, pendingTools, promptId, promptItem, cardRev, isReview, type Match, type PendingTool, type PromptKind } from "./match.js";
 export { promptAnswerActor, PROMPT_ANSWER, type PromptAnswerActor, type PromptAnswerOptions, type PromptSource, type PublishedPrompt } from "./answer.js";
 export { confirmOtherField, otherSendArgs, OTHER_CONFIRM_MAX_MS, type OtherFieldConfirmation } from "./other.js";
-export { agentStopActor, interruptible, AGENT_STOP, INTERRUPT_HINT, STOP_COOLDOWN_MS, type AgentStopActor, type AgentStopOptions, type StopSource } from "./stop.js";
+export { agentStopActor, composerDraft, interruptible, AGENT_STOP, INTERRUPT_HINT, STOP_COOLDOWN_MS, type AgentStopActor, type AgentStopOptions, type StopSource } from "./stop.js";
 export { TerminalLocks } from "./lock.js";

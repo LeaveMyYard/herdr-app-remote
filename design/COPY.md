@@ -87,8 +87,9 @@ Rows for the Claude Code chat view, from `docs/chatview.md` §11. These rows are
 | ● | Stop: done | `new (CV8)` | - | Stopped by you · 21:14 | CV8 | status row |
 | ● | Stop: not working | `new (CV8, not_working)` | - | Agent 1 already stopped. | CV8 | - |
 | ● | Stop: prompt open | `new (CV8, prompt_open)` | - | Answer the prompt above first | CV8 | the locked composer's words; Esc would cancel the prompt |
-| ● | Stop: desk busy | `new (CV8, busy)` | - | desk-1 is typing. Try again in a moment. | CV8 | the prompt cards' words |
-| ● | Stop: cooldown | `new (CV8, cooldown)` | - | Agent 1 was just stopped. Try again in a few seconds. | CV8 | CV8 author, 2026-11-13 (delegated copy); a second Esc opens Rewind |
+| ● | Stop: another press running | `new (CV8, busy)` | - | Another answer or Stop is running for Agent 1. Try again in a moment. | CV8 | CV8 author, review L2: `busy` is the terminal's lock, never the desk typing (that is a held press: unknown effect) |
+| ● | Stop: desk draft | `new (CV8, desk_draft)` | - | desk-1 has unsent text in Agent 1's box. Nothing was pressed. | CV8 | CV8 author, review L3 |
+| ● | Stop: cooldown | `new (CV8, cooldown)` | - | Agent 1 was just stopped. Try again in a few seconds. | CV8 | CV8 author, 2026-11-13 (delegated copy); a margin against Esc pairing into Rewind |
 | ● | Stop: unknown effect | `new (CV8, unknown_effect)` | - | Agent 1 may have been stopped. Look before you stop it again. | CV8 | CV8 author, 2026-11-13; never invites a second press |
 | ● | Stop: off | `new (CV8, forbidden)` | - | Stop is off for this phone. Turn on Answer prompts in Remote on desk-1. | CV8 | CV8 author, 2026-11-13; Stop is under the Answer prompts switch |
 | ● | Stop: too many | `new (CV8, rate_limited)` | - | Too many presses. Wait a moment and try again. | CV8 | CV8 author, 2026-11-13 |

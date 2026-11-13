@@ -3,11 +3,14 @@
 //
 //   1. capability (`prompt.answer`, off by default, expires), rate limit and audit are `Security.act`'s (refused while
 //      Activity can't be written); here: the per-terminal lock shared with `prompt.answer` (one press sequence at a
-//      time per terminal, across devices) and a 3 s per-terminal cooldown, since a second Esc opens the rewind menu;
+//      time per terminal, across devices) and a 3 s per-terminal cooldown. The rig shows two Escs 300 ms apart on an
+//      idle agent open Rewind, while one second Esc 0.3 to 3.5 s after an interrupt does not; the 3 s is a margin
+//      against Stop's Esc pairing with another, not a measured window;
 //   2. S: the host says the agent is `working` (not `blocked`), and no prompt card is published;
-//   3. V: a fresh `hc read` shows no prompt block, and Claude Code's own footer says "esc to interrupt" (the H0 rig
-//      recording `stop-working-*`): Esc on a dialog cancels it (`stop-permission-after-esc`), so a prompt on screen
-//      refuses with nothing pressed; S is checked again after the read;
+//   3. V: a fresh `hc read` shows no prompt block, the composer holds no desk draft, and Claude Code's own footer says
+//      "esc to interrupt" (the H0 rig recording `stop-working-*`): Esc on a dialog cancels it
+//      (`stop-permission-after-esc`), so a prompt on screen refuses with nothing pressed; a draft hides the footer hint
+//      (`stop-working-draft`) and hc would hold the press for it, so it is `desk_draft`; S is checked again after the read;
 //   4. `hc keys esc`, alone, timed: a press hc held over 1 s waited for the desk (S16's quiet rule), so the screen may
 //      have changed meanwhile: `unknown_effect` ("held N s while the desk was typing");
 //   5. post-check for 2 s: the footer no longer says "esc to interrupt": `ok`; else `unknown_effect`.
@@ -18,7 +21,7 @@ import type { ActResult } from "../hub.js";
 import type { Actor } from "../app/act.js";
 import { DEFAULT_BINARIES, type Binaries } from "../plugins/detect.js";
 import type { Runner, RunResult } from "../plugins/exec.js";
-import { readHc } from "../terminal/hc-act.js";
+import { readHc, TIMEOUT_HOLD_MS } from "../terminal/hc-act.js";
 import { HELD_MS, POST_CHECK_MS, PRESS_TIMEOUT_MS, READ_TIMEOUT_MS, SETTLE_MS } from "./answer.js";
 import { TerminalLocks } from "./lock.js";
 import { parseScreen, PROMPT_READ_LINES, screenLines } from "./screen.js";
@@ -54,6 +57,8 @@ export interface AgentStopOptions {
   postCheckMs?: number;
   heldMs?: number;
   cooldownMs?: number;
+  /** After a timed-out or killed press, the lock is kept this long. Default {@link TIMEOUT_HOLD_MS}. */
+  holdMs?: number;
 }
 
 /**
@@ -66,6 +71,23 @@ export function interruptible(screen: string): boolean {
   const footer = lines[lines.length - 1];
   if (footer === undefined) return false;
   return footer.split(" · ").some((seg) => seg.trim() === INTERRUPT_HINT);
+}
+
+/** A full-width rule of Claude Code's composer box. */
+const RULE = /^ *─{20,} *$/;
+
+/**
+ * Whether the composer (the lines between the last two full-width rules) holds text: a desk draft. Null when no
+ * composer box can be found (the caller refuses: fail closed).
+ */
+export function composerDraft(screen: string): boolean | null {
+  const lines = screenLines(screen);
+  const rules: number[] = [];
+  for (let i = lines.length - 1; i >= 0 && rules.length < 2; i--) if (RULE.test(lines[i]!)) rules.push(i);
+  if (rules.length < 2) return null;
+  const inner = lines.slice(rules[1]! + 1, rules[0]!);
+  if (inner.length === 0 || !inner[0]!.startsWith("❯")) return null;
+  return inner.map((l, i) => (i === 0 ? l.slice(1) : l)).some((l) => l.trim() !== "");
 }
 
 /** hc's refusals before anything was pressed; anything else may have pressed (`unknown_effect`). */
@@ -116,7 +138,9 @@ export function agentStopActor(o: AgentStopOptions): AgentStopActor {
     if (signal.aborted) return { ok: false, code: "cancelled" };
     if (screen === null) return { ok: false, code: "screen_unreadable" };
     if (parseScreen(screen).ok) return { ok: false, code: "prompt_open" };
-    if (!interruptible(screen)) return { ok: false, code: "not_working" };
+    const draft = composerDraft(screen);
+    if (draft === true) return { ok: false, code: "desk_draft" };
+    if (draft === null || !interruptible(screen)) return { ok: false, code: "not_working" };
     // S again: the read took time.
     const s1 = refuseByState(t);
     if (s1) return s1;
@@ -157,10 +181,15 @@ export function agentStopActor(o: AgentStopOptions): AgentStopActor {
     let set = inflight.get(device);
     if (!set) inflight.set(device, (set = new Set()));
     set.add(ac);
+    let res: ActResult | undefined;
     try {
-      return await stop(t, ac.signal);
+      res = await stop(t, ac.signal);
+      return res;
     } finally {
-      o.locks.release(t);
+      // A timed-out or killed hc is still being killed (SIGKILL 0.5 s after TERM) and may yet press Esc: the terminal
+      // stays locked until that is over, so an answer can't start under it (as `InFlight` does for typing).
+      if (res?.code === "timeout" || res?.code === "cancelled") setTimeout(() => o.locks.release(t), o.holdMs ?? TIMEOUT_HOLD_MS).unref();
+      else o.locks.release(t);
       set.delete(ac);
       if (set.size === 0) inflight.delete(device);
     }
