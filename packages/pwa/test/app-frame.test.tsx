@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { boardData, swarmTopic } from "../src/fixtures";
 import { nodeUid } from "../src/panorama/select";
+import { Chat } from "../src/screens/Chat";
 import { installIosVpFix } from "../src/ios-vp-fix";
 
 const dir = join(process.cwd(), "src/styles");
@@ -39,6 +40,17 @@ describe("every route renders inside the one app frame (.ph, extended by --ios-v
     const foot = css("chat.css").match(/^\.chat-foot\{([^}]*)\}/m)?.[1] ?? "";
     expect(foot).not.toMatch(/(^|;)\s*height:/);
     expect(foot).toContain("calc(var(--sab) + 8px)");
+    expect(css("chat.css")).toContain(".chat-foot-slot{height:calc(var(--sab) + 109px)");
+  });
+
+  it("the board's footer slot is demo data only: a real (live) chat footer is content-sized", () => {
+    window.location.hash = "#/chat/a-1";
+    const demo = render(<App />);
+    expect(demo.container.querySelector("footer")).toHaveClass("chat-foot-slot");
+    demo.unmount();
+    const live = render(<Chat agent={{ name: "Agent 1", folder: "tab 1", harness: "claude", status: "idle" }} topic={{ terminal: "t3", lines: [] }} />);
+    expect(live.container.querySelector("footer")).toHaveClass("chat-foot");
+    expect(live.container.querySelector("footer")).not.toHaveClass("chat-foot-slot");
   });
 });
 

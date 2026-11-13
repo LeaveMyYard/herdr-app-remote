@@ -43,6 +43,8 @@ export interface ChatProps {
   now?: () => number;
   /** Demo data only (the PhoneKeys board's states): the Keys sheet open at first, and the key shown as pressed. */
   demoSheet?: { open: boolean; pressed: string | null };
+  /** Demo data only (the visual boards): the read-only footer keeps the board's 139 px slot. A real phone gets a footer as tall as its text. */
+  boardSlot?: boolean;
 }
 
 /**
@@ -138,7 +140,7 @@ function Status({ status }: { status: AgentStatus }) {
  * The chat: the terminal's text, an inbox banner when a question waits, and a footer. With `terminal.input` on, the
  * footer is the key bar and composer (S16); otherwise it says typing is off.
  */
-export function Chat({ agent, topic, stale, question, backHref = "#/agents", input, terminal, now = Date.now, demoSheet }: ChatProps) {
+export function Chat({ agent, topic, stale, question, backHref = "#/agents", input, terminal, now = Date.now, demoSheet, boardSlot }: ChatProps) {
   const host = useHostName();
   const { on, ranOut } = useInputOn(input, now);
   const typing = on && input && terminal !== undefined ? { input, terminal } : null;
@@ -239,7 +241,7 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
           <ChatComposer terminal={typing.terminal} agentName={agent.short ?? agent.name} input={typing.input} now={now} {...(demoSheet ? { demoSheet } : {})} />
         </footer>
       ) : (
-        <footer className={`col nf chat-foot${ranOut !== null ? " chat-foot-out" : ""}${keysBar ? " chat-foot-keys" : ""}`} {...(ranOut === null && !keysBar ? { "data-vis-mask": "" } : {})}>
+        <footer className={`col nf chat-foot${ranOut !== null ? " chat-foot-out" : ""}${keysBar ? " chat-foot-keys" : ""}${boardSlot && ranOut === null && !keysBar ? " chat-foot-slot" : ""}`} {...(ranOut === null && !keysBar ? { "data-vis-mask": "" } : {})}>
           {ranOut !== null ? (
             <>
               <p className="chat-out">{W.typingRanOut(clockOf(ranOut))}</p>
