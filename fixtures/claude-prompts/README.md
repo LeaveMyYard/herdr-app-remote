@@ -7,6 +7,10 @@ Recorded (not hand-written) by `rig/scenarios/claude-prompts.sh`: the real `clau
 (`rig/fake-anthropic.mjs`). No credentials, no network. Content is fake ("Agent 1", "Project Alpha", "Question Title 123").
 Each `.txt` is `hc read` output with trailing blanks stripped; the plan file's path is replaced by `~/CONFIG/plans/plan-1.md`.
 
+The `stop-*` screens and the manifest's `stop` section (CV8: what Esc does while working, idle, twice, and on a prompt)
+are recorded by `rig/scenarios/agent-stop.sh` (part 1 of `agent-stop-harness.mjs`, files in the rig's `rec-stop/`); a
+re-record with `claude-prompts.sh` rewrites `manifest.json`, so keep or re-add that section and its `files` rows.
+
 `manifest.json` says what each file is, the multi-select and Other key findings, and the R5 result (the assistant message
 holding the `tool_use` was on disk before the dialog showed, 4 of 4). CV7's parser tests read these files. To move the
 pin: install the new Claude Code, change `PINNED_CLAUDE_VERSION` in the scenario, run it, copy `rec-claude/*` to a new

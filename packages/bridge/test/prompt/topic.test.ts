@@ -154,3 +154,25 @@ describe("chatview prompt cards", () => {
     expect((hub.get(TOPIC) as unknown as bridgeApi.ChatviewTopic).items.some((i) => i.role === "prompt")).toBe(false);
   });
 });
+
+describe("Stop's view of the chat view (CV8)", () => {
+  it("the host's state only for an open, good chat view; a published card shows", async () => {
+    const working = await setup("working", bashTurn, null);
+    expect(working.drv.stopSource.state("t1")).toEqual({ working: true, blocked: false });
+    expect(working.drv.stopSource.hasCard("t1")).toBe(false);
+    // Another terminal has no open chat view.
+    expect(working.drv.stopSource.state("t2")).toBeNull();
+    const blocked = await setup("waiting", bashTurn, screen("permission"));
+    expect(blocked.drv.stopSource.state("t1")).toEqual({ working: false, blocked: true });
+    expect(blocked.drv.stopSource.hasCard("t1")).toBe(true);
+    const idle = await setup("idle", bashTurn, IDLE);
+    expect(idle.drv.stopSource.state("t1")).toEqual({ working: false, blocked: false });
+  });
+
+  it("is null once the binding is gone (the host no longer has the agent there)", async () => {
+    const { hub, drv } = await setup("working", bashTurn, null);
+    const h = hostState();
+    hub.publish("host", { ...h, agents: h.agents.filter((a) => a.id !== "agent-1") } as unknown as Json);
+    expect(drv.stopSource.state("t1")).toBeNull();
+  });
+});

@@ -617,6 +617,24 @@ describe("startApp: topics over the link", () => {
     expect(text).toContain("Phone 2: prompt.answer on");
   });
 
+  it("agent.stop (CV8) needs prompt.answer; with it but no open chat view of the terminal, nothing is read or pressed", async () => {
+    await start();
+    const off = await phone(await paired({ terminal: true, keys: true }));
+    send(off, { type: "hello", api: 1 });
+    send(off, { type: "act", id: "s0", kind: "agent.stop", args: { terminal: "t3" } });
+    expect(await off.until(resOf("s0"))).toMatchObject({ ok: false, code: "forbidden" });
+    const on = await phone(await paired({ prompts: true }));
+    send(on, { type: "hello", api: 1 });
+    send(on, { type: "act", id: "s1", kind: "agent.stop", args: { terminal: "t3" } });
+    expect(await on.until(resOf("s1"))).toMatchObject({ ok: false, code: "not_open" });
+    send(on, { type: "act", id: "s2", kind: "agent.stop", args: { terminal: "t3", keys: ["enter"] } });
+    expect(await on.until(resOf("s2"))).toMatchObject({ ok: false, code: "bad_args" });
+    expect(calls.some((c) => c.args[0] === "keys" || c.args[0] === "send" || c.args[0] === "read")).toBe(false);
+    const text = app!.security.activity().map((e) => e.text);
+    expect(text).toContain("Phone 1 stopped the agent in t3: refused");
+    expect(text).toContain("Phone 2 stopped the agent in t3: failed");
+  });
+
   it("turning prompt.answer off leaves a held send alone; losing terminal.input does not end prompt.answer", async () => {
     await start();
     holdSends = true;

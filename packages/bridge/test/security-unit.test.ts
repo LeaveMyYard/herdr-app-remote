@@ -71,8 +71,9 @@ describe("capabilities", () => {
     expect(hasCap(c, "prompt.answer", 1000)).toBe(false);
     expect(hasCap({ ...c, "prompt.answer.until": null }, "prompt.answer", 1e15)).toBe(true);
     expect(ACTION_CAPS.get("prompt.answer")).toBe("prompt.answer");
-    // Neither typing nor the key menu implies it.
-    expect([...ACTION_CAPS.entries()].filter(([, cap]) => cap === "prompt.answer").map(([k]) => k)).toEqual(["prompt.answer"]);
+    // Neither typing nor the key menu implies it. It covers exactly answers and Stop (CV8).
+    expect([...ACTION_CAPS.entries()].filter(([, cap]) => cap === "prompt.answer").map(([k]) => k)).toEqual(["prompt.answer", "agent.stop"]);
+    expect(ACTION_CAPS.get("agent.stop")).toBe("prompt.answer");
   });
 
   it("terminal.input expires", () => {
@@ -112,6 +113,12 @@ describe("audit redaction", () => {
     expect(describeAct("prompt.answer", { terminal: "t3", choice: { other: SECRET } }, "a question\nown answer (23 chars)")).toBe("answered a question in t3: own answer (23 chars)");
     expect(describeAct("prompt.answer", { terminal: "t3", choice: { other: SECRET } })).toBe("answered a prompt in t3");
     expect(describeAct("prompt.answer", { terminal: SECRET, prompt_id: SECRET })).toBe("answered a prompt in a terminal");
+  });
+
+  it("a Stop logs the terminal and the bridge's own words only", () => {
+    expect(describeAct("agent.stop", { terminal: "t3" })).toBe("stopped the agent in t3");
+    expect(describeAct("agent.stop", { terminal: "t3" }, "held 2 s while the desk was typing")).toBe("stopped the agent in t3, held 2 s while the desk was typing");
+    expect(describeAct("agent.stop", { terminal: SECRET, text: SECRET })).toBe("stopped the agent in a terminal");
   });
 
   it("inbox answers log the bridge-resolved option label, never client text", () => {

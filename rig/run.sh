@@ -43,7 +43,7 @@ sleep 20
 echo done > "$rig/daemon.finished"
 EOT
 chmod +x "$rig/bin/"*.sh
-cp "$here/fake-anthropic.mjs" "$here/claude-prompts-harness.mjs" "$here/prompt-answer-harness.mjs" "$rig/bin/"
+cp "$here/fake-anthropic.mjs" "$here/claude-prompts-harness.mjs" "$here/prompt-answer-harness.mjs" "$here/agent-stop-harness.mjs" "$rig/bin/"
 cp "$here/sidecar.mjs" "$here/inner.sh" "$here/lib.sh" "$rig/bin/"
 # The real link mod and the harness, for the scenarios that use them (rig-only copy of the mod).
 repo=$(cd "$here/.." && pwd -P)

@@ -713,7 +713,10 @@ export const ChatItem = z.discriminatedUnion("role", [
       state: z.enum(["open", "answered", "gone"]),
     })
     .strict(),
-  /** A status row such as "Stopped by you · 21:14" (CV8). Defined here; CV3 never produces one. */
+  /**
+   * A status row (CV8): `stopped` is "Stopped by you · 21:14", from the transcript's own interrupt marker ("[Request
+   * interrupted by user]", also after a tool call), whoever pressed Esc. `at` is that marker's time.
+   */
   z.object({ ...itemBase, role: z.literal("status"), status: z.enum(["stopped"]) }).strict(),
 ]).superRefine((i, ctx) => {
   // A `tool_use_id` names an `ask_operator` call: never on a Claude ask, which no timeline item may replace.
@@ -987,6 +990,39 @@ export type PromptAnswerArgs = z.infer<typeof PromptAnswerArgs>;
  * reached the agent ("Agent 1 may have got your answer. Look before you answer again."). The phone never retries.
  */
 export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_moved", "prompt_gone", "busy", "bad_choice", "forbidden", "audit_unavailable", "unknown_effect"] as const;
+
+// ---- Stop (CV8): `agent.stop` (docs/chatview.md §3a.6) ----
+//
+// The phone names a terminal and nothing else. The bridge presses Esc once, only while the host says the agent is
+// working, no prompt card is open and a fresh screen shows no prompt block and Claude Code's own "esc to interrupt"
+// footer. Covered by `prompt.answer`; never `hc send`, never `--force`.
+
+export const AGENT_STOP = "agent.stop";
+/**
+ * After a Stop press in a terminal, another is refused for this long (`cooldown`): a second Esc in Claude Code opens
+ * the rewind menu. Counted from the end of the press (hc may hold it while the desk types).
+ */
+export const STOP_COOLDOWN_MS = 3_000;
+
+/** `act agent.stop` (capability `prompt.answer`): press Esc once in `terminal`'s working Claude Code agent. */
+export const AgentStopArgs = z.object({ terminal: z.string().regex(TERMINAL_ID) }).strict();
+export type AgentStopArgs = z.infer<typeof AgentStopArgs>;
+
+/**
+ * `res.code` of a refused `agent.stop`. Nothing was pressed unless `unknown_effect` is set:
+ * - `not_working`: the host does not say working, or the screen has no "esc to interrupt" ("Agent 1 already stopped.");
+ * - `prompt_open`: a prompt card is open, the host says blocked, or the screen shows a prompt block: Esc would cancel
+ *   it ("Answer the prompt above first");
+ * - `cooldown`: a Stop was pressed in this terminal less than {@link STOP_COOLDOWN_MS} ago;
+ * - `busy`: an answer or another Stop runs for this terminal ("desk-1 is typing. Try again in a moment.");
+ * - `not_open`: no chat view of this terminal is open and bound (the phone shows Stop only in one);
+ * - `screen_unreadable`: `hc read` failed, so nothing could be checked;
+ * - `forbidden`, `audit_unavailable`, `rate_limited`, `bad_args`: as for every act.
+ * With `unknown_effect: true` (code `unknown_effect`, `timeout` or `cancelled`) Esc may have been pressed: hc held
+ * it over 1 s for the desk, failed after it may have acted, or the footer still showed afterwards ("Agent 1 may have
+ * been stopped. Look before you stop it again."). The phone never retries.
+ */
+export const AGENT_STOP_CODES = ["not_working", "prompt_open", "cooldown", "busy", "not_open", "screen_unreadable", "forbidden", "audit_unavailable", "unknown_effect"] as const;
 
 // ---- terminal keys (S16b): the special-keys menu ----
 //

@@ -7,7 +7,26 @@ import type { PendingTool } from "../../src/prompt/match.js";
 export const PINNED = "2.1.323";
 const DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../../fixtures/claude-prompts", PINNED);
 
-export type Screen = "permission" | "ask-single" | "ask-other" | "ask-multi" | "ask-multi-after-space" | "ask-multi-after-down-enter" | "ask-multi-on-submit" | "ask-multi-review" | "plan";
+export type Screen =
+  | "permission"
+  | "ask-single"
+  | "ask-other"
+  | "ask-multi"
+  | "ask-multi-after-space"
+  | "ask-multi-after-down-enter"
+  | "ask-multi-on-submit"
+  | "ask-multi-review"
+  | "plan"
+  // CV8 (Stop), recorded by rig/scenarios/agent-stop.sh.
+  | "stop-idle"
+  | "stop-idle-after-esc"
+  | "stop-idle-after-double-esc"
+  | "stop-working-stream"
+  | "stop-stream-after-esc"
+  | "stop-after-stop-double-esc"
+  | "stop-working-tool"
+  | "stop-tool-after-esc"
+  | "stop-permission-after-esc";
 export const screen = (name: Screen): string => readFileSync(join(DIR, `${name}.txt`), "utf8");
 
 /** The tool calls the rig's fake API made for each recording (rig/fake-anthropic.mjs), as pending calls. */

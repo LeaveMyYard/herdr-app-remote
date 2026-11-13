@@ -138,6 +138,11 @@
 .hd .cv-tools-failed .cv-dot{color:var(--dock-need)}
 .cv-tool-names{margin:0;padding:0 0 0 12px;list-style:none;font-size:12.5px;line-height:1.5;color:var(--t-muted)}
 .cv-status{gap:8px;font-size:13px;color:var(--t-working)}
+/* CV8: the stopped row and the composer's Stop button (PhoneChatView, states stop and chat). */
+.cv-stopped{gap:8px;font-size:13px;color:var(--t-muted)}
+.cv-stopped-dot{width:7px;height:7px;border-radius:4px;border:1.5px solid var(--t-idle)}
+.hd .chat-stop{border:1px solid var(--t-input);background:var(--t-raised);color:var(--t-foreground)}
+.hd .chat-stop:disabled{opacity:.45}
 .cv-asked{gap:8px;min-height:34px;font-size:13px;color:var(--t-muted)}
 .cv-ask{gap:4px;padding:10px 12px;border-radius:8px;border:1px solid var(--t-border);background:var(--t-background);font-size:13.5px}
 .cv-ask-head{font-size:11.5px;color:var(--t-dim)}

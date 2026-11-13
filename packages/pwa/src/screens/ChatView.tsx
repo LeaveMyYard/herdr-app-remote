@@ -276,7 +276,7 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
       </main>
       {typing ? (
         <footer className="col nf chat-foot chat-foot-on cv-foot" data-vis-mask="">
-          <ChatComposer variant="chat" locked={locked === true} terminal={typing.terminal} agentName={agent.short ?? agent.name} input={typing.input} now={now} />
+          <ChatComposer variant="chat" locked={locked === true} working={working} terminal={typing.terminal} agentName={agent.short ?? agent.name} input={typing.input} now={now} />
         </footer>
       ) : (
         <footer className={`col nf chat-foot cv-foot${ranOut !== null ? " chat-foot-out" : ""}`}>

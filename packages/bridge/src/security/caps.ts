@@ -33,7 +33,7 @@ export interface Caps {
    */
   "transcript.read": boolean;
   /**
-   * Answer prompts (CV7, docs/chatview.md §5.1): `prompt.answer` (and CV8's `agent.stop`). Off by default, desktop
+   * Answer prompts (CV7, docs/chatview.md §5.1): `prompt.answer` and CV8's `agent.stop`. Off by default, desktop
    * only, with an expiry like `terminal.keys`. Separate from `terminal.input` and `terminal.keys`: approving a
    * command is a stronger act than typing, and the phone never chooses keys (the bridge derives them from a
    * verified screen).
@@ -98,6 +98,8 @@ export const ACTION_CAPS: ReadonlyMap<string, Capability> = new Map<string, Capa
   ["terminal.keys", "terminal.keys"],
   // CV7: a native prompt's answer, pressed by the bridge from a verified screen (docs/chatview.md §3a).
   ["prompt.answer", "prompt.answer"],
+  // CV8: Stop presses Esc once in a working agent; the same switch as answering (docs/chatview.md §5.1).
+  ["agent.stop", "prompt.answer"],
   ["push.subscribe", "push"],
   ["push.unsubscribe", "push"],
   // S5b: a one-time code that moves this (approved) device into its Home Screen app. Answered by Security itself.

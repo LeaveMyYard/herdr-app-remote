@@ -25,6 +25,7 @@ import { mapMessages, newest, type MapOptions } from "./map.js";
 import { cardRev, matchPrompt, pendingTools, promptItem, type Match, type PendingTool } from "../prompt/match.js";
 import { parseScreen } from "../prompt/screen.js";
 import type { PromptSource, PublishedPrompt } from "../prompt/answer.js";
+import type { StopSource } from "../prompt/stop.js";
 
 type ChatItem = bridgeApi.ChatItem;
 type ChatviewTopic = bridgeApi.ChatviewTopic;
@@ -485,6 +486,21 @@ export class ChatviewTopicDriver {
       }
       void this.poll(w.topic);
     },
+  };
+
+  /**
+   * What Stop needs (CV8): the host's state now, only for a terminal whose chat view is open, good, and still bound to
+   * the same proved Claude session; and whether a prompt card is published.
+   */
+  readonly stopSource: StopSource = {
+    state: (t) => {
+      const w = this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${t}`);
+      if (!w || w.last?.state !== "ok" || w.sessionId === null) return null;
+      const r = resolve(t, this.o.hub.get("host"), this.o.feed(), this.now());
+      if (!r.ok || r.session.sessionId !== w.sessionId) return null;
+      return { working: r.agentState === "working", blocked: r.agentState === "waiting" };
+    },
+    hasCard: (t) => this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${t}`)?.card != null,
   };
 
   private failRead(w: Watch, agentState: AgentState | null): void {

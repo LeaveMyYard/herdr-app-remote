@@ -29,6 +29,8 @@ import { createBridgeServer, type BridgeServer, type GuardVerdict } from "../ser
 import { terminalSendActor } from "../terminal/send.js";
 import { terminalKeysActor } from "../terminal/keys.js";
 import { promptAnswerActor, type PromptSource } from "../prompt/answer.js";
+import { TerminalLocks } from "../prompt/lock.js";
+import { agentStopActor, type StopSource } from "../prompt/stop.js";
 import { PROMPT_READ_LINES } from "../prompt/screen.js";
 import { KeysMenu, type Loaded as KeysLoaded, type LoadState as KeysLoadState } from "../terminal/keys-config.js";
 import { UsageTopicDriver } from "../usage.js";
@@ -143,13 +145,15 @@ export async function startApp(o: AppOptions): Promise<App> {
   let usage: UsageTopicDriver | undefined = undefined;
   // `terminal.send` (S16): `hc send` only, under `terminal.input` (expiry, rate limit and audit in Security).
   // While a prompt answer runs in a terminal (CV7), typing and key presses there from any device are `busy`.
-  const terminal = terminalSendActor({ run, binaries, busy: (t) => prompts.answering(t) });
+  // So does a Stop (CV8): the two share one per-terminal lock.
+  const pressLocks = new TerminalLocks();
+  const terminal = terminalSendActor({ run, binaries, busy: (t) => pressLocks.has(t) });
   const dataDir = join(o.appHome, "data/herdr-app-remote");
   // The key menu (S16b), from `keys.json` or the default; reported once the hub and security exist (below).
   let onKeysLoad: (l: KeysLoaded) => void = () => {};
   const keysMenu = new KeysMenu(dataDir, (l) => onKeysLoad(l));
   // `terminal.keys` (S16b): `hc keys` with a menu entry's tokens only, under `terminal.keys`.
-  const keys = terminalKeysActor({ run, binaries, menu: keysMenu, busy: (t) => prompts.answering(t) });
+  const keys = terminalKeysActor({ run, binaries, menu: keysMenu, busy: (t) => pressLocks.has(t) });
   let inboxDriver: InboxTopicDriver | undefined = undefined;
   let push: PushService | undefined = undefined;
   // `prompt.answer` (CV7): presses keys the bridge derives from a verified screen, for a card the chat view published.
@@ -163,6 +167,18 @@ export async function startApp(o: AppOptions): Promise<App> {
       answered: (t, id) => promptSourceRef.current?.answered(t, id),
       isAnswered: (t, id) => promptSourceRef.current?.isAnswered(t, id) ?? false,
     },
+    locks: pressLocks,
+  });
+  // `agent.stop` (CV8): Esc once in a working Claude agent whose chat view is open; under `prompt.answer`, same lock.
+  const stopSourceRef: { current?: StopSource } = {};
+  const stopper = agentStopActor({
+    run,
+    binaries,
+    locks: pressLocks,
+    source: {
+      state: (t) => stopSourceRef.current?.state(t) ?? null,
+      hasCard: (t) => stopSourceRef.current?.hasCard(t) ?? false,
+    },
   });
   const actors: Actor[] = [
     ...(o.actors ?? []),
@@ -174,6 +190,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     terminal,
     keys,
     prompts,
+    stopper,
     navigateActor(o.link),
   ];
   // Security's topic cut reaches the hub, which is built after it.
@@ -199,7 +216,10 @@ export async function startApp(o: AppOptions): Promise<App> {
       if (cap === undefined || cap === "terminal.input") terminal.cancel(id ?? undefined);
       if (cap === undefined || cap === "terminal.keys") keys.cancel(id ?? undefined);
       // Losing `prompt.answer` stops only that device's own answer in flight (§5.1).
-      if (cap === undefined || cap === "prompt.answer") prompts.cancel(id ?? undefined);
+      if (cap === undefined || cap === "prompt.answer") {
+        prompts.cancel(id ?? undefined);
+        stopper.cancel(id ?? undefined);
+      }
     },
     onAuditHealth: (h) => log({ event: "audit_health", ok: h.ok, failures: h.failures }),
     // Chat history turned off (CV1): its open `chatview:<t>` / `timeline:<t>` subscriptions end now.
@@ -266,6 +286,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     },
   });
   promptSourceRef.current = chatview.promptSource;
+  stopSourceRef.current = chatview.stopSource;
   // Plugin items inline in the chat view (CV5): inbox rows of the terminal, anchored only on its own transcript.
   const timeline = new TimelineTopicDriver({
     hub,

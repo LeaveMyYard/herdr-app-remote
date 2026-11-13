@@ -6,6 +6,8 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { promptAnswerActor } from "../../src/prompt/answer.js";
+import { agentStopActor } from "../../src/prompt/stop.js";
+import { TerminalLocks } from "../../src/prompt/lock.js";
 import { confirmOtherField, OTHER_CONFIRM_MAX_MS, otherSendArgs, type OtherFieldConfirmation } from "../../src/prompt/other.js";
 import { matchPrompt } from "../../src/prompt/match.js";
 import { terminalSendActor } from "../../src/terminal/send.js";
@@ -55,14 +57,17 @@ function recorder(term: FakeTerm) {
 const forced = (calls: string[][]) => calls.some((a) => a.includes("--force"));
 
 /** All the bridge's terminal actors over one fake terminal, routed as the app routes them. */
-function all(name: Screen, pending: PendingTool[]) {
+function all(name: Screen, pending: PendingTool[], stopState: { working: boolean; blocked: boolean } = { working: false, blocked: true }) {
   const term = new FakeTerm(screen(name));
   const rec = recorder(term);
   const s = source(term, pending);
-  const prompts = promptAnswerActor({ run: rec.run, source: s.src, binaries: { hc: "hc" } as never, sleep: async () => {}, postCheckMs: 30 });
+  const locks = new TerminalLocks();
+  const prompts = promptAnswerActor({ run: rec.run, source: s.src, binaries: { hc: "hc" } as never, sleep: async () => {}, postCheckMs: 30, locks });
+  // Stop (CV8), with the state the test gives it: the screen decides the rest.
+  const stop = agentStopActor({ run: rec.run, source: { state: () => stopState, hasCard: () => false }, locks, binaries: { hc: "hc" } as never, sleep: async () => {}, postCheckMs: 30 });
   const send = terminalSendActor({ run: rec.run, binaries: { hc: "hc" } as never });
   const keys = terminalKeysActor({ run: rec.run, binaries: { hc: "hc" } as never, menu: { current: () => ({ rev: "0123456789abcdef", keys: [{ id: "esc", label: "Esc", keys: ["esc"] }] }) } as never });
-  const route = routeActs([send, keys, prompts]);
+  const route = routeActs([send, keys, prompts, stop]);
   const act = (kind: string, args: Record<string, unknown>) => route(CLIENT() as never, kind, args);
   return { term, rec, s, act };
 }
@@ -76,12 +81,39 @@ describe("--force is unreachable from every other path", () => {
     for (const a of rec.calls) expect(a.slice(0, 3)).toEqual(["send", "--json", "--"]);
   });
 
-  it("Stop (agent.stop is CV8: no actor here runs anything for it)", async () => {
-    const { rec, act } = all("permission", [BASH]);
-    expect(await act("agent.stop", { terminal: "t3" })).toEqual({ ok: false, code: "unsupported_action" });
+  it("Stop (agent.stop, CV8): on a working agent it presses Esc alone with hc keys; never hc send, never --force", async () => {
+    const { rec, act, term } = all("stop-working-stream", [], { working: true, blocked: false });
+    // The fake terminal has no Esc of its own: once Esc goes, the screen is the recorded one after it.
+    term.keysReply = () => {
+      term.screen = screen("stop-stream-after-esc");
+      return { code: 0, stdout: "{}", stderr: "" };
+    };
+    expect(await act("agent.stop", { terminal: "t3" })).toEqual({ ok: true });
+    expect(rec.calls.filter((a) => a[0] !== "read")).toEqual([["keys", "--json", "--", "t3", "esc"]]);
+    // Whatever the phone puts in the args, Stop takes no text and no keys from it.
+    expect((await act("agent.stop", { terminal: "t3", text: "--force" })).code).toBe("bad_args");
+    expect((await act("agent.stop", { terminal: "--force" })).code).toBe("bad_args");
+    expect(forced(rec.calls)).toBe(false);
+    expect(rec.calls.some((a) => a[0] === "send")).toBe(false);
+  });
+
+  it("Stop on every prompt the H0 rig recorded, even with the state wrongly saying working: nothing pressed", async () => {
+    for (const name of ["permission", "ask-single", "ask-other", "ask-multi", "ask-multi-review", "plan", "stop-idle", "stop-after-stop-double-esc"] as const) {
+      const { rec, act } = all(name, [], { working: true, blocked: false });
+      const r = await act("agent.stop", { terminal: "t3" });
+      expect(r.ok, name).toBe(false);
+      expect(rec.calls.filter((a) => a[0] !== "read"), name).toEqual([]);
+    }
     // The key menu's Esc presses keys, never sends.
+    const { rec, act } = all("permission", [BASH]);
     await act("terminal.keys", { terminal: "t3", key: "esc", rev: "0123456789abcdef" });
     expect(forced(rec.calls)).toBe(false);
+  });
+
+  it("Stop's source has no path to the forced send: it imports nothing from other.ts and names no send", () => {
+    const src = code(readFileSync(join(SRC, "prompt/stop.ts"), "utf8"));
+    expect(src).not.toMatch(/other\.js|otherSendArgs|confirmOtherField|"send"|'send'/);
+    expect(src).toMatch(/\["keys", "--json", "--", t, \.\.\.STOP_KEYS\]/);
   });
 
   it("option presses (permission, plan-like, question option, multi-select)", async () => {

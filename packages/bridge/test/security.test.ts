@@ -1173,6 +1173,62 @@ describe("prompt.answer (CV7)", () => {
   });
 });
 
+// ---- CV8: agent.stop (Stop), under prompt.answer ----
+
+describe("agent.stop (CV8)", () => {
+  const client = (id: string) => ({ principal: { deviceId: id }, send: () => undefined, close: () => undefined });
+  const STOP = { terminal: "t3" };
+  const inner: ActHandler = (_c, kind, args) => {
+    acts.push({ kind, args });
+    return { ok: true };
+  };
+  async function startWith(extra: Partial<ConstructorParameters<typeof Security>[0]> = {}) {
+    await start();
+    const { id } = await pairedDevice();
+    sec.close();
+    sec = new Security({ dataDir: join(dir, "data"), serve: { host: SERVE, login: OWNER }, now: () => clock, inner, ...extra });
+    return id;
+  }
+
+  it("needs prompt.answer: off after approval, refused while off, and typing or keys don't imply it", async () => {
+    const id = await startWith();
+    sec.setCap(id, "terminal.input", true);
+    sec.setCap(id, "terminal.keys", true);
+    expect(await sec.act(client(id), "agent.stop", STOP)).toEqual({ ok: false, code: "forbidden" });
+    expect(acts).toHaveLength(0);
+    expect(activity()).toContain("Phone 1 stopped the agent in t3: refused");
+    sec.setCap(id, "prompt.answer", true);
+    expect(await sec.act(client(id), "agent.stop", STOP)).toMatchObject({ ok: true });
+    expect(activity()).toContain("Phone 1 stopped the agent in t3");
+  });
+
+  it("expires with prompt.answer", async () => {
+    const id = await startWith();
+    sec.setCap(id, "prompt.answer", true, clock + 60_000);
+    expect(await sec.act(client(id), "agent.stop", STOP)).toMatchObject({ ok: true });
+    clock += 60_000;
+    expect(await sec.act(client(id), "agent.stop", STOP)).toMatchObject({ ok: false, code: "forbidden" });
+    expect(acts).toHaveLength(1);
+  });
+
+  it("6 per 10 s, and refused while Activity can't be written (nothing reaches the actor)", async () => {
+    const id = await startWith();
+    const c = client(id);
+    expect(KIND_LIMITS.get("agent.stop")).toEqual({ max: 6, windowMs: 10_000 });
+    sec.setCap(id, "prompt.answer", true);
+    for (let i = 0; i < 6; i++) expect(await sec.act(c, "agent.stop", STOP)).toMatchObject({ ok: true });
+    expect(await sec.act(c, "agent.stop", STOP)).toMatchObject({ ok: false, code: "rate_limited" });
+    clock += 10_000;
+    const f = join(dir, "data", "activity.jsonl");
+    await rm(f, { force: true });
+    await import("node:fs/promises").then((fs) => fs.mkdir(f));
+    await sec.act(c, "inbox.ack", {});
+    expect(sec.auditHealth.ok).toBe(false);
+    expect(await sec.act(c, "agent.stop", STOP)).toEqual({ ok: false, code: "audit_unavailable" });
+    expect(acts.filter((a) => a.kind === "agent.stop")).toHaveLength(6);
+  });
+});
+
 // ---- CV1: transcript.read (chat history), a capability of its own ----
 
 describe("transcript.read (CV1)", () => {
