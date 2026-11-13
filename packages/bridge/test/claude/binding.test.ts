@@ -4,6 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+
+/** These pools never spawn (a missing script, or a stubbed call): any well-formed hash will do. */
+const NO_SHA = "0".repeat(64);
 import { claude } from "../../src/index.js";
 
 const { chooseRoot, ClaudeHistory, ReaderPool } = claude;
@@ -107,7 +110,7 @@ describe("chooseRoot", () => {
 describe("ClaudeHistory", () => {
   it("bind is no_profiles without agent-usage, and starts no reader", async () => {
     const { h } = world();
-    const pool = new ReaderPool({ script: "/nonexistent/claude-reader.mjs", home: h });
+    const pool = new ReaderPool({ script: "/nonexistent/claude-reader.mjs", scriptSha256: NO_SHA, home: h });
     const history = new ClaudeHistory({ appHome: join(h, ".config/herdr-app"), home: h, pool });
     expect(await history.bind({ sessionId: S, transcript: null, cwd: "/work/project-alpha" })).toEqual({ ok: false, reason: "no_profiles", detail: "missing" });
     expect(pool.running).toBe(0);
@@ -118,7 +121,7 @@ describe("ClaudeHistory", () => {
     const { h, roots } = world();
     mkdirSync(join(h, ".config/agent-usage"), { recursive: true });
     writeFileSync(join(h, ".config/agent-usage/config.toml"), `[[claude.profiles]]\nid = "agent-2"\nconfig_dir = "~/.claude-2"\n`);
-    const history = new ClaudeHistory({ appHome: join(h, ".config/herdr-app"), home: h, pool: { script: "/nonexistent/claude-reader.mjs", home: h } });
+    const history = new ClaudeHistory({ appHome: join(h, ".config/herdr-app"), home: h, pool: { script: "/nonexistent/claude-reader.mjs", scriptSha256: NO_SHA, home: h } });
     const transcript = join(roots[1]!.projects, "-work-project-alpha", `${S}.jsonl`);
     expect(await history.bind({ sessionId: S, transcript, cwd: null })).toMatchObject({ ok: true, binding: { root: { configDir: roots[1]!.configDir, profileIds: ["agent-2"] } } });
     // a transcript under a root the list doesn't name is not bound by path
@@ -131,7 +134,7 @@ describe("ClaudeHistory", () => {
     const { roots } = world();
     const binding = { sessionId: S, root: roots[0]!, via: "transcript" as const };
     const fake = (reply: ReaderReply, info: ReaderReply = { ok: true, value: { sessionId: S } }) => {
-      const p = new ReaderPool({ script: "/nonexistent/claude-reader.mjs" });
+      const p = new ReaderPool({ script: "/nonexistent/claude-reader.mjs", scriptSha256: NO_SHA });
       p.call = (_root, req) => Promise.resolve(req.op === "info" ? info : reply);
       return new ClaudeHistory({ appHome: "/nonexistent", pool: p });
     };
@@ -143,7 +146,7 @@ describe("ClaudeHistory", () => {
     const { roots } = world();
     const binding = { sessionId: S, root: roots[0]!, via: "transcript" as const };
     const fake = (info: ReaderReply) => {
-      const p = new ReaderPool({ script: "/nonexistent/claude-reader.mjs" });
+      const p = new ReaderPool({ script: "/nonexistent/claude-reader.mjs", scriptSha256: NO_SHA });
       p.call = (_root, req) => Promise.resolve(req.op === "info" ? info : { ok: true, value: [] });
       return new ClaudeHistory({ appHome: "/nonexistent", pool: p });
     };

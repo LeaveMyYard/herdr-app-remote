@@ -1,9 +1,11 @@
 // The bundle's entry: `node bridge.mjs launch|serve --app-home ABS`. Exit codes: 0 done (or a bridge
 // already runs), 1 refused (with one line on stderr), 2 usage.
 import { existsSync, realpathSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { install } from "@herdr-remote/protocol";
 import { fileURLToPath } from "node:url";
+import { BUILT_READER_SHA256 } from "../claude/build-info.js";
+import { READER_FILE } from "../claude/pool.js";
 import { launch } from "./launch.js";
 import { serve } from "./serve.js";
 import { checkBundle } from "./self.js";
@@ -31,7 +33,9 @@ export async function main(argv: string[], bundle: string): Promise<number> {
     return 1;
   }
   const pwa = join(args.appHome, install.PWA_DIR);
-  const bridge = await serve({ appHome: args.appHome, bundleSha256: check.sha256, app: existsSync(pwa) ? { staticDir: pwa } : {} });
+  // The chat view's reader sits next to the bundle, and only the one built with it runs (its hash is injected).
+  const claude = { script: join(dirname(bundle), READER_FILE), sha256: BUILT_READER_SHA256 };
+  const bridge = await serve({ appHome: args.appHome, bundleSha256: check.sha256, app: { ...(existsSync(pwa) ? { staticDir: pwa } : {}), claude } });
   if (!bridge) return 0;
   for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) process.once(sig, () => void bridge.stop("signal"));
   await bridge.stopped;

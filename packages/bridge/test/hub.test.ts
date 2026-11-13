@@ -36,6 +36,40 @@ describe("hub snap/patch", () => {
     expect(client.got.length).toBe(before);
   });
 
+  it("publish with snap sends a fresh snap even when a patch could say it, and drops the replay log (CV3)", async () => {
+    const hub = newHub();
+    hub.publish("host", HOST(1));
+    hub.publish("host", HOST(2));
+    const { client, send } = await join(hub);
+    await send({ type: "sub", topics: ["host"] });
+    hub.publish("host", HOST(3), { snap: true });
+    const snaps = client.ofType("snap");
+    expect(snaps).toHaveLength(2);
+    expect(snaps[1]).toMatchObject({ data: HOST(3), seq: snaps[0]!.seq + 1 });
+    expect(client.ofType("patch")).toEqual([]);
+    // A resume from before the snap can't be replayed across it.
+    const late = await join(hub, { epoch: "epoch-1", seqs: { host: snaps[0]!.seq } });
+    await late.send({ type: "sub", topics: ["host"] });
+    expect(late.client.ofType("snap")).toHaveLength(1);
+  });
+
+  it("publish with ops sends the source's own patch (CV3)", async () => {
+    const hub = newHub();
+    hub.publish("plugins", { items: [1, 2, 3] });
+    const { client, send } = await join(hub);
+    await send({ type: "sub", topics: ["plugins"] });
+    const ops: bridgeApi.PatchOp[] = [
+      { op: "remove", path: "/items/0" },
+      { op: "add", path: "/items/2", value: 4 },
+    ];
+    hub.publish("plugins", { items: [2, 3, 4] }, { ops });
+    expect(client.ofType("patch")).toEqual([{ type: "patch", topic: "plugins", seq: client.ofType("snap")[0]!.seq + 1, ops }]);
+    expect(hub.get("plugins")).toEqual({ items: [2, 3, 4] });
+    // An empty ops list is a publish with nothing to send.
+    hub.publish("plugins", { items: [2, 3, 4] }, { ops: [] });
+    expect(client.ofType("patch")).toHaveLength(1);
+  });
+
   it("keeps seq per topic", async () => {
     const hub = newHub();
     hub.publish("host", HOST(1));
@@ -375,10 +409,10 @@ describe("topic gate (CV1)", () => {
 
   it("asks the gate at every sub, and a refused topic is not counted against the topic limit", async () => {
     let allow = false;
-    const asked: [string, string, boolean | undefined][] = [];
+    const asked: [string, string, string | undefined][] = [];
     const hub = newHub({
-      mayRead: (c, t, recheck) => {
-        asked.push([c.principal?.deviceId ?? "", t, recheck]);
+      mayRead: (c, t, mode) => {
+        asked.push([c.principal?.deviceId ?? "", t, mode]);
         return !bridgeApi.isTranscriptTopic(t) || allow;
       },
     });
@@ -386,12 +420,31 @@ describe("topic gate (CV1)", () => {
     const a = await joinAs(hub, "d-a");
     await a.send({ type: "sub", topics: ["chatview:t3"] });
     expect(a.got.filter((m) => m.type === "snap")).toEqual([]);
-    expect(asked).toEqual([["d-a", "chatview:t3", undefined]]);
+    expect(asked).toEqual([["d-a", "chatview:t3", "sub"]]);
     for (let i = 0; i < 80; i++) await a.send({ type: "sub", topics: [`chatview:t${i}`] });
     expect(hub.topicCount).toBe(1);
     allow = true;
     await a.send({ type: "sub", topics: ["chatview:t3"] });
     expect(a.got.filter((m) => m.type === "snap")).toMatchObject([{ topic: "chatview:t3", data: { n: 1 } }]);
+  });
+
+  it("checks the connection's topic cap before the gate, so a gate never records an open the cap refuses", async () => {
+    const asked: string[] = [];
+    const hub = newHub({
+      mayRead: (_c, t) => {
+        asked.push(t);
+        return true;
+      },
+    });
+    const closed: number[] = [];
+    const conn = hub.connect({ principal: { deviceId: "d-a" }, send: () => undefined, close: (code: number) => void closed.push(code) });
+    const send = (m: unknown) => hub.handleRaw(conn, JSON.stringify(m));
+    await send({ type: "hello", api: 1 });
+    for (let i = 0; i < 64; i++) await send({ type: "sub", topics: [`chat:t${i}`] });
+    expect(asked).toHaveLength(64);
+    await send({ type: "sub", topics: ["chatview:t99"] });
+    expect(asked).not.toContain("chatview:t99");
+    expect(closed).toEqual([1008]);
   });
 
   it("recheck ends exactly the subscriptions the gate now refuses, for that device only", async () => {
@@ -426,8 +479,8 @@ describe("topic gate (CV1)", () => {
   it("recheck(deviceId) asks the gate for that device's subscriptions only", async () => {
     const asked: string[] = [];
     const hub = newHub({
-      mayRead: (c, _t, recheck) => {
-        if (recheck) asked.push(c.principal?.deviceId ?? "");
+      mayRead: (c, _t, mode) => {
+        if (mode === "recheck") asked.push(c.principal?.deviceId ?? "");
         return true;
       },
     });

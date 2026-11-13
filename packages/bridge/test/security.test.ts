@@ -1170,7 +1170,7 @@ describe("transcript.read (CV1)", () => {
     // A recheck (the switch was just turned off, and Activity says so) writes nothing.
     clock += TOPIC_REFUSAL_LOG_LIMIT.windowMs;
     const m = activity().length;
-    expect(sec.mayRead(client(id), "chatview:t3", true)).toBe(false);
+    expect(sec.mayRead(client(id), "chatview:t3", "recheck")).toBe(false);
     expect(activity().length).toBe(m);
   });
 
@@ -1181,7 +1181,7 @@ describe("transcript.read (CV1)", () => {
     expect(needs).toEqual(["transcript.read"]);
     expect(topicCaps("chat:t3")).toEqual([]);
     expect(sec.requestDevice(req, needs)).toBeUndefined();
-    expect(sec.requestDevice(req)).toEqual({ id });
+    expect(sec.requestDevice(req, [])).toEqual({ id });
     sec.setCap(id, "transcript.read", true);
     expect(sec.requestDevice(req, needs)).toEqual({ id });
     sec.pause();

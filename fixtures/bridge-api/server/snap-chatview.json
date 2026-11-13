@@ -1,0 +1,18 @@
+{
+  "type": "snap",
+  "topic": "chatview:t3",
+  "epoch": "epoch-1",
+  "seq": 1,
+  "data": {
+    "terminal": "t3",
+    "harness": "claude",
+    "state": "ok",
+    "items": [],
+    "older": false,
+    "rev": "0c6e9b2f41a8d375",
+    "status": {
+      "state": "idle",
+      "since": null
+    }
+  }
+}

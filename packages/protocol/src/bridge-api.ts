@@ -562,6 +562,196 @@ export function chatTerminal(topic: string): string | null {
   return TERMINAL_ID.test(id) ? id : null;
 }
 
+// ---- chat view topic (CV3): `chatview:<t>` and its older pages (docs/chatview.md §2, §3, §5, §7) ----
+//
+// An agent's conversation as chat items, read from its own history through the bridge's Claude reader. Only what
+// §5.2 lets leave the bridge is here: prompt and reply text, AskUserQuestion text and options, tool names, file
+// base names and counts. Never tool inputs or outputs, thinking, transcript paths, config dirs or session ids.
+
+/** Prefix of the chat view topic. */
+export const CHATVIEW_PREFIX = "chatview:";
+
+/** The terminal id of a `chatview:<t>` topic, or null for any other topic or an id that fails {@link TERMINAL_ID}. */
+export function chatviewTerminal(topic: string): string | null {
+  if (!topic.startsWith(CHATVIEW_PREFIX)) return null;
+  const id = topic.slice(CHATVIEW_PREFIX.length);
+  return TERMINAL_ID.test(id) ? id : null;
+}
+
+/** The newest items the topic carries. Older ones come from {@link ChatviewPage}. */
+export const CHATVIEW_WINDOW = 100;
+/** A snap (and a page) stays at or under this many bytes of JSON; the oldest items are left out to fit. */
+export const CHATVIEW_SNAP_MAX_BYTES = 512 * 1024;
+/** Each text block is cut at this many UTF-8 bytes. */
+export const CHATVIEW_TEXT_MAX_BYTES = 16 * 1024;
+/** Each message's text, all blocks together, is cut at this many UTF-8 bytes. */
+export const CHATVIEW_MESSAGE_MAX_BYTES = 32 * 1024;
+/** The most items one `GET /api/v1/chatview/<t>` returns (`n`, default this). */
+export const CHATVIEW_PAGE_MAX = 50;
+
+/**
+ * Why a chat view is unavailable (§6). The phone shows the text view with the notice for the reason:
+ * - `harness`: the agent is not Claude Code (Codex and others keep the text view in v1);
+ * - `no_panorama`: herdr-panorama is missing or runs in basic mode (no lease owner, no feed, no verified contract);
+ * - `no_profiles`: herdr-agent-usage is missing, or its profile list is unreadable or empty;
+ * - `no_binding`: panorama proves no session for this exact terminal (feed aged or stale, no root, no session id,
+ *   a conflicting or ambiguous join), or no agent-usage root holds it;
+ * - `reader_failed`: the reader could not read the session, or the SDK's shape is unexpected;
+ * - `forbidden`: `transcript.read` is off. The bridge sends it as `stale {reason: "forbidden"}` (CV1) and the
+ *   page route as 403, never inside a topic value; it is listed so the phone has one vocabulary.
+ */
+export const CHATVIEW_REASONS = ["harness", "no_panorama", "no_profiles", "no_binding", "reader_failed", "forbidden"] as const;
+export const ChatviewReason = z.enum(CHATVIEW_REASONS);
+export type ChatviewReason = z.infer<typeof ChatviewReason>;
+
+/** Item ids: a message uuid, or one with a suffix (`<uuid>:q1`, `day:<uuid>`). Opaque to the phone. */
+export const ChatItemId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_.-]{0,99}$/);
+
+/**
+ * Tool row kinds (§3): `shell` "Ran 2 shell commands", `read` "Read 3 files", `edit` "Edited 2 files", `search`
+ * "Searched 4 times", `subagent` "Ran 3 subagents", `other` "Used 2 tools" (also a run that mixes kinds).
+ */
+export const TOOL_KINDS = ["shell", "read", "edit", "search", "subagent", "other"] as const;
+export const ToolKind = z.enum(TOOL_KINDS);
+export type ToolKind = z.infer<typeof ToolKind>;
+
+/** At most this many calls are named in one row; `count` still counts them all. */
+export const CHAT_TOOL_NAMES_MAX = 50;
+
+export const ChatTools = z
+  .object({
+    kind: ToolKind,
+    /** Calls in the run. */
+    count: z.number().int().positive(),
+    /** Calls with no result yet. The phone shows a spinner only while the host says the agent is working. */
+    running: z.number().int().nonnegative(),
+    /** Calls whose result is an error ("1 command failed"). */
+    failed: z.number().int().nonnegative(),
+    /** One line per call: the tool name, and for a file tool the file's base name ("Read · main.ts"). Never input or output. */
+    names: z.array(z.string().min(1).max(200)).max(CHAT_TOOL_NAMES_MAX),
+  })
+  .strict();
+export type ChatTools = z.infer<typeof ChatTools>;
+
+export const ChatAskOption = z.object({ label: z.string().max(400), description: z.string().max(2000).nullable() }).strict();
+
+/**
+ * The agent asked a question. `via: "claude"`: an AskUserQuestion call (its text and options, one item per
+ * question). `via: "inbox"`: a herdr-inbox `ask_operator` call, shown as "Asked you a question" with no text (CV5
+ * puts the inbox's own item in its place).
+ */
+export const ChatAsk = z
+  .object({
+    via: z.enum(["claude", "inbox"]),
+    question: z.string().max(4000).nullable(),
+    header: z.string().max(200).nullable(),
+    multi: z.boolean(),
+    options: z.array(ChatAskOption).max(20),
+  })
+  .strict();
+export type ChatAsk = z.infer<typeof ChatAsk>;
+
+const itemBase = { id: ChatItemId, at: z.string().datetime().nullable() };
+
+/** A prompt's option list from the screen (§3a.3). Defined for CV7; CV3 never produces `prompt` items. */
+export const ChatPromptQuestion = z
+  .object({
+    text: z.string().max(4000),
+    header: z.string().max(200),
+    multi: z.boolean(),
+    options: z.array(ChatAskOption).max(20),
+    other: z.boolean(),
+  })
+  .strict();
+
+export const ChatItem = z.discriminatedUnion("role", [
+  z
+    .object({
+      ...itemBase,
+      role: z.literal("you"),
+      /** Markdown-free prompt text, redacted and cut. For a command chip, just the command ("/compact"). */
+      text: z.string(),
+      /** The message only wrapped a slash command: a one-line chip. */
+      command: z.literal(true).optional(),
+      /** The text was cut at the 16 KB block or 32 KB message limit: the phone shows "Cut here". */
+      cut: z.literal(true).optional(),
+    })
+    .strict(),
+  z.object({ ...itemBase, role: z.literal("agent"), text: z.string(), cut: z.literal(true).optional() }).strict(),
+  z.object({ ...itemBase, role: z.literal("tools"), tools: ChatTools }).strict(),
+  /** `cut`: the message's questions and options were cut to fit its 32 KB. */
+  z.object({ ...itemBase, role: z.literal("ask"), ask: ChatAsk, cut: z.literal(true).optional() }).strict(),
+  /** `compact`: "Earlier messages were summarised". `day`: a day divider ("Today 21:02"), formatted by the phone from `at`. */
+  z.object({ ...itemBase, role: z.literal("divider"), divider: z.enum(["compact", "day"]) }).strict(),
+  /** A native prompt card (§3a, §7). Defined here for CV7; CV3 never produces one. */
+  z
+    .object({
+      ...itemBase,
+      role: z.literal("prompt"),
+      prompt_id: z.string().regex(/^[0-9a-f]{64}$/),
+      rev: z.string().min(1).max(128),
+      kind: z.enum(["permission", "question", "plan", "other", "unparsed"]),
+      title: z.string().max(400),
+      summary: z.string().max(2000).optional(),
+      questions: z.array(ChatPromptQuestion).max(4).optional(),
+      plan_md: z.string().max(CHATVIEW_MESSAGE_MAX_BYTES).optional(),
+      options: z.array(z.object({ label: z.string().max(400) }).strict()).max(20),
+      screen_lines: z.array(z.string().max(400)).max(60).optional(),
+      state: z.enum(["open", "answered", "gone"]),
+    })
+    .strict(),
+  /** A status row such as "Stopped by you · 21:14" (CV8). Defined here; CV3 never produces one. */
+  z.object({ ...itemBase, role: z.literal("status"), status: z.enum(["stopped"]) }).strict(),
+]);
+export type ChatItem = z.infer<typeof ChatItem>;
+
+/**
+ * The status line (§3): the host topic's agent status, not the transcript. `working` shows "Working · 1m 12s"
+ * timed from `since` (the last prompt's time), `blocked` shows "Waiting for you", `idle` shows nothing.
+ */
+export const ChatviewStatus = z
+  .object({
+    state: z.enum(["working", "blocked", "idle"]),
+    since: z.string().datetime().nullable(),
+  })
+  .strict();
+export type ChatviewStatus = z.infer<typeof ChatviewStatus>;
+
+export const ChatviewTopic = z
+  .object({
+    terminal: z.string().regex(TERMINAL_ID),
+    /** The harness id as panorama or the host names it (`claude`, `codex`), or `unknown`. */
+    harness: z.string().min(1).max(64),
+    state: z.enum(["ok", "unavailable"]),
+    /** Set exactly when `state` is `unavailable`. */
+    reason: ChatviewReason.optional(),
+    /** The newest items, oldest first: at most {@link CHATVIEW_WINDOW}, and the whole value at most {@link CHATVIEW_SNAP_MAX_BYTES}. */
+    items: z.array(ChatItem).max(CHATVIEW_WINDOW),
+    /** Older items exist: `GET /api/v1/chatview/<t>?before=<items[0].id>` returns them. */
+    older: z.boolean(),
+    /**
+     * The history's revision: a new random value whenever the bridge starts over (another session, a rewritten
+     * chain after a compaction or rewind). The phone drops older pages it holds from another `rev`.
+     */
+    rev: z.string().max(64),
+    status: ChatviewStatus,
+  })
+  .strict()
+  .refine((t) => (t.state === "unavailable") === (t.reason !== undefined), { message: "reason is set exactly when unavailable", path: ["reason"] })
+  .refine((t) => t.reason !== "forbidden", { message: "forbidden is sent as stale, never in the topic", path: ["reason"] });
+export type ChatviewTopic = z.infer<typeof ChatviewTopic>;
+
+/** `GET /api/v1/chatview/<t>?before=<id>&n=<1..50>[&rev=<rev>]`: the items just before `before`, oldest first. */
+export const ChatviewPage = z
+  .object({
+    items: z.array(ChatItem).max(CHATVIEW_PAGE_MAX),
+    /** Items older than these exist. */
+    older: z.boolean(),
+    rev: z.string().max(64),
+  })
+  .strict();
+export type ChatviewPage = z.infer<typeof ChatviewPage>;
+
 /**
  * `terminal.send` (S16, capability `terminal.input`): `hc send` pastes `text` into the terminal and presses Enter.
  * That is all it can do (checked in the rig against hc 0.1.19): it has no special keys. Those are `terminal.keys`
@@ -855,7 +1045,7 @@ export const Snap = z
     data: z.unknown(),
   })
   .superRefine((m, ctx) => {
-    const payload = m.topic.startsWith("chat:") ? ChatTopic : TOPIC_PAYLOADS[m.topic];
+    const payload = m.topic.startsWith("chat:") ? ChatTopic : m.topic.startsWith(CHATVIEW_PREFIX) ? ChatviewTopic : TOPIC_PAYLOADS[m.topic];
     if (!payload) return;
     const r = payload.safeParse(m.data);
     if (!r.success) {
@@ -885,11 +1075,13 @@ export const Patch = z.object({
 });
 
 /** Known reasons; the field stays open so the bridge can add more without a version bump. */
-export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable", "terminal_not_found", "bad_terminal", "too_many_chats", "hc_missing", "forbidden"] as const;
+export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable", "terminal_not_found", "bad_terminal", "too_many_chats", "hc_missing", "forbidden", "audit_unavailable"] as const;
 /**
  * `hc_missing`: a chat could not run `hc` (not on the bridge's PATH nor in `~/.local/bin`). `forbidden` (CV1): the
  * device lacks a capability the topic needs (`transcript.read` for {@link TRANSCRIPT_TOPIC_PREFIXES}); the bridge
  * did not subscribe it, or ended its subscription, and sends nothing more on the topic until a new `sub`.
+ * `audit_unavailable` (CV3): a `chatview:<t>` open was refused because Activity could not record it; like
+ * `forbidden`, nothing was subscribed. A later `sub` tries again.
  */
 export type StaleReason = (typeof STALE_REASONS)[number];
 export const Stale = z.object({

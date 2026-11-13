@@ -60,6 +60,9 @@ export const root = (over: Partial<FeedRoot> = {}): FeedRoot => ({
   inbox: [],
   hidden_finished: 0,
   last_activity: null,
+  session_id: null,
+  cwd: null,
+  transcript: null,
   agents: [],
   ...over,
 });

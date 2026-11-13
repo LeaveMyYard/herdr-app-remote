@@ -1,0 +1,12 @@
+{
+  "terminal": "t3",
+  "harness": "claude",
+  "state": "ok",
+  "items": [],
+  "older": false,
+  "rev": "0c6e9b2f41a8d375",
+  "status": {
+    "state": "idle",
+    "since": null
+  }
+}

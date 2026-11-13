@@ -1,6 +1,7 @@
 // ReaderPool against a fake reader child (test/fake-reader.mjs): one child per projects root, clean env,
 // the permission model, per-call timeout, RSS limit, idle exit and the cap of 4. Fake data only.
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,7 @@ type ReaderEvent = claude.ReaderEvent;
 type ClaudeRoot = claude.ClaudeRoot;
 
 const FAKE = fileURLToPath(new URL("../fake-reader.mjs", import.meta.url));
+const FAKE_SHA = createHash("sha256").update(readFileSync(FAKE)).digest("hex");
 const sid = (kind: string, n = 0) => `0000000${n}-0000-4000-8000-0000000000${kind}`;
 
 const dirs: string[] = [];
@@ -36,7 +38,7 @@ function root(h: string, n: number): ClaudeRoot {
 
 function pool(h: string, o: Partial<claude.ReaderPoolOptions> = {}): { pool: claude.ReaderPool; events: ReaderEvent[] } {
   const events: ReaderEvent[] = [];
-  const p = new ReaderPool({ script: FAKE, home: h, onEvent: (e) => events.push(e), ...o });
+  const p = new ReaderPool({ script: FAKE, scriptSha256: FAKE_SHA, home: h, onEvent: (e) => events.push(e), ...o });
   pools.push(p);
   return { pool: p, events };
 }
@@ -103,6 +105,29 @@ describe("ReaderPool", () => {
     const { pool: p } = pool(h);
     const got = await p.call({ configDir, projects: target, profileIds: ["agent-1"] }, { op: "info", session: sid("07") });
     expect(got).toMatchObject({ ok: true, value: { credentials: "ERR_ACCESS_DENIED", projects: false } });
+  });
+
+  it("runs only the reader built with the bridge: another hash is never started, and fails as spawn", async () => {
+    const h = home();
+    const r = root(h, 1);
+    // A copy of the fake reader with one byte changed: what an edited or swapped file looks like.
+    const swapped = join(h, "claude-reader.mjs");
+    writeFileSync(swapped, readFileSync(FAKE, "utf8") + "\n// changed\n");
+    const { pool: p, events } = pool(h, { script: swapped });
+    expect(await p.call(r, { op: "info", session: sid("09") })).toEqual({ ok: false, error: "spawn" });
+    expect(p.running).toBe(0);
+    expect(events).toEqual([{ kind: "refused", projects: r.projects, why: "hash" }]);
+    // A malformed expected hash refuses too, and so does a script that is not there.
+    expect(await pool(h, { scriptSha256: "abc" }).pool.call(r, { op: "info", session: sid("09") })).toEqual({ ok: false, error: "spawn" });
+    expect(await pool(h, { script: join(h, "missing.mjs") }).pool.call(r, { op: "info", session: sid("09") })).toEqual({ ok: false, error: "spawn" });
+    // The right file starts; edited afterwards, the next start is refused.
+    writeFileSync(swapped, readFileSync(FAKE));
+    const ok = pool(h, { script: swapped, idleMs: 50 });
+    expect(await ok.pool.call(r, { op: "info", session: sid("09") })).toEqual({ ok: true, value: { session: sid("09") } });
+    const pid = ok.pool.pidFor(r)!;
+    await until(() => exitOf(ok.events, pid) !== undefined);
+    writeFileSync(swapped, readFileSync(FAKE, "utf8") + "\n// changed again\n");
+    expect(await ok.pool.call(r, { op: "info", session: sid("09") })).toEqual({ ok: false, error: "spawn" });
   });
 
   it("discards the child's stderr", async () => {
@@ -253,6 +278,7 @@ describe("ReaderPool", () => {
     const events: ReaderEvent[] = [];
     const p = new ReaderPool({
       script: FAKE,
+      scriptSha256: FAKE_SHA,
       home: h,
       onEvent: (e) => {
         events.push(e);

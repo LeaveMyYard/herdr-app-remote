@@ -526,6 +526,28 @@ describe("startApp: topics over the link", () => {
     expect(JSON.stringify(p.msgs)).not.toContain("Question Title 124");
   });
 
+  it("serves chatview:<t> (CV3) and its older pages behind transcript.read; without panorama it is unavailable, never guessed", async () => {
+    await start();
+    const mod = await linkMod();
+    await sendState(mod);
+    const cookie = await paired();
+    const id = app!.security.devices()[0]!.id;
+    const page = (c: string, extra: Headers = {}) => http("GET", "/api/v1/chatview/term-1?before=a1000000-0000-4000-8000-000000000002", { ...OK_GET, "X-Remote-Api": "1", Cookie: c, ...extra });
+    expect((await page(cookie)).status).toBe(403);
+    app!.security.setCap(id, "transcript.read", true);
+    const p = await phone(cookie);
+    send(p, { type: "hello", api: 1 });
+    send(p, { type: "sub", topics: ["chatview:term-1"] });
+    const snap = await p.until(snapOf("chatview:term-1"));
+    // No feed in this app home: panorama can't prove a session, so there is no chat view (the phone shows the terminal).
+    expect(snap.data).toEqual({ terminal: "term-1", harness: "unknown", state: "unavailable", reason: "no_panorama", items: [], older: false, rev: "", status: { state: "working", since: null } });
+    expect(app!.security.activity().map((e) => e.text)).toContain("Phone 1 opened the chat of term-1");
+    // Pages come only from an open chat view.
+    const r = await page(cookie);
+    expect(r.status).toBe(409);
+    expect(JSON.parse(r.body)).toEqual({ error: "not_open" });
+  });
+
   it("terminal.keys presses a menu entry's keys only with terminal.keys; Activity names the entry, never the label", async () => {
     await start();
     const off = await phone(await paired({ terminal: true }));

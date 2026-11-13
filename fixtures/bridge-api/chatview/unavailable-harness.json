@@ -1,0 +1,13 @@
+{
+  "terminal": "t2",
+  "harness": "codex",
+  "state": "unavailable",
+  "reason": "harness",
+  "items": [],
+  "older": false,
+  "rev": "",
+  "status": {
+    "state": "working",
+    "since": null
+  }
+}

@@ -67,14 +67,36 @@ interface ConnState {
 }
 
 /**
- * The topic guard (CV1): whether `client` may read `topic` now. Asked at every `sub`, and by {@link Hub.recheck}
- * with `recheck` true (a subscription it held, not a new request).
- * `Security.mayRead` is the real one; it is the only place a topic's capabilities are checked.
+ * Why the gate is asked: `sub`, a `sub` for a topic this connection does not hold yet (a new subscription);
+ * `resub`, a `sub` for one it already holds (a client recovering from a seq gap: the same subscription);
+ * `recheck`, {@link Hub.recheck} asking again for a subscription it held.
  */
-export type TopicGate = (client: HubClient, topic: string, recheck?: boolean) => boolean;
+export type GateMode = "sub" | "resub" | "recheck";
+
+/**
+ * The topic guard (CV1): whether `client` may read `topic` now. `true` allows; `false` refuses with `stale
+ * forbidden`; a string refuses with that stale reason (CV3: `audit_unavailable`, a chat open Activity could not
+ * record). `Security.mayRead` is the real one; it is the only place a topic's capabilities are checked.
+ */
+export type TopicGate = (client: HubClient, topic: string, mode?: GateMode) => boolean | bridgeApi.StaleReason;
 
 /** Without a gate the hub fails closed: no transcript topic (`chatview:<t>`, `timeline:<t>`) is ever served. */
 const CLOSED_GATE: TopicGate = (_client, topic) => !bridgeApi.isTranscriptTopic(topic);
+
+/** How {@link Hub.publish} sends a change. */
+export interface PublishOptions {
+  /**
+   * A fresh `snap` to every subscriber even when a patch could say it (a history that started over: CV3). The
+   * patch log is dropped, so a resume across it gets the snap too.
+   */
+  snap?: boolean;
+  /**
+   * The patch, computed by the source because it knows the change better than an index-wise diff (CV3: a window
+   * that slid by k items is k removes at the front, not 100 replaces). The caller guarantees that applying `ops`
+   * to the topic's current value gives `data`; it is tested at the source.
+   */
+  ops?: PatchOp[];
+}
 
 export interface HubOptions {
   bridgeVersion: string;
@@ -171,16 +193,16 @@ export class Hub {
   }
 
   /** Publishes the new full value of a topic. Clears staleness (with a fresh snap) and patches otherwise. */
-  publish(name: string, data: Json): void {
+  publish(name: string, data: Json, opts: PublishOptions = {}): void {
     const t = this.topic(name);
-    if (t.data === undefined || t.stale !== null) {
-      // First value, or leaving a stale period: subscribers get a fresh snap.
+    if (t.data === undefined || t.stale !== null || opts.snap === true) {
+      // First value, or leaving a stale period, or asked for: subscribers get a fresh snap.
       t.data = data;
       t.stale = null;
       this.rebase(name, t);
       return;
     }
-    const ops = diff(t.data, data);
+    const ops = opts.ops ?? diff(t.data, data);
     if (ops.length === 0) return;
     t.data = data;
     t.seq += 1;
@@ -289,18 +311,21 @@ export class Hub {
         for (const name of new Set(msg.topics)) {
           // The topic guard first: a refused topic is never created, counted, snapped or watched (a source that
           // starts work on its first subscriber, such as a transcript reader, never hears of it).
-          if (!this.mayRead(c.client, name)) {
+          // The connection's topic cap first, so a gate that records a granted open (CV3: "opened the chat of t3")
+          // never writes one for a subscription the cap then refuses.
+          if (!c.topics.has(name) && c.topics.size >= MAX_TOPICS_PER_CONN) {
+            this.kill(c, 1008, "too many topics");
+            return;
+          }
+          const verdict = this.mayRead(c.client, name, c.topics.has(name) ? "resub" : "sub");
+          if (verdict !== true) {
             // One frame draws at most MAX_TOPICS_PER_CONN refusals, as it could hold at most that many topics.
             if (++refused > MAX_TOPICS_PER_CONN) {
               this.kill(c, 1008, "too many topics");
               return;
             }
-            this.refuse(c, name);
+            this.refuse(c, name, verdict === false ? "forbidden" : verdict);
             continue;
-          }
-          if (!c.topics.has(name) && c.topics.size >= MAX_TOPICS_PER_CONN) {
-            this.kill(c, 1008, "too many topics");
-            return;
           }
           this.subscribe(c, name);
         }
@@ -348,18 +373,21 @@ export class Hub {
   recheck(deviceId?: string): void {
     for (const c of [...this.conns]) {
       if (deviceId !== undefined && c.client.principal?.deviceId !== deviceId) continue;
-      for (const name of [...c.topics]) if (!this.mayRead(c.client, name, true)) this.refuse(c, name);
+      for (const name of [...c.topics]) {
+        const verdict = this.mayRead(c.client, name, "recheck");
+        if (verdict !== true) this.refuse(c, name, verdict === false ? "forbidden" : verdict);
+      }
     }
   }
 
   /** Ends (or never starts) `c`'s subscription to `name` and tells it why. */
-  private refuse(c: ConnState, name: string): void {
+  private refuse(c: ConnState, name: string, reason: string): void {
     if (c.topics.delete(name)) {
       const t = this.topics.get(name);
       if (t && t.subscribers.delete(c)) this.notifyWatchers(name, t);
       if (t && t.subscribers.size === 0 && t.data === undefined && t.stale === null && t.watchers.size === 0) this.topics.delete(name);
     }
-    c.client.send({ type: "stale", topic: name, reason: "forbidden" });
+    c.client.send({ type: "stale", topic: name, reason });
   }
 
   /** Patches after `seq`, [] if already current, or null if the log can't cover it. */

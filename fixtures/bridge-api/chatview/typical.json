@@ -1,0 +1,99 @@
+{
+  "terminal": "t3",
+  "harness": "claude",
+  "state": "ok",
+  "items": [
+    {
+      "id": "day:a1000000-0000-4000-8000-000000000002",
+      "role": "divider",
+      "at": "2026-01-02T10:00:05.000Z",
+      "divider": "day"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "role": "you",
+      "at": "2026-01-02T10:00:05.000Z",
+      "text": "Hello Agent 1. Please look at Project Alpha and run the tests."
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "role": "agent",
+      "at": "2026-01-02T10:00:15.000Z",
+      "text": "I'll start by running the tests."
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "role": "tools",
+      "at": "2026-01-02T10:00:20.000Z",
+      "tools": {
+        "kind": "other",
+        "count": 3,
+        "running": 0,
+        "failed": 1,
+        "names": [
+          "Bash",
+          "Read · README.md",
+          "Read · missing.ts"
+        ]
+      }
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000011",
+      "role": "agent",
+      "at": "2026-01-02T10:00:50.000Z",
+      "text": "Tests pass. **Summary:**\n\n- 3 tests\n- `README.md` read\n\n```sh\nnpm test\n```"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000013",
+      "role": "you",
+      "at": "2026-01-02T10:01:00.000Z",
+      "text": "/compact",
+      "command": true
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000015",
+      "role": "divider",
+      "at": "2026-01-02T10:01:10.000Z",
+      "divider": "compact"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000016",
+      "role": "you",
+      "at": "2026-01-02T10:01:15.000Z",
+      "text": "Now check the screenshot, Agent 1."
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000019",
+      "role": "ask",
+      "at": "2026-01-02T10:01:30.000Z",
+      "ask": {
+        "via": "claude",
+        "question": "Question Title 123?",
+        "header": "Choice",
+        "multi": false,
+        "options": [
+          {
+            "label": "Option A",
+            "description": "First"
+          },
+          {
+            "label": "Option B",
+            "description": "Second"
+          }
+        ]
+      }
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000021",
+      "role": "agent",
+      "at": "2026-01-02T10:01:40.000Z",
+      "text": "Going with Option B."
+    }
+  ],
+  "older": false,
+  "rev": "5f2c0a9e1b7d4c36",
+  "status": {
+    "state": "idle",
+    "since": null
+  }
+}

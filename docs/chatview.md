@@ -80,6 +80,15 @@ What was checked, in a private test HOME with fake transcripts only (SDK 0.3.312
 - When either changes, it asks the reader for the session. The bridge diffs by `uuid` and publishes a patch.
 - If the uuid chain is rewritten (compaction, rewind, `continued-in` moving `session_id`), it publishes a fresh `snap`.
 
+**Implemented in CV3** (`packages/bridge/src/chatview/`; payloads in bridge-api v1, `chatview:<t>`):
+- **Binding** (`resolve`): the host agent's program key decides `harness` first (a Codex pane needs no panorama). Then: no lease owner, no feed or no verified contract is `no_panorama`; an aged or stale feed (checked again at use: the contract's `aged`, and a snapshot older than 3 s), no root or two roots at `host == "herdr-core"`, `terminal == t`, no live agent or two at the address, no uuid `session_id` or no absolute `transcript` is `no_binding`. The proved `{session_id, transcript, cwd}` goes to `ClaudeHistory.bind`; a change of any of the three binds again and starts over.
+- **Tail**: a 1 s stat (size, mtime) of `root.transcript`; a read only when either changed (or the binding did). A read that is `not_found` while the stat saw a size > 0 (or the stat itself fails) is `reader_failed`; `not_found` with no file or an empty one is an empty chat ("No messages yet"). A bind or read failure drops the items held and is retried after 5 s.
+- **Diff**: items are compared by id. The same chain gives a patch: a window that slid by k items is k removes at `/items/0` plus a diff, sent as the source's own ops (`Hub.publish(..., {ops})`). A chain whose old ids are not a prefix of the new ones (compaction, rewind) or another session gives a fresh `snap` and a new random `rev`.
+- **Mapping** (`mapMessages`): as §3, with these choices: one row per run of tool calls, `kind` the shared kind or `other` for a mixed run; thinking does not break a run, text, a prompt, an ask item or a divider does; a tool row counts `running` calls with no result yet (the phone spins only while the host says working). AskUserQuestion is an `ask` item per question (§3a cards are CV7). The compact divider comes from the summary marker (`isCompactSummary`), as CV2 found. Harness wrappers are removed from every text block of a user turn (reminders, hook output, `ide_*` context, command output, bash mode, any `system-*`/`command-*`/`*hook*` tag); a block left with only tags of any name is dropped (fail closed); tags are paired by a linear scanner (no backtracking regex runs on transcript text). Only `<command-name>` makes a chip, and only when nothing else is left, never with its arguments. An AskUserQuestion call shares its message's 32 KB with the text and is cut to fit (`cut`). Day dividers use the bridge's local day.
+- **Status line**: the topic's `status` field (`working` with `since` = the last prompt's time, `blocked` for the host's `waiting`, else `idle`), not an item, so it never shifts the item window.
+- **Pages** come from the items an open chat view holds (the newest 5000 per open chat), so `GET /api/v1/chatview/<t>` answers `409 not_open` when it isn't open.
+- **Audit**: the open is written by the topic gate at the `sub` that starts the subscription (`GateMode` `sub`, not `resub` or `recheck`); with Activity failing it is `stale audit_unavailable`.
+
 ### 2.3 Codex and others
 
 - There is no SDK. Codex is **terminal-only in v1**.
@@ -282,11 +291,20 @@ What does leave: user prompt text, assistant text, the AskUserQuestion text and 
 ## 7. Protocol additions (bridge-api v1, additive)
 
 - **Topics.**
-  - `chatview:<t>` = `{terminal, harness, state: "ok"|"unavailable", reason?, items: ChatItem[], older: boolean, rev}`.
-  - `ChatItem` = `{id (uuid), role: "you"|"agent"|"tools"|"ask"|"divider"|"prompt"|"status", at|null, text?, tools?: {kind, count, running, failed, names[]}, ask?: {question, options[]}}`.
-  - `reason` takes one of the §6 cases (`harness`, `no_panorama`, `no_profiles`, `no_binding`, `reader_failed`, `forbidden`).
+  - `chatview:<t>` = `{terminal, harness, state: "ok"|"unavailable", reason?, items: ChatItem[], older: boolean, rev, status}`.
+    - `status` = `{state: "working"|"blocked"|"idle", since: iso|null}`: the status line (§3) from the host topic; `since` is the last prompt's time while working. It is a field, not an item, so it never shifts the item window.
+    - `rev`: random, new whenever the history starts over (another session, a rewritten chain); empty while unavailable.
+  - `ChatItem` = `{id, role: "you"|"agent"|"tools"|"ask"|"divider"|"prompt"|"status", at|null}` plus, per role:
+    - `you`: `text`; `command?: true` (a chip: `text` is the command alone); `cut?: true` (a 16 KB/32 KB limit cut it: "Cut here").
+    - `agent`: `text`, `cut?`.
+    - `tools`: `tools: {kind: "shell"|"read"|"edit"|"search"|"subagent"|"other", count, running, failed, names[]}` (`other` also for a mixed run; `names` one line per call, at most 50).
+    - `ask`: `ask: {via: "claude"|"inbox", question|null, header|null, multi, options[{label, description|null}]}`, `cut?` (the message's questions were cut to its 32 KB). `via: "inbox"` has no text.
+    - `divider`: `divider: "compact"|"day"`.
+    - `prompt` (below) and `status` (`status: "stopped"`, CV8) are defined but not produced before CV7/CV8.
+    - `id` is a message uuid, with `:<n>` for a later item of one message or `day:` for a day divider; opaque.
+  - `reason` takes one of the §6 cases (`harness`, `no_panorama`, `no_profiles`, `no_binding`, `reader_failed`); `forbidden` is sent only as `stale` (and 403 on the pages), never in the value. A `chatview:<t>` open Activity can't record is `stale audit_unavailable`.
   - `timeline:<t>` is defined in §4.
-- **HTTP.** `GET /api/v1/chatview/<t>?before=<id>&n=<≤50>` returns `{items, older}`.
+- **HTTP.** `GET /api/v1/chatview/<t>?before=<id>&n=<≤50>[&rev=<rev>]` returns `{items, older, rev}`, from the open chat view's items. It needs the `X-Remote-Api: 1` header. Refusals: `409 not_open` (no open chat view for `t`), `409 rev_changed` (another `rev`), `404 unknown_cursor` (an id the bridge doesn't hold), `400` (bad arguments), `401`/`403`/`429`, and `503 audit_unavailable`.
 - **Prompt cards** are `ChatItem` role `prompt`: `{prompt_id, rev, kind: "permission"|"question"|"plan"|"other"|"unparsed", title, summary?, questions?: [{text, header, multi, options[{label, description?}], other: boolean}], plan_md?, options: [{label}] (from the screen), screen_lines?: string[] (kind `unparsed`, read-only, redacted), state: "open"|"answered"|"gone"}`.
 - **Acts.**
   - `prompt.answer {terminal, prompt_id, rev, choice}`. Results: `ok`, `prompt_changed`, `prompt_gone`, `busy` (desk typing, or another answer running), `forbidden`, `audit_unavailable`, `unknown_effect`.
