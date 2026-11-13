@@ -128,7 +128,10 @@
 .md a{color:var(--t-accent);text-decoration:underline;text-underline-offset:2px}
 .cv-tools-wrap{align-items:flex-start;gap:6px}
 .hd .cv-tools{height:34px;gap:8px;padding:0 10px;border-radius:8px;border:1px solid var(--t-border);background:var(--t-background);font-size:13px;color:var(--t-muted)}
-.cv-dot{font-size:12px;color:var(--t-dim)}
+/* The tool dot is painted, not a glyph: no bundled font has ⏺, so its size and advance came from the host's fallback
+   font and moved the label on other hosts. The box is the board's glyph advance (0.6em at 12px, as laid out), and the
+   soft stop stands in for its antialiased edge. */
+.cv-dot{display:inline-block;flex:none;width:7.22px;height:16.8px;color:var(--t-dim);background:radial-gradient(circle 3.4px at 3.7px 7.8px,currentColor 2.4px,transparent 3.4px)}
 .cv-chev{color:var(--t-dim)}
 .cv-chev-open{display:inline-block;transform:rotate(90deg)}
 .hd .cv-tools-failed{border-color:#514028;color:var(--dock-need)}

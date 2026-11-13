@@ -27,9 +27,8 @@ function ToolsRow({ tools, working }: { tools: bridgeApi.ChatTools; working: boo
   const expandable = tools.names.length > 0;
   const inner = (
     <>
-      <span className="mono cv-dot" aria-hidden="true">
-        ⏺
-      </span>
+      {/* Drawn, not a glyph: no bundled font has ⏺, so its size and advance came from the host's fallback font. */}
+      <span className="cv-dot" aria-hidden="true" />
       <span>{label}</span>
       {running ? <Spinner /> : expandable ? <span className={`cv-chev${open ? " cv-chev-open" : ""}`} aria-hidden="true">›</span> : null}
     </>
