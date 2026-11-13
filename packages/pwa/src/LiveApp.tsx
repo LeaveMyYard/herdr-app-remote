@@ -3,6 +3,8 @@ import { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { App, type AppData, type HomePromptState, type LiveSources } from "./App";
 import type { BridgeClient, ClientSnapshot } from "./bridge/client";
 import { fetchHostName, HostNameProvider } from "./bridge/host-name";
+import { fetchOlder, type OlderResult } from "./bridge/chatview";
+import { chatMode, isClaude, useWaited, VIEW_WAIT_MS, type ViewMode } from "./chatview/mode";
 import { fetchTerminalInput, type TerminalInputView } from "./bridge/me";
 import { useBridge, useTopics } from "./bridge/react";
 import { isStandalone, promptWanted, refreshManifest, setPromptWanted } from "./pair/flow";
@@ -174,9 +176,37 @@ export function LiveApp({
   const chatAgent = chatAgentId !== null ? host?.agents.find((a) => a.id === chatAgentId) : undefined;
   const terminal = chatAgent?.terminal_id;
   const chatName = terminal !== undefined ? `chat:${terminal}` : null;
-  useTopics(client, chatName ? [chatName] : [], chatName !== null);
-  // The desktop's key menu (S16b), read only while a chat is open (the Keys sheet is there).
-  useTopics(client, ["keys"], chatName !== null);
+  // A Claude agent's screen is the chat view (`chatview:<t>`); the terminal text (`chat:<t>`) and the key menu are
+  // read only while the screen is the text view (Codex, or the chat source unavailable: §6).
+  const claude = chatAgent !== undefined && isClaude(chatAgent);
+  const viewName = terminal !== undefined && claude ? `chatview:${terminal}` : null;
+  useTopics(client, viewName ? [viewName] : [], viewName !== null);
+  const viewTopicView = viewName ? t[viewName] : undefined;
+  const viewTopic = useMemo(() => parsed(bridgeApi.ChatviewTopic, viewTopicView?.data), [viewTopicView?.data]);
+  const viewStale = viewTopicView?.stale ?? (viewTopicView?.data !== undefined && viewTopic === undefined ? "bad_data" : null);
+  // An older page refused with 403: the capability went away; the text view takes over until the agent is reopened.
+  // It lasts until the topic brings a newer value (the capability may be back) or the agent is closed.
+  const [deniedFor, setDeniedFor] = useState<{ terminal: string; seq: number } | null>(null);
+  const viewSeq = viewTopicView?.seq ?? -1;
+  const denied = terminal !== undefined && deniedFor?.terminal === terminal && deniedFor.seq === viewSeq;
+  useEffect(() => {
+    if (terminal === undefined) setDeniedFor(null);
+  }, [terminal]);
+  const [shown, setShown] = useState<"chat" | "text" | null>(null);
+  const onForbidden = useCallback(() => {
+    if (terminal !== undefined) setDeniedFor({ terminal, seq: viewSeq });
+  }, [terminal, viewSeq]);
+  const loadOlder = useCallback((before: string, rev: string) => (terminal !== undefined ? fetchOlder(terminal, before, rev) : Promise.resolve<OlderResult>({ ok: false, code: "failed" })), [terminal]);
+  const waited = useWaited(terminal ?? "", VIEW_WAIT_MS, viewName !== null && viewTopic === undefined && viewStale === null);
+  const mode: ViewMode | undefined =
+    terminal === undefined || !chatAgent
+      ? undefined
+      : chatMode({ claude, harnessId: chatAgent.program ?? chatAgent.harness, topic: denied ? undefined : viewTopic, stale: denied ? "forbidden" : viewStale, waitedOut: waited });
+  // The text view's topics follow what is on screen too: a draft or an open Keys sheet holds it after the chat source is up.
+  const textView = chatName !== null && (mode?.kind === "text" || shown === "text");
+  useTopics(client, chatName ? [chatName] : [], textView);
+  // The desktop's key menu (S16b), read only while the text view is open (the Keys sheet is there).
+  useTopics(client, ["keys"], textView);
   const keysMenu = useMemo(() => parsed(bridgeApi.KeysTopic, t.keys?.data), [t.keys?.data]);
   const chatView = chatName ? t[chatName] : undefined;
   const chatTopic = useMemo(() => parsed(bridgeApi.ChatTopic, chatView?.data), [chatView?.data]);
@@ -221,7 +251,13 @@ export function LiveApp({
     // An agent with no terminal has nothing to subscribe: say so rather than wait for a topic that never comes.
     chat:
       chatName && terminal !== undefined
-        ? { topic: chatTopic, stale: chatView?.stale ?? (chatView?.data !== undefined && chatTopic === undefined ? "bad_data" : null), terminal, input }
+        ? {
+            topic: chatTopic,
+            stale: chatView?.stale ?? (chatView?.data !== undefined && chatTopic === undefined ? "bad_data" : null),
+            terminal,
+            input,
+            ...(mode ? { mode, onShown: setShown, view: { topic: viewTopic, loadOlder, onForbidden } } : {}),
+          }
         : chatAgent
           ? { topic: undefined, stale: "no_terminal" }
           : undefined,

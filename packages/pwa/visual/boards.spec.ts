@@ -11,6 +11,8 @@ import { compare, MAX_DIFF_RATIO, type Rect } from "./compare";
  */
 /** The design-only state switcher at the top of the PhonePair, PhoneBanners and PhoneKeys boards; not part of the app. */
 const SWITCHER: Rect = { x: 0, y: 0, width: 390, height: 44 };
+/** The composer's Stop button (CV8) in the chat view boards. */
+const STOP_BUTTON: Rect = { x: 330, y: 762, width: 56, height: 52 };
 const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[]; viewport?: { width: number; height: number }; clip?: Rect; compare?: string }[] = [
   { ref: "PhoneAgentsBasic", url: "/?fixture=basic#/agents" },
   { ref: "PhoneUsage", url: "/?fixture=usage#/usage" },
@@ -22,6 +24,12 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[];
   { ref: "PhoneChat", url: "/?fixture=chat#/chat/a-1", nav: false },
   // PhoneKeys (S16b): the key bar, Keys sheet, typing-time line and ran-out footer are compared; the text stays masked.
   ...(["bar", "menu", "off", "soon", "gone"] as const).map((s) => ({ ref: `PhoneKeys-${s}`, url: `/?fixture=chat&typing=${s}#/chat/a-1`, nav: false, skip: [SWITCHER], compare: ".chat-foot" })),
+  // CV4: the chat view. The strip row (CV5) is an empty masked slot; the Stop button (CV8) and prompt cards (CV7) are
+  // not drawn yet, so those parts are skipped. The other board states (history, off) have items from CV5/CV7 or a
+  // different scroll position and are checked by eye (screenshots in the PR); Codex's notice card is compared.
+  { ref: "PhoneChatView-chat", url: "/?fixture=chatview&view=chat#/chat/a-1", nav: false, skip: [SWITCHER, STOP_BUTTON] },
+  { ref: "PhoneChatView-new", url: "/?fixture=chatview&view=new#/chat/a-1", nav: false, skip: [SWITCHER] },
+  { ref: "PhoneChatView-codex", url: "/?fixture=chatview&view=codex#/chat/a-1", nav: false, skip: [SWITCHER], clip: { x: 0, y: 158, width: 390, height: 72 } },
   // PhoneInbox: the fourth row is the placeholder of an answer the phone saw delivered (demo data seeds it).
   { ref: "PhoneInbox", url: "/?fixture=inbox#/inbox" },
   { ref: "PhoneQuestion", url: "/?fixture=inbox&pick=0#/inbox/q/group%3A123/123", nav: false },

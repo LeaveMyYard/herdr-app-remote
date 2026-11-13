@@ -4,7 +4,9 @@ import { Banner } from "./components/Banner";
 import { HomePrompt, HomePromptBell } from "./pair/HomePrompt";
 import { TabBar } from "./components/TabBar";
 import type { bridgeApi, HostState } from "@herdr-remote/protocol";
-import { chats, typingDemo } from "./chat-fixtures";
+import { chats, chatviewDemo, typingDemo } from "./chat-fixtures";
+import type { ViewMode } from "./chatview/mode";
+import { ChatRoute, type ChatRouteProps } from "./screens/ChatRoute";
 import { HostNameProvider } from "./bridge/host-name";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
 import { TABS, type Connection, type PluginRow, type Space, type TabBadges, type TabId } from "./model";
@@ -82,7 +84,20 @@ export interface LiveSources {
   onUsageFilter: (filter: bridgeApi.UsageTopic["filter"]) => void;
   onUsageRefresh: () => Promise<unknown>;
   /** The open chat's `chat:<t>` topic (LiveApp subscribes it from the route). */
-  chat?: { topic: bridgeApi.ChatTopic | undefined; stale: string | null; terminal?: string; input?: ChatInput | undefined } | undefined;
+  chat?:
+    | {
+        topic: bridgeApi.ChatTopic | undefined;
+        stale: string | null;
+        terminal?: string;
+        input?: ChatInput | undefined;
+        /** Which view a Claude agent's screen is (chat view or text view with a notice); absent: the text view. */
+        mode?: ViewMode;
+        /** The `chatview:<t>` topic and its older pages. */
+        view?: ChatRouteProps["view"];
+        /** Reports which view is on screen (see `ChatRoute`). */
+        onShown?: ChatRouteProps["onShown"];
+      }
+    | undefined;
   /** Sends an inbox `act` (draft, answer, dismiss, retry, stop showing, ack); resolves with the bridge's `res`. */
   inboxAct?: ActFn | undefined;
   /** Web Push on this phone (S17): the Inbox shows the notifications row with it. */
@@ -250,18 +265,26 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
     const demo = data ? undefined : chats[chatAgent.id];
     // The PhoneKeys board's states, on demo data only (`?fixture=chat&typing=menu`).
     const typed = demo && !live ? typingDemo(new URLSearchParams(window.location.search).get("typing")) : null;
-    const chat = (
-      <Chat
-          agent={demo?.agent ?? { name: chatAgent.name, folder: chatAgent.tab, harness: chatAgent.harness === "codex" ? "codex" : "claude", status: chatAgent.status }}
-          topic={live ? live.chat?.topic : demo?.topic}
-          stale={live?.chat?.stale ?? undefined}
-          question={typed ? undefined : demo?.question}
-          input={typed ? typed.input : live?.chat?.input}
-          terminal={typed ? demo?.topic.terminal : live?.chat?.terminal}
-          boardSlot={demo !== undefined && new URLSearchParams(window.location.search).get("slot") !== "0"}
-          {...(typed ? { now: typed.now, demoSheet: { open: typed.sheet, pressed: typed.pressed } } : {})}
-        />
-    );
+    const params = new URLSearchParams(window.location.search);
+    // The chat view boards, on demo data only (`?fixture=chatview&view=chat`).
+    const cvDemo = demo && !live && params.get("fixture") === "chatview" ? chatviewDemo(params.get("view")) : null;
+    const textProps = {
+      agent: cvDemo?.agent ?? demo?.agent ?? { name: chatAgent.name, folder: chatAgent.tab, harness: chatAgent.harness === "codex" ? "codex" : "claude", status: chatAgent.status },
+      topic: live ? live.chat?.topic : (cvDemo ? cvDemo.text : demo?.topic),
+      stale: live?.chat?.stale ?? undefined,
+      question: typed || cvDemo ? undefined : demo?.question,
+      input: typed ? typed.input : cvDemo ? cvDemo.input : live?.chat?.input,
+      terminal: typed ? demo?.topic.terminal : cvDemo ? "t2" : live?.chat?.terminal,
+      boardSlot: demo !== undefined && params.get("slot") !== "0",
+      ...(cvDemo ? { now: cvDemo.now } : {}),
+      ...(typed ? { now: typed.now, demoSheet: { open: typed.sheet, pressed: typed.pressed } } : {}),
+    } as const;
+    const route = cvDemo
+      ? { mode: cvDemo.mode, view: { topic: cvDemo.topic, loadOlder: cvDemo.loadOlder }, onShown: undefined }
+      : live?.chat?.mode
+        ? { mode: live.chat.mode, view: live.chat.view, onShown: live.chat.onShown }
+        : null;
+    const chat = route ? <ChatRoute mode={route.mode} view={route.view} onShown={route.onShown} text={textProps} slots={cvDemo ? { strip: <div className="nf cv-strip-demo" data-vis-mask="" style={cvDemo.mode.kind === "text" ? { height: 42 } : undefined} /> } : undefined} /> : <Chat {...textProps} />;
     // The board's computer is "desk-1"; live data gets its name from LiveApp's provider.
     return <AppFrame>{typed ? <HostNameProvider name="desk-1">{chat}</HostNameProvider> : chat}</AppFrame>;
   }
