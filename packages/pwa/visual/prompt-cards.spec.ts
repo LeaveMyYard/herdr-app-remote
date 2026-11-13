@@ -58,6 +58,8 @@ for (const c of CARDS) {
 }
 
 test("several questions (CV9, no board): every block and Submit, no sideways scroll", async ({ page }, info) => {
+  // Taller than a phone so the evidence shot holds the whole card; the width is the phone's.
+  await page.setViewportSize({ width: W, height: 1300 });
   await page.goto("/?fixture=prompt-cards&state=several");
   await page.evaluate(() => document.fonts.ready);
   await page.waitForSelector(".pc-card");
@@ -68,7 +70,7 @@ test("several questions (CV9, no board): every block and Submit, no sideways scr
   await page.getByRole("button", { name: /^Staging/ }).click();
   await expect(page.getByRole("button", { name: "Submit" })).toBeEnabled();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  writeFileSync(info.outputPath("several.png"), await page.screenshot({ type: "png", animations: "disabled", caret: "hide", fullPage: true }));
+  writeFileSync(info.outputPath("several.png"), await page.locator(".pc-card").screenshot({ type: "png", animations: "disabled", caret: "hide" }));
   const overflowX = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflowX).toBeLessThanOrEqual(0);
 });
