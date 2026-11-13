@@ -13,14 +13,16 @@ export interface TimelineOptions {
   asks: (terminal: string) => ReadonlySet<string> | null;
   /** The inbox's recorded call id of a group row (`InboxTopicDriver.toolUseIdOf`). */
   toolUseIdOf: (key: string) => string | undefined;
+  /** Keeps the `usage` topic collecting while a timeline is open (`UsageTopicDriver.hold`); returns the release. */
+  holdUsage?: () => () => void;
   /** The value failed its own schema (a bug): logged by the app, the topic goes stale. */
   onInvalid?: (topic: string, error: string) => void;
 }
 
-const SOURCES = ["inbox", "panorama", "host"] as const;
+const SOURCES = ["inbox", "panorama", "host", "usage"] as const;
 
 export class TimelineTopicDriver {
-  private readonly open = new Map<string, { terminal: string; unwatch: () => void }>();
+  private readonly open = new Map<string, { terminal: string; unwatch: () => void; release: () => void }>();
   private unwatch: (() => void)[] = [];
 
   constructor(private readonly o: TimelineOptions) {}
@@ -50,7 +52,7 @@ export class TimelineTopicDriver {
     const terminal = bridgeApi.timelineTerminal(topic);
     if (terminal === null) return void this.o.hub.setStale(topic, "bad_terminal");
     const unwatch = this.o.hub.watchValue(`${bridgeApi.CHATVIEW_PREFIX}${terminal}`, () => this.refresh(topic));
-    this.open.set(topic, { terminal, unwatch });
+    this.open.set(topic, { terminal, unwatch, release: this.o.holdUsage?.() ?? (() => {}) });
     this.refresh(topic);
   }
 
@@ -58,6 +60,7 @@ export class TimelineTopicDriver {
     const w = this.open.get(topic);
     if (w) {
       w.unwatch();
+      w.release();
       this.open.delete(topic);
     }
     this.o.hub.discard(topic);
@@ -72,6 +75,7 @@ export class TimelineTopicDriver {
       inbox: hub.get("inbox"),
       panorama: hub.get("panorama"),
       host: hub.get("host"),
+      usage: hub.get("usage"),
       asks: this.o.asks(w.terminal),
       toolUseIdOf: this.o.toolUseIdOf,
     });

@@ -5,7 +5,8 @@
 // - `inbox.question`: an open `group` row asked from terminal t; `data` is the row itself (key, rev, actions), so the
 //   phone acts on it with the inbox's own acts, bound by the same `rev`;
 // - `inbox.alert`: an `alert` row from t; `inbox.failed`: a `failed` row (an answer not delivered) to t;
-// - strip `panorama.swarm`: the subagents of the panorama root joined to t, counted per status.
+// - strip `panorama.swarm`: the subagents of the panorama root joined to t, counted per status;
+// - strip `usage.account` (CV6): the account whose `usage` entry lists t as a pane, and its first window's use.
 //
 // Anchors. A question replaces the transcript's `tool_use` block only when the inbox recorded the `ask_operator`
 // call's id (app-feed-v1 minor 1) AND that id is on an `ask_operator` call in t's own transcript (the open chat
@@ -21,6 +22,7 @@ type Of<K extends string> = Extract<Row, { kind: K }>;
 
 export const INBOX_PLUGIN = "herdr-inbox";
 export const PANORAMA_PLUGIN = "herdr-panorama";
+export const USAGE_PLUGIN = "herdr-agent-usage";
 
 export interface TimelineInput {
   terminal: string;
@@ -28,6 +30,8 @@ export interface TimelineInput {
   inbox: unknown;
   panorama: unknown;
   host: unknown;
+  /** The `usage` topic value as published (unchecked: parsed here); undefined when nobody has collected yet. */
+  usage?: unknown;
   /** `ask_operator` call ids in t's own transcript (the open chat view), or null when it holds none. */
   asks: ReadonlySet<string> | null;
   /** The inbox's recorded call id of a group row (bridge-side only). */
@@ -146,6 +150,41 @@ function swarmStrip(inp: TimelineInput, host: HostState | null): Strip[] {
   ];
 }
 
+/**
+ * The account strip chip: the one account whose report entry lists terminal t among its panes (the bridge passes the
+ * terminal id as `paneId`). Accounts come only from agent-usage's own report, never from a directory scan. Two entries
+ * of one account (`sameAccountAs`) are one; entries of two accounts are ambiguous and draw nothing. A pane that did
+ * not use any account in the report's window is listed nowhere, so it has no chip.
+ */
+function accountStrip(inp: TimelineInput): Strip[] {
+  const parsed = bridgeApi.UsageTopic.safeParse(inp.usage);
+  if (!parsed.success || parsed.data.report === null) return [];
+  const report = parsed.data.report;
+  const mine = report.providers.filter((p) => p.inUse !== false && (p.paneActivity?.panes ?? []).some((x) => x.paneId === inp.terminal));
+  const accounts = new Set(mine.map((p) => p.sameAccountAs || p.providerId));
+  if (accounts.size !== 1) return [];
+  const id = [...accounts][0]!;
+  const p = mine.find((x) => x.providerId === id) ?? mine[0]!;
+  const account = oneLine(p.profileLabel || p.accountLabel || p.label);
+  if (account === "") return [];
+  const w = p.windows[0];
+  const used = w === undefined ? null : Math.min(100, Math.max(0, Math.round(report.limitPercent === "used" ? w.displayPercent : 100 - w.displayPercent)));
+  // The band follows what is left: plenty is ok, getting low warns, low is bad. No window (nothing read yet) is muted.
+  const tone = w === undefined ? "muted" : w.band === "low" ? "bad" : w.band === "mid" ? "warn" : w.band === "high" ? "ok" : "muted";
+  const data: bridgeApi.UsageStripData = { provider_id: p.providerId, account, used_percent: used, window: w?.tag ?? null };
+  return [
+    {
+      key: `usage.account:${p.providerId}`.slice(0, 200),
+      plugin: USAGE_PLUGIN,
+      kind: "usage.account",
+      label: used === null ? account : `${account} · ${used}% used`,
+      tone,
+      href: href("usage"),
+      data,
+    },
+  ];
+}
+
 const KIND_ORDER: Record<string, number> = { "inbox.question": 0, "inbox.failed": 1, "inbox.alert": 2 };
 
 /** The topic value for terminal t. Items oldest first by `at`, those with none last; capped, open questions kept first. */
@@ -160,5 +199,5 @@ export function buildTimeline(inp: TimelineInput): bridgeApi.TimelineTopic {
   }
   const ms = (i: Item): number => (i.at === null ? Infinity : Date.parse(i.at));
   items = items.map((i, n) => ({ i, n })).sort((a, b) => ms(a.i) - ms(b.i) || a.n - b.n).map((x) => x.i);
-  return { terminal: inp.terminal, items, strip: swarmStrip(inp, host).filter((s) => bridgeApi.StripItem.safeParse(s).success) };
+  return { terminal: inp.terminal, items, strip: [...swarmStrip(inp, host), ...accountStrip(inp)].filter((s) => bridgeApi.StripItem.safeParse(s).success) };
 }

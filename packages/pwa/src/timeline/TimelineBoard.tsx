@@ -110,6 +110,16 @@ export const boardStrip: bridgeApi.StripItem = {
   },
 };
 
+export const boardAccount: bridgeApi.StripItem = {
+  key: "usage.account:claude-2",
+  plugin: "herdr-agent-usage",
+  kind: "usage.account",
+  label: "Account 2 · 38% used",
+  tone: "ok",
+  href: "#/usage",
+  data: { provider_id: "claude-2", account: "Account 2", used_percent: 38, window: "5h" },
+};
+
 /**
  * Where the board draws each part (design/refs/PhoneChatView-*.png, found from its fills and borders). The question
  * card sits at y 488.4 there: the chat above it ends between pixels, and the options round from that.
@@ -130,7 +140,7 @@ export function TimelineBoard({ state }: { state: string | null }) {
   return (
     <div className="hd ph">
       <div style={{ position: "absolute", top: BOARD_PLACES.strip.top, left: 0, right: 0 }}>
-        <TimelineStrip strip={[boardStrip]} />
+        <TimelineStrip strip={[boardStrip, boardAccount]} />
       </div>
       {state === "history"
         ? [at(BOARD_PLACES.alert.top, <TimelineRow item={boardAlert} now={NOW} />, "a"), at(BOARD_PLACES.failed.top, <TimelineRow item={boardFailed} now={NOW} />, "f")]

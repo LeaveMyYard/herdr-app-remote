@@ -105,6 +105,83 @@ describe("anchors: only the asker's own ask_operator call", () => {
   });
 });
 
+/** A `usage` topic value: claude-1 lists term-1 as a pane (primary window 62% left), claude-2 lists term-2. */
+const usage = (over: { limit?: "used" | "remaining"; providers?: Record<string, unknown>[]; report?: boolean } = {}) => ({
+  filter: "open-panes",
+  updatedAtMs: 1,
+  report:
+    over.report === false
+      ? null
+      : {
+          version: 1,
+          generatedAtMs: 1,
+          filter: "open-panes",
+          limitPercent: over.limit ?? "remaining",
+          providers: over.providers ?? [account("claude-1", "Account 1", ["term-1"], 62, "high"), account("claude-2", "Account 2", ["term-2"], 10, "low")],
+        },
+});
+const account = (id: string, profile: string, panes: string[], display: number, band: string, over: Record<string, unknown> = {}) => ({
+  providerId: id,
+  family: "claude",
+  label: id,
+  profileLabel: profile,
+  accountLabel: "user-1@example.com",
+  status: "ok",
+  inUse: true,
+  windows: [{ slot: "primary", tag: "5h", windowMinutes: 300, displayPercent: display, barFill: display / 100, band, resetIn: "2h" }],
+  paneActivity: { panes: panes.map((paneId) => ({ paneId })) },
+  ...over,
+});
+
+describe("the account strip chip (CV6)", () => {
+  it("names the terminal's account by its profile and says how much of its first window is used", () => {
+    expect(build({ usage: usage() }).strip).toEqual([
+      {
+        key: "usage.account:claude-1",
+        plugin: "herdr-agent-usage",
+        kind: "usage.account",
+        label: "Account 1 · 38% used",
+        tone: "ok",
+        href: "#/usage",
+        data: { provider_id: "claude-1", account: "Account 1", used_percent: 38, window: "5h" },
+      },
+    ]);
+  });
+
+  it("counts used whichever way the report prints, and takes the tone from the band", () => {
+    expect(build({ usage: usage({ limit: "used", providers: [account("claude-1", "Account 1", [T], 38, "high")] }) }).strip[0]).toMatchObject({ label: "Account 1 · 38% used", tone: "ok" });
+    expect(build({ usage: usage({ providers: [account("claude-1", "Account 1", [T], 30, "mid")] }) }).strip[0]).toMatchObject({ label: "Account 1 · 70% used", tone: "warn" });
+    expect(build({ usage: usage({ providers: [account("claude-1", "Account 1", [T], 5, "low")] }) }).strip[0]).toMatchObject({ label: "Account 1 · 95% used", tone: "bad" });
+  });
+
+  it("falls back to the account label, then the provider's, and shows no use when there is no window", () => {
+    const p = account("claude-1", "", [T], 62, "high", { windows: [], status: "no-data" });
+    expect(build({ usage: usage({ providers: [p] }) }).strip[0]).toMatchObject({ label: "user-1@example.com", tone: "muted", data: { used_percent: null, window: null } });
+    const q = account("claude-1", "", [T], 62, "high", { accountLabel: null });
+    expect(build({ usage: usage({ providers: [q] }) }).strip[0]).toMatchObject({ label: "claude-1 · 38% used" });
+  });
+
+  it("sits after the subagent link", () => {
+    const v = build({ panorama: panorama(T, "agent-1", ["run"]), usage: usage() });
+    expect(v.strip.map((s) => s.kind)).toEqual(["panorama.swarm", "usage.account"]);
+  });
+
+  it("draws nothing for a terminal no account lists, an unused entry, or no usable report", () => {
+    expect(build({ usage: usage({ providers: [account("claude-2", "Account 2", ["term-2"], 10, "low")] }) }).strip).toEqual([]);
+    expect(build({ usage: usage({ providers: [account("claude-1", "Account 1", [T], 62, "high", { inUse: false })] }) }).strip).toEqual([]);
+    expect(build({ usage: usage({ providers: [account("claude-1", "Account 1", [T], 62, "high", { paneActivity: null })] }) }).strip).toEqual([]);
+    expect(build({ usage: usage({ report: false }) }).strip).toEqual([]);
+    expect(build({ usage: undefined }).strip).toEqual([]);
+    expect(build({ usage: { nonsense: true } }).strip).toEqual([]);
+  });
+
+  it("treats two entries of one account as one, and two accounts for one terminal as ambiguous", () => {
+    const dup = [account("claude-2-dup", "claude", [T], 62, "high", { sameAccountAs: "claude-2" }), account("claude-2", "Account 2", [T], 62, "high")];
+    expect(build({ usage: usage({ providers: dup }) }).strip.map((s) => s.label)).toEqual(["Account 2 · 38% used"]);
+    expect(build({ usage: usage({ providers: [account("claude-1", "Account 1", [T], 62, "high"), account("claude-2", "Account 2", [T], 10, "low")] }) }).strip).toEqual([]);
+  });
+});
+
 describe("the panorama strip (§4)", () => {
   it("counts the joined root's subagents per status, finished together, with the one that needs you", () => {
     const v = build({ panorama: panorama(T, "agent-1", ["run", "run", "done", "cxl", "wait"], {}, { hidden_finished: 1 }) });

@@ -80,7 +80,7 @@ describe("normalizeReport", () => {
     if (!n.ok) return;
     expect(n.report).not.toHaveProperty("watchDirs");
     expect(n.report).not.toHaveProperty("apiUsage");
-    expect(n.report.providers[0]).not.toHaveProperty("paneActivity");
+    expect(n.report.providers[0]?.paneActivity).toEqual({ panes: [{ paneId: "p1" }] });
     expect(n.report.providers[0]?.home).toBe("~/.claude-1");
     expect(n.report.providers[0]?.windows[0]).not.toHaveProperty("resetsAt");
     expect(n.report.providers[0]?.windows[0]?.runOut).toEqual({ text: "empty in ~18h 56m" } satisfies { text: string });
@@ -140,6 +140,26 @@ describe("usage topic polling", () => {
     expect(driver?.isPolling).toBe(false);
     await vi.advanceTimersByTimeAsync(USAGE_INTERVAL_MS * 4);
     expect(calls).toHaveLength(3);
+  });
+
+  it("hold() keeps collecting without a subscriber until released, and a subscriber alone does not release it", async () => {
+    vi.useFakeTimers();
+    const { calls, runner } = stub(() => okRun());
+    const { hub } = setup(runner);
+    const release = driver!.hold();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(1);
+    const a = await join(hub);
+    await a.send({ type: "sub", topics: ["usage"] });
+    hub.disconnect(a.conn);
+    expect(driver?.isPolling).toBe(true);
+    await vi.advanceTimersByTimeAsync(USAGE_INTERVAL_MS);
+    expect(calls).toHaveLength(2);
+    release();
+    release();
+    expect(driver?.isPolling).toBe(false);
+    await vi.advanceTimersByTimeAsync(USAGE_INTERVAL_MS * 3);
+    expect(calls).toHaveLength(2);
   });
 
   it("does not stack collects: a slow one is shared by the next tick", async () => {

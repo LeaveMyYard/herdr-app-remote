@@ -79,6 +79,12 @@ export function swarmData(s: bridgeApi.StripItem): bridgeApi.SwarmStripData | nu
   return r.success ? r.data : null;
 }
 
+export function usageData(s: bridgeApi.StripItem): bridgeApi.UsageStripData | null {
+  if (s.kind !== "usage.account") return null;
+  const r = bridgeApi.UsageStripData.safeParse(s.data);
+  return r.success ? r.data : null;
+}
+
 /** The Peek route of a root's subagent (App.tsx: `#/swarm/peek/<nodeUid>`). */
 export const peekHref = (rootKey: string, nodeId: string): string => `#/swarm/peek/${encodeURIComponent(nodeUid({ key: rootKey }, nodeId))}`;
 

@@ -4,6 +4,12 @@
 .hd .tl-strip-link{min-width:0;height:36px;gap:4px;font-size:12px;color:var(--t-muted)}
 .tl-strip-label{margin-left:4px}
 .tl-strip-chev{color:var(--t-dim)}
+.hd .tl-chip{height:26px;margin-left:auto;padding:0 9px;gap:6px;border-radius:13px;border:1px solid #ffffff14;background:#ffffff0a;font-size:11.5px;color:var(--t-muted)}
+.tl-chip-dot{width:6px;height:6px;border-radius:3px;background:var(--t-ansi2)}
+.tl-chip[data-tone=warn] .tl-chip-dot{background:var(--t-working)}
+.tl-chip[data-tone=bad] .tl-chip-dot{background:var(--t-blocked)}
+.tl-chip[data-tone=muted] .tl-chip-dot{background:var(--t-dim)}
+.tl-chip-used{color:var(--t-dim)}
 
 .tl-q{padding:12px 12px 12px 14px;gap:10px;border-radius:10px;background:#24221f;border:1px solid #4a3b26}
 .tl-q-edge{left:0;top:0;bottom:0;width:2px;border-radius:9px 0 0 9px;background:#ffb547}

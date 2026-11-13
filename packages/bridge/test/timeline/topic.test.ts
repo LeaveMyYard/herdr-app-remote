@@ -55,6 +55,25 @@ describe("TimelineTopicDriver", () => {
     expect(hub.get("timeline:t1")).toBeUndefined();
   });
 
+  it("follows the usage topic, and holds usage collection while a timeline is open (CV6)", async () => {
+    const hub = newHub({ mayRead: () => true });
+    hub.publish("host", hostState() as unknown as Json);
+    const log: string[] = [];
+    const drv = new TimelineTopicDriver({ hub, asks: () => null, toolUseIdOf: () => undefined, holdUsage: () => (log.push("hold"), () => log.push("release")) });
+    drv.start();
+    stops.push(() => drv.stop());
+    const c = await join(hub);
+    await c.send({ type: "sub", topics: ["timeline:t1"] });
+    expect(log).toEqual(["hold"]);
+    const v = () => hub.get("timeline:t1") as unknown as bridgeApi.TimelineTopic;
+    expect(v().strip).toEqual([]);
+    const providers = [{ providerId: "claude-1", family: "claude", label: "claude-1", profileLabel: "Account 1", status: "ok", windows: [{ slot: "primary", tag: "5h", windowMinutes: 300, displayPercent: 62, barFill: 0.62, band: "high", resetIn: "" }], paneActivity: { panes: [{ paneId: "t1" }] } }];
+    hub.publish("usage", { filter: "open-panes", updatedAtMs: 1, report: { version: 1, generatedAtMs: 1, filter: "open-panes", limitPercent: "remaining", providers } } as unknown as Json);
+    expect(v().strip.map((s) => s.label)).toEqual(["Account 1 · 38% used"]);
+    hub.disconnect(c.conn);
+    expect(log).toEqual(["hold", "release"]);
+  });
+
   it("re-checks anchors when the terminal's chat view changes", async () => {
     const { hub, env } = await setup({ ids: new Map([["group:1", "toolu_1"]]) });
     hub.publish("inbox", inbox([group(1, core("t1"))]) as unknown as Json);
