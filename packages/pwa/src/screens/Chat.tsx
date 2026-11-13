@@ -7,6 +7,7 @@ import type { AgentStatus } from "../model";
 import { useHostName } from "../bridge/host-name";
 import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
 import { KeysButton } from "./KeysSheet";
+import type { StripSlot } from "./ChatView";
 import * as W from "./keys-words";
 import { noticeWords, type NoticeKind } from "../chatview/words";
 
@@ -43,8 +44,8 @@ export interface ChatProps {
   terminal?: string | undefined;
   /** Why this is the text view and not the chat view (§6); closable. */
   viewNotice?: NoticeKind | null | undefined;
-  /** A row under the header (CV5's swarm and account strip). */
-  strip?: ReactNode;
+  /** A row under the header (CV5's swarm and account strip); as a function it draws Aa on that row instead. */
+  strip?: StripSlot;
   /** The chat view boards' taller header (14 px more under the status bar); set by `ChatRoute`. */
   roomy?: boolean;
   now?: () => number;
@@ -236,14 +237,15 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
   const notice = stale === undefined || !topic ? undefined : (STALE_TEXT[stale] ?? "Showing older text.");
   const error = topic ? undefined : stale !== undefined ? (STALE_ERROR[stale] ?? { title: "Can't read this terminal", body: () => STALE_TEXT[stale] ?? `The computer said: ${stale}.` }) : undefined;
   const waitedOut = useElapsed(terminal ?? agent.name, CHAT_WAIT_MS);
+  const fitButton = (
+    <button type="button" aria-label="Fit width" aria-pressed={fit} className="mono row nf chat-fit" onClick={toggleFit}>
+      Aa
+    </button>
+  );
   return (
     <>
-      <ChatHead roomy={roomy} agent={agent} backHref={backHref} right={
-        <button type="button" aria-label="Fit width" aria-pressed={fit} className="mono row nf chat-fit" onClick={toggleFit}>
-          Aa
-        </button>
-      } />
-      {strip}
+      <ChatHead roomy={roomy} agent={agent} backHref={backHref} right={typeof strip === "function" ? undefined : fitButton} />
+      {typeof strip === "function" ? strip(fitButton) : strip}
       {viewNotice ? <ViewNotice id={terminal ?? agent.name} kind={viewNotice} /> : null}
       <main className="col f1 chat-main">
         {notice ? (

@@ -101,6 +101,7 @@
 .cv-scroll{min-height:0;overflow:hidden auto;overscroll-behavior:contain;justify-content:flex-start}
 .cv-scroll:focus-visible{outline:1px solid var(--t-accent);outline-offset:-1px}
 .cv-list{margin-top:auto;padding:14px 16px 12px;gap:14px}
+.cv-list:empty{padding:0}
 .cv-item{min-width:0}
 .cv-divider{gap:10px;font-size:11.5px;color:var(--t-dim)}
 .cv-rule{height:1px;background:var(--t-border)}
@@ -147,7 +148,7 @@
 .cv-ask-d{font-size:12px;color:var(--t-dim)}
 .cv-older{justify-content:center}
 .hd .cv-older-pill{height:36px;padding:0 14px;gap:6px;border-radius:18px;border:1px solid var(--t-border);background:var(--t-background);font-size:12.5px;color:var(--t-muted)}
-.cv-empty{align-items:center;justify-content:center;gap:8px;padding:22px 24px 24px;text-align:center;color:var(--t-dim)}
+.cv-empty{align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center;color:var(--t-dim)}
 .cv-empty svg{width:31px;height:31px;margin-bottom:8px}
 .cv-empty-t{font-size:15px;font-weight:500;color:var(--t-foreground)}
 .cv-empty-b{max-width:260px;font-size:13.5px;line-height:1.45;color:var(--t-muted)}

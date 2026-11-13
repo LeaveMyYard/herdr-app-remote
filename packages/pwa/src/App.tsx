@@ -7,6 +7,7 @@ import type { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { chats, chatviewDemo, typingDemo } from "./chat-fixtures";
 import type { ViewMode } from "./chatview/mode";
 import { ChatRoute, type ChatRouteProps } from "./screens/ChatRoute";
+import { TimelineStrip } from "./timeline/Timeline";
 import { HostNameProvider } from "./bridge/host-name";
 import { agents, badges, host, plugins, spaces, usageInstallCommand } from "./fixtures";
 import { TABS, type Connection, type PluginRow, type Space, type TabBadges, type TabId } from "./model";
@@ -96,6 +97,8 @@ export interface LiveSources {
         view?: ChatRouteProps["view"];
         /** Reports which view is on screen (see `ChatRoute`). */
         onShown?: ChatRouteProps["onShown"];
+        /** The `timeline:<t>` topic (CV5): plugin items inline and the strip; absent when refused or not there. */
+        timeline?: bridgeApi.TimelineTopic | undefined;
       }
     | undefined;
   /** Sends an inbox `act` (draft, answer, dismiss, retry, stop showing, ack); resolves with the bridge's `res`. */
@@ -131,6 +134,12 @@ export function pluginRows(p: bridgeApi.PluginsTopic | undefined): PluginRow[] {
     { name: "herdr-inbox", state: p.inbox.state },
     { name: "agent-usage", state: p.usage.state },
   ];
+}
+
+/** The chat view's timeline slots (CV5): the strip under the header and the items inline, acting through `act`. */
+function timelineSlots(t: bridgeApi.TimelineTopic, act: ActFn): NonNullable<ChatRouteProps["slots"]> {
+  // The text view draws its Aa on the strip row (board "Codex"); with no strip it stays in the header.
+  return { ...(t.strip.length > 0 ? { strip: (end: ReactNode) => <TimelineStrip strip={t.strip} end={end} /> } : {}), timeline: { items: t.items, act } };
 }
 
 function parts(hash: string): string[] {
@@ -284,7 +293,8 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
       : live?.chat?.mode
         ? { mode: live.chat.mode, view: live.chat.view, onShown: live.chat.onShown }
         : null;
-    const chat = route ? <ChatRoute mode={route.mode} view={route.view} onShown={route.onShown} text={textProps} slots={cvDemo ? { strip: <div className="nf cv-strip-demo" data-vis-mask="" style={cvDemo.mode.kind === "text" ? { height: 42 } : undefined} /> } : undefined} /> : <Chat {...textProps} />;
+    const slots = cvDemo ? (cvDemo.timeline ? timelineSlots(cvDemo.timeline, offlineAct) : { strip: <div className="nf cv-strip-demo" data-vis-mask="" style={cvDemo.mode.kind === "text" ? { height: 42 } : undefined} /> }) : live?.chat?.timeline ? timelineSlots(live.chat.timeline, inboxAct) : undefined;
+    const chat = route ? <ChatRoute mode={route.mode} view={route.view} onShown={route.onShown} text={textProps} slots={slots} /> : <Chat {...textProps} />;
     // The board's computer is "desk-1"; live data gets its name from LiveApp's provider.
     return <AppFrame>{typed ? <HostNameProvider name="desk-1">{chat}</HostNameProvider> : chat}</AppFrame>;
   }

@@ -8,9 +8,16 @@ import { hasOpenPrompt, PromptTail, type PromptAct } from "../chatview/prompt/Pr
 import * as W from "../chatview/words";
 import { ChatHead, useInputOn, type ChatAgent } from "./Chat";
 import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
+import { timelineRow, usePlaced, type InlineTimeline } from "../timeline/inline";
 import * as K from "./keys-words";
 
 type Item = bridgeApi.ChatItem;
+
+/**
+ * The row under the header. As a function it is given the text view's Aa (`end`) to draw on that row, as the board
+ * does when there is a strip; the chat view has no Aa and passes null.
+ */
+export type StripSlot = ReactNode | ((end: ReactNode) => ReactNode);
 
 export interface ChatViewProps {
   agent: ChatAgent;
@@ -28,13 +35,15 @@ export interface ChatViewProps {
    * every item: `undefined` means "draw the default", which it gets as `draw()`. `tail` comes after the last item,
    * before the status line.
    */
-  strip?: ReactNode;
+  strip?: StripSlot;
   tail?: ReactNode;
   /** A native prompt is open (CV7): the composer waits. */
   locked?: boolean;
   renderItem?: ((item: Item, prev: Item | undefined, draw: () => ReactNode) => ReactNode | undefined) | undefined;
   /** Sends `prompt.answer` for a prompt card (CV7); resolves with the bridge's `res`. */
   promptAct?: PromptAct | undefined;
+  /** Plugin items (`timeline:<t>`, CV5), placed among the items by `placeTimeline`. */
+  timeline?: InlineTimeline | undefined;
 }
 
 /** Scrolled this close to the end counts as following it. */
@@ -81,7 +90,7 @@ const isNews = (i: Item) => i.role !== "divider";
  * composer. The scroll follows the end unless the reader has scrolled up; then a button jumps back, counting what
  * arrived. Older pages load as the top is reached.
  */
-export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal, backHref = "#/agents", now = Date.now, strip, tail: extraTail, locked: lockedProp, renderItem, promptAct }: ChatViewProps) {
+export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal, backHref = "#/agents", now = Date.now, strip, tail: extraTail, locked: lockedProp, renderItem, promptAct, timeline }: ChatViewProps) {
   const host = useHostName();
   const { on, ranOut } = useInputOn(input, now);
   const [held, setHeld] = useState<Held>(() => initHeld(topic));
@@ -211,12 +220,44 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
   };
 
   const ctx: ItemCtx = { agent: agent.short ?? agent.name, working, now: t0, ...(terminal !== undefined && promptAct ? { prompt: { terminal, desk: host, act: promptAct } } : {}) };
+  const placed = usePlaced(items, timeline);
+  // Chat items and timeline rows as one flat, keyed list: a timeline row that moves (a newer message arrives, its
+  // anchored ask loads, an older page goes in above) keeps its component, so an act in flight stays in flight.
+  const listRows: ReactNode[] = [];
+  /** Where a run of open prompt cards that ends the list starts, else null. */
+  let promptRun: number | null = null;
+  const addRows = (list: readonly bridgeApi.TimelineItem[] | undefined) => {
+    if (!timeline || !list || list.length === 0) return;
+    for (const t of list) listRows.push(timelineRow(t, timeline.act, t0));
+    promptRun = null;
+  };
+  items.forEach((item, i) => {
+    addRows(placed?.before.get(item.id));
+    // An inbox ask the timeline anchored to is drawn as that item instead.
+    const swap = placed?.replace.get(item.id);
+    if (swap) return addRows([swap]);
+    const prev = items[i - 1];
+    const draw = () => renderDefaultItem(item, prev, ctx);
+    const node = renderItem?.(item, prev, draw) ?? draw();
+    if (node !== null && node !== undefined) {
+      if (item.role === "prompt" && item.state === "open") promptRun ??= listRows.length;
+      else promptRun = null;
+      listRows.push(
+        <div key={item.id} className="cv-item">
+          {node}
+        </div>,
+      );
+    }
+  });
+  // Rows newer than every item go at the end, but above an open prompt card that ends the list: the card is what
+  // the agent waits on now, and stays last above the locked composer (CV7).
+  if (timeline && placed) listRows.splice(promptRun ?? listRows.length, 0, ...placed.tail.map((t) => timelineRow(t, timeline.act, t0)));
   const typing = on && input && terminal !== undefined ? { input, terminal } : null;
   const empty = items.length === 0;
   return (
     <>
       <ChatHead roomy agent={agent} backHref={backHref} />
-      {strip}
+      {typeof strip === "function" ? strip(null) : strip}
       <main className="rel col f1 cv-main">
         <div ref={view} role="log" aria-label="Conversation" className="col f1 cv-scroll" tabIndex={0} onScroll={onScroll}>
           {empty ? (
@@ -227,42 +268,27 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
               <span className="cv-empty-t">{W.EMPTY_TITLE}</span>
               <span className="cv-empty-b">{W.emptyBody(agent.folder)}</span>
             </div>
-          ) : (
-            <div className="col cv-list">
-              {cur.older ? (
-                <div className="row cv-older">
-                  {loading ? (
-                    <span className="row cv-older-pill">
-                      <Spinner />
-                      {W.LOADING_OLDER}
-                    </span>
-                  ) : failed ? (
-                    <button type="button" className="row cv-older-pill" onClick={more}>
-                      {W.SHOW_OLDER}
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-              {items.map((item, i) => {
-                const prev = items[i - 1];
-                const draw = () => renderDefaultItem(item, prev, ctx);
-                const node = renderItem?.(item, prev, draw) ?? draw();
-                return node === null || node === undefined ? null : (
-                  <div key={item.id} className="cv-item">
-                    {node}
-                  </div>
-                );
-              })}
-              {tail}
-              <StatusLine status={topic.status} now={now} card={card} />
-            </div>
-          )}
-          {empty ? (
-            <>
-              {tail}
-              <StatusLine status={topic.status} now={now} card={card} />
-            </>
           ) : null}
+          {/* One list element in every state, so a row keeps its place in the tree (and its state) when it moves. */}
+          <div className="col cv-list">
+            {!empty && cur.older ? (
+              <div className="row cv-older">
+                {loading ? (
+                  <span className="row cv-older-pill">
+                    <Spinner />
+                    {W.LOADING_OLDER}
+                  </span>
+                ) : failed ? (
+                  <button type="button" className="row cv-older-pill" onClick={more}>
+                    {W.SHOW_OLDER}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {listRows}
+            {tail}
+            <StatusLine status={topic.status} now={now} card={card} />
+          </div>
         </div>
         {away || fresh > 0 ? (
           <button type="button" className="row cv-jump" onClick={jump}>
