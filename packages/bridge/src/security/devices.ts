@@ -20,6 +20,9 @@ const CapsSchema = z
     // Added by CV1 (chat history): a devices.json written before it has none, and reads as off. The schema stays
     // strict, so a bridge from before CV1 refuses a file written by this one: there is no downgrade.
     "transcript.read": z.boolean().default(false),
+    // Added by CV7 (answer prompts): absent reads as off, with no expiry. Same no-downgrade rule as above.
+    "prompt.answer": z.boolean().default(false),
+    "prompt.answer.until": z.number().int().nullable().default(null),
   })
   .strict();
 

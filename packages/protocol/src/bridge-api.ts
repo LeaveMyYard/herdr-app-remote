@@ -776,6 +776,75 @@ export const TerminalSendArgs = z
   .strict();
 export type TerminalSendArgs = z.infer<typeof TerminalSendArgs>;
 
+// ---- native prompts (CV7): `prompt.answer` (docs/chatview.md §3a) ----
+//
+// A prompt card (`ChatItem` role `prompt`) is published only when the transcript (a pending tool_use), the host
+// (the agent is `blocked`) and the screen (`hc read`: a prompt block that matches the tool) agree. The phone answers
+// it by `prompt_id` and `rev`; the bridge re-checks all three, then presses arrow keys only, re-reads, and presses
+// Enter (two phases). It never presses digits and the phone never names keys.
+
+export const PROMPT_ANSWER = "prompt.answer";
+/** An Other answer: at most this many characters (code points). */
+export const PROMPT_OTHER_MAX_CHARS = 2000;
+/**
+ * What an Other answer may not hold: everything {@link TERMINAL_SEND_UNSAFE} refuses, and also newline and tab. The
+ * Other field is one line: a pasted newline could end the answer early and type the rest into the composer.
+ */
+// eslint-disable-next-line no-control-regex
+export const PROMPT_OTHER_UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+/**
+ * The answer:
+ * - `{option: i}`: the i-th entry of the card's `options` (0-based; a permission, plan or generic card, or a
+ *   single-select question);
+ * - `{picks: [i…]}`: a multi-select question's options to tick (0-based into `questions[0].options`, at least one,
+ *   no repeats);
+ * - `{other: text}`: a single-select question's Other field (only when `questions[0].other` is true).
+ */
+export const PromptChoice = z.union([
+  z.object({ option: z.number().int().min(0).max(19) }).strict(),
+  z
+    .object({ picks: z.array(z.number().int().min(0).max(19)).min(1).max(20) })
+    .strict()
+    .refine((c) => new Set(c.picks).size === c.picks.length, { message: "picks are distinct" }),
+  z
+    .object({
+      other: z
+        .string()
+        .refine((s) => s.trim().length > 0, { message: "an Other answer is not empty" })
+        .refine((s) => [...s].length <= PROMPT_OTHER_MAX_CHARS, { message: `at most ${PROMPT_OTHER_MAX_CHARS} characters` })
+        .refine((s) => !PROMPT_OTHER_UNSAFE.test(s), { message: "one line, no control characters" }),
+    })
+    .strict(),
+]);
+export type PromptChoice = z.infer<typeof PromptChoice>;
+
+/** `act prompt.answer` (capability `prompt.answer`): answer card `prompt_id`, as published at `rev`, in `terminal`. */
+export const PromptAnswerArgs = z
+  .object({
+    terminal: z.string().regex(TERMINAL_ID),
+    prompt_id: z.string().regex(/^[0-9a-f]{64}$/),
+    rev: z.string().min(1).max(128),
+    choice: PromptChoice,
+  })
+  .strict();
+export type PromptAnswerArgs = z.infer<typeof PromptAnswerArgs>;
+
+/**
+ * `res.code` of a refused `prompt.answer`:
+ * - `prompt_changed`: the card, the transcript or the screen is not what the phone was shown, or the cursor did not
+ *   land where phase A aimed: nothing was decided ("The prompt changed. Look again." / "Nothing was pressed.");
+ * - `prompt_gone`: the prompt is no longer on the screen ("Already answered on desk-1.");
+ * - `busy`: another answer runs for this terminal, or hc refused because the terminal is busy ("desk-1 is typing.
+ *   Try again in a moment.");
+ * - `bad_choice`: the choice does not fit the card (an index out of range, Other on a card without it, a card with
+ *   no buttons);
+ * - `forbidden`, `audit_unavailable`, `rate_limited`, `bad_args`: as for every act.
+ * With `unknown_effect: true` (code `unknown_effect`, `timeout` or `cancelled`) Enter or the Other text may have
+ * reached the agent ("Agent 1 may have got your answer. Look before you answer again."). The phone never retries.
+ */
+export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_gone", "busy", "bad_choice", "forbidden", "audit_unavailable", "unknown_effect"] as const;
+
 // ---- terminal keys (S16b): the special-keys menu ----
 //
 // `terminal.keys` (capability `terminal.keys`, separate from `terminal.input`) presses one entry of the desktop's

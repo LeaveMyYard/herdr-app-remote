@@ -298,6 +298,11 @@ export function localDay(iso: string): string {
 export interface MapOptions {
   /** The day an ISO time falls on, for day dividers. Default {@link localDay}. */
   dayOf?: (iso: string) => string;
+  /**
+   * Filled with the item ids of each AskUserQuestion call (by tool_use id), so a prompt card for that call (CV7) can
+   * take their place.
+   */
+  askIds?: Map<string, string[]>;
 }
 
 interface Run {
@@ -395,7 +400,13 @@ export function mapMessages(messages: readonly ClaudeMessage[], o: MapOptions = 
           run = null;
           const fit = fitAsks(qs, Math.max(0, bridgeApi.CHATVIEW_MESSAGE_MAX_BYTES - used));
           used += askBytes(fit.asks);
-          for (const ask of fit.asks) push({ id: nextId(), role: "ask", at: m.at, ask, ...(fit.cut ? { cut: true as const } : {}) });
+          const ids: string[] = [];
+          for (const ask of fit.asks) {
+            const id = nextId();
+            ids.push(id);
+            push({ id, role: "ask", at: m.at, ask, ...(fit.cut ? { cut: true as const } : {}) });
+          }
+          o.askIds?.set(b.id, ids);
           continue;
         }
       }

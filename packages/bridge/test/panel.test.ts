@@ -146,6 +146,20 @@ describe("panel acts", () => {
     expect(security.devices().find((x) => x.id === APPROVED)!.caps["terminal.input"]).toBe(false);
   });
 
+  it("prompt.answer (CV7) turns on with an expiry from the panel, shows in the view, and off again", async () => {
+    const p = await open("panel");
+    const before = Date.now();
+    expect(driver.view().devices.find((x) => x.id === APPROVED)!).toMatchObject({ caps: { "prompt.answer": false }, prompt_answer_until: null });
+    expect(await act(p, "device.cap", { id: APPROVED, cap: "prompt.answer", on: true, minutes: 60 })).toMatchObject({ ok: true });
+    const row = driver.view().devices.find((x) => x.id === APPROVED)!;
+    expect(row.caps["prompt.answer"]).toBe(true);
+    expect(row.caps["terminal.keys"]).toBe(false);
+    expect(row.prompt_answer_until).toBeGreaterThanOrEqual(before + 60 * 60_000);
+    expect(modLink.PanelView.safeParse(driver.view()).success).toBe(true);
+    expect(await act(p, "device.cap", { id: APPROVED, cap: "prompt.answer", on: false })).toMatchObject({ ok: true });
+    expect(driver.view().devices.find((x) => x.id === APPROVED)!).toMatchObject({ caps: { "prompt.answer": false }, prompt_answer_until: null });
+  });
+
   it("terminal.keys (S16b) turns on with an expiry from the panel, shows in the view, and off again", async () => {
     const p = await open("panel");
     const before = Date.now();

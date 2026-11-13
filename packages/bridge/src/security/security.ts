@@ -67,6 +67,8 @@ export interface DeviceView {
   terminal_input_until: number | null;
   /** When `terminal.keys` turns off by itself (S16b), or null. */
   terminal_keys_until: number | null;
+  /** When `prompt.answer` turns off by itself (CV7), or null. */
+  prompt_answer_until: number | null;
   created_at: number;
   approved_at: number | null;
   last_seen: number | null;
@@ -105,6 +107,8 @@ export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([
   ["terminal.send", { max: 6, windowMs: 10_000 }],
   // A menu press is one tap, but arrows get tapped a few times in a row.
   ["terminal.keys", { max: 10, windowMs: 10_000 }],
+  // CV7: answering a native prompt (docs/chatview.md §3a.4).
+  ["prompt.answer", { max: 6, windowMs: 10_000 }],
 ]);
 /**
  * Refused transcript subscriptions written to Activity per device per window (CV1). A phone with chat history off
@@ -112,7 +116,7 @@ export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([
  */
 export const TOPIC_REFUSAL_LOG_LIMIT: Limit = { max: 4, windowMs: 60_000 };
 /** Kinds that must not run while the Activity log can't be written: their whole safeguard is the audit line. */
-const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send", "terminal.keys"]);
+const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send", "terminal.keys", "prompt.answer"]);
 /** Kinds the security layer answers itself, never handed to the inner handler. */
 const LOCAL_KINDS: ReadonlySet<string> = new Set(["pair.transfer"]);
 /** setTimeout's ceiling (about 24.8 days); a later expiry is re-armed when this fires. */
@@ -577,6 +581,7 @@ export class Security {
       caps,
       terminal_input_until: d.caps["terminal.input.until"],
       terminal_keys_until: d.caps["terminal.keys.until"],
+      prompt_answer_until: d.caps["prompt.answer.until"],
       created_at: d.created_at,
       approved_at: d.approved_at,
       last_seen: d.last_seen,
@@ -632,7 +637,7 @@ export class Security {
   setCap(id: string, cap: Capability, on: boolean, until: number | null = null): void {
     const d = this.store.get(id);
     if (!d || d.state !== "approved") throw new Error("no such approved device");
-    if (until !== null && !isExpiring(cap)) throw new Error("only terminal.input and terminal.keys can expire");
+    if (until !== null && !isExpiring(cap)) throw new Error("only terminal.input, terminal.keys and prompt.answer can expire");
     if (until !== null && (!Number.isSafeInteger(until) || until <= this.now())) throw new Error("until must be a future epoch ms");
     // Drop first, as in revoke.
     if (cap === "view" && !on) {
