@@ -69,13 +69,23 @@ Host, identity and Origin failures all answer the same `403 forbidden`, so a pro
 
 **Pause** refuses everything except `/healthz` and closes live sockets.
 
-**Claude history reader** (chat view, docs/chatview.md §2.2; no topic serves it to the phone yet). Claude Code history is read only through the pinned Claude Agent SDK's `getSessionMessages` and `getSessionInfo`, never by parsing transcripts in the bridge:
+**Claude history reader** (chat view, docs/chatview.md §2.2; the `chatview:<t>` topic below serves it). Claude Code history is read only through the pinned Claude Agent SDK's `getSessionMessages` and `getSessionInfo`, never by parsing transcripts in the bridge:
 
 - The Claude config dirs come only from herdr-agent-usage's profile list (`[[claude.profiles]].config_dir` in its `config.toml`, read-only). There is no `~/.claude*` scan, no `$CLAUDE_CONFIG_DIR` source and no fallback; without a usable list the reader reports `no_profiles`.
 - Each distinct `projects` dir gets its own child process (`claude-reader.mjs`), so the parse cost and the SDK stay out of the bridge process. A child gets a clean environment (`CLAUDE_CONFIG_DIR` and `HOME` only: no tokens, no `NODE_OPTIONS`) and runs under Node's permission model, allowed to read only its own script and its `projects` dir (`<config dir>/projects` and that path's realpath). It is not granted the rest of the config dir, so it cannot open `.credentials.json` or other account files directly. Node's permission model follows symlinks, though, so a symlink inside `projects` that points out of it would be followed (the child cannot create one: writes are denied). It cannot write files or start processes, so it can never start Claude Code.
 - At most 4 children run at once. A child exits after 60 s idle and is killed by its own pid when a call takes over 5 s, its RSS goes over 512 MB, or a reply is over 64 MB.
 - A session is bound to a reader only through the transcript path panorama proved (the realpath of its `projects` dir), or, failing that, a reader that finds the session id. The transcript is never opened by the bridge.
 - What a read returns is checked block by block; thinking text and tool output are dropped before anything else sees it, and an unexpected shape makes the history unavailable rather than guessed.
+- The bridge runs only the reader it was built with: the build puts `claude-reader.mjs`'s sha256 into `bridge.mjs` (the installer records the same hash), and the file is hashed before every start. Another file (edited, swapped, left from another build) is never run, and the chat view says `reader_failed`.
+
+**Chat view topic** (`chatview:<t>`, docs/chatview.md §2, §3, §5; CV3). It needs `view` and `transcript.read`, like its older pages (`GET /api/v1/chatview/<t>`).
+
+- **Only panorama's proved binding is used.** A session is shown for terminal `t3` only when panorama's feed has exactly one root at that exact address, joined to the one live agent there, with a verified session id. An aged or stale feed, a conflict, or no session id hides the chat view (the phone shows the terminal); it is never guessed from cwd, titles or recency. Showing the wrong session is the worst correctness failure, so a binding that changes drops the history held and starts over.
+- **The transcript is never opened by the bridge.** While a chat is open it is stat'ed once a second (size and mtime); the history is read through the reader child only when they change.
+- **What leaves the bridge** is prompt and reply text, AskUserQuestion text and options, tool names, file base names and counts. Tool inputs and outputs, thinking, attachments, hook context, system prompts, subagent messages, transcript paths, config dir names and session ids never do; item ids are message uuids, opaque to the phone.
+- **Limits.** Each text block is cut at 16 KB and each message at 32 KB; the topic carries the newest 100 items in at most 512 KB, and a page at most 50 items.
+- **Redaction is best effort.** Known secret shapes (`sk-ant-…`, GitHub `gh?_…` and `github_pat_…` tokens, AWS `AKIA…`/`ASIA…` key ids, Slack `xox?-…` tokens, PEM private key blocks, `Authorization: Bearer …`) become `[hidden]` before anything is sent. A secret in another shape, or split across messages, is sent as the agent or you wrote it. Chat history is off by default for that reason too.
+- **Audit.** Activity records "Phone 1 opened the chat of t3" once per subscription and each older page by count ("Phone 1 loaded 50 earlier messages of t3"), never text. Both are refused while Activity can't be written (`audit_unavailable`), as typing is. The pages need the API marker header and, when sent, the exact Origin, and are limited to 20 per 10 s per device.
 
 ## Accepted risks
 
@@ -89,6 +99,7 @@ These are known and accepted for v1.
 - **The tailnet is a trust boundary.** The owner login check means another user of the same tailnet is refused, but a compromised Tailscale account, or an admin of your tailnet, is not defended against.
 - **A lost phone** is protected by the phone's own lock and by revoking it from the desktop; the cookie is long-lived (400 days) and is not bound to the device hardware.
 - **The Claude reader runs third-party code with your user's read rights.** The pinned Claude Agent SDK runs in the reader children. Node's permission model limits a child to reading its `projects` dir and denies writes and child processes. It follows symlinks, so a symlink placed inside `projects` (which takes your user's rights; the child can't make one) would extend the child's read access to its target, such as the credentials next to it. On Node 24 and older it does not limit network access (`--allow-net` arrives in Node 25), and every reader of a shared (symlinked) `projects` dir can read every session in it. The exact pin and the rig test limit drift; a compromised SDK release would still have read access to the transcripts.
+- **Chat history shows what the agent and you wrote.** With `transcript.read` on, the phone can read whole conversations, including anything pasted into them; the secret redaction is best effort. A stolen cookie with chat history on can read that history until it is revoked or the switch is turned off.
 - **iOS** kills background sockets and can let push subscriptions lapse; the app reconnects when it comes back, and never retries an action by itself when its outcome is unknown.
 
 ## Reporting a problem

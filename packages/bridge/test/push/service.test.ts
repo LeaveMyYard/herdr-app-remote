@@ -59,7 +59,7 @@ function addQuestion(id: number): void {
   topics.inbox = { ...t, entries: [...t.entries, row] };
 }
 
-const gate = () => ({ mayPush: (id: string) => sec.mayPush(id), requestDevice: (r: Parameters<Security["requestDevice"]>[0]) => sec.requestDevice(r), device: (id: string) => sec.pushDevice(id), note: (e: Parameters<Security["note"]>[0]) => sec.note(e) });
+const gate = () => ({ mayPush: (id: string) => sec.mayPush(id), requestDevice: (r: Parameters<Security["requestDevice"]>[0]) => sec.requestDevice(r, []), device: (id: string) => sec.pushDevice(id), note: (e: Parameters<Security["note"]>[0]) => sec.note(e) });
 
 /** A second push service on the same data dir: the bridge restarted (production endpoint check unless given). */
 function restartPush(allowFake = false): void {

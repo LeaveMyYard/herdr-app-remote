@@ -1,0 +1,13 @@
+{
+  "terminal": "t3",
+  "harness": "claude",
+  "state": "unavailable",
+  "reason": "no_profiles",
+  "items": [],
+  "older": false,
+  "rev": "",
+  "status": {
+    "state": "idle",
+    "since": null
+  }
+}

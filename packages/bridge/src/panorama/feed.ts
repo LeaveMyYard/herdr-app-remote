@@ -37,6 +37,12 @@ export interface FeedRoot {
   inbox: number[];
   hidden_finished: number;
   last_activity: number | null;
+  /** The verified harness session id (after `continued-in`), never a join heuristic. The chat view (CV3) reads it. */
+  session_id: string | null;
+  /** Source folder metadata: the chat view's getSessionInfo fallback only, never identity. */
+  cwd: string | null;
+  /** The absolute path of the main transcript. The chat view stats it and picks a reader root by it; never opened. */
+  transcript: string | null;
   agents: FeedAgent[];
 }
 

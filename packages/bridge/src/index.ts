@@ -1,4 +1,4 @@
-export { Hub, toRes, type ActHandler, type ActResult, type HubClient, type HubOptions, type Principal, type TopicGate } from "./hub.js";
+export { Hub, toRes, type ActHandler, type ActResult, type GateMode, type HubClient, type HubOptions, type Principal, type PublishOptions, type TopicGate } from "./hub.js";
 export { HostTopic, HOST_TOPIC, type HostSink, type HostSource, type HostTopicOptions } from "./host.js";
 export { createBridgeServer, type BridgeServer, type GuardVerdict, type ServerOptions } from "./server.js";
 export { diff, applyPatch, PatchError, type Json } from "./patch.js";
@@ -28,3 +28,4 @@ export { terminalSendActor, readSend, sendArgs, TERMINAL_SEND, SEND_TIMEOUT_MS, 
 export { terminalKeysActor, TERMINAL_KEYS, type TerminalKeysActor } from "./terminal/keys.js";
 export { KeysMenu, menuTopic, DEFAULT_KEYS } from "./terminal/keys-config.js";
 export * as claude from "./claude/index.js";
+export * as chatview from "./chatview/index.js";

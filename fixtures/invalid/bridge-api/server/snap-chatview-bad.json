@@ -1,0 +1,10 @@
+{
+  "type": "snap",
+  "topic": "chatview:t3",
+  "epoch": "epoch-1",
+  "seq": 1,
+  "data": {
+    "terminal": "t3",
+    "text": "Question Title 123"
+  }
+}

@@ -9,6 +9,9 @@ import { type Binaries } from "../plugins/detect.js";
 import { resolvedBinaries } from "../plugins/binaries.js";
 import { run as defaultRun, type Runner } from "../plugins/exec.js";
 import { ChatTopicDriver } from "../chat/topic.js";
+import { ChatviewTopicDriver } from "../chatview/topic.js";
+import { chatviewRoute } from "../chatview/route.js";
+import { ClaudeHistory, type ReaderPoolOptions } from "../claude/index.js";
 import { HostTopic } from "../host.js";
 import { InboxTopicDriver } from "../inbox/topic.js";
 import { Hub } from "../hub.js";
@@ -81,6 +84,12 @@ export interface AppOptions {
   /** Extra Status checks and panel operations (tests and rigs; Tailscale setup is wired in by the app itself). */
   panel?: Pick<import("../panel/driver.js").PanelDriverOptions, "extraChecks" | "extraAct">;
   log?: (e: AppLogEvent) => void;
+  /**
+   * The chat view's Claude reader child (CV2/CV3): its path and the sha256 it must have (the bundle's injected one,
+   * `BUILT_READER_SHA256`). Left out, or with no hash, there is no reader: every Claude chat view is `reader_failed`
+   * and the phone shows the text view. `pool` holds test seams.
+   */
+  claude?: { script: string; sha256: string | null; pool?: Omit<ReaderPoolOptions, "script" | "scriptSha256" | "home"> };
   /** Web Push test seams (S17): the fake push service's transport and endpoint check. */
   push?: Pick<PushOptions, "transport" | "allowEndpoint" | "tickMs" | "rateLimit" | "now">;
 }
@@ -212,13 +221,34 @@ export async function startApp(o: AppOptions): Promise<App> {
   const panorama = new PanoramaTopicDriver({ hub, appHome: o.appHome, onInvalid: invalid("panorama") });
   const chat = new ChatTopicDriver({ hub, run, binaries });
   const inbox = (inboxDriver = new InboxTopicDriver({ hub, appHome: o.appHome, run, binaries }));
+  // The chat view (CV3): a reader only when the bridge knows the hash of the one it was built with.
+  const history =
+    o.claude && o.claude.sha256 !== null
+      ? new ClaudeHistory({
+          appHome: o.appHome,
+          ...(o.home !== undefined ? { home: o.home } : {}),
+          pool: { ...(o.claude.pool ?? {}), script: o.claude.script, scriptSha256: o.claude.sha256, ...(o.home !== undefined ? { home: o.home } : {}) },
+        })
+      : null;
+  const chatview = new ChatviewTopicDriver({ hub, history, feed: () => panorama.feedView(), onInvalid: (topic, error) => log({ event: "invalid_topic", topic, error }) });
+  const chatviewPages = chatviewRoute({
+    gate: {
+      requestDevice: (req, needs) => security.requestDevice(req, needs),
+      auditChatPage: (id, t, n) => security.auditChatPage(id, t, n),
+      note: (e) => security.note(e),
+      deviceName: (id) => security.deviceName(id),
+      origin: () => security.origin(),
+    },
+    page: (t, before, n, rev) => chatview.page(t, before, n, rev),
+  });
   usage = new UsageTopicDriver({ hub, run, binaries, appHome: o.appHome, ...(o.home !== undefined ? { home: o.home } : {}) });
 
   push = new PushService({
     dataDir: join(o.appHome, "data/herdr-app-remote"),
     gate: {
       mayPush: (id) => security.mayPush(id),
-      requestDevice: (req) => security.requestDevice(req),
+      // Push info needs only what holding the socket needs; `allowed` says whether `push` is on.
+      requestDevice: (req) => security.requestDevice(req, []),
       device: (id) => security.pushDevice(id),
       note: (e) => security.note(e),
     },
@@ -253,7 +283,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     port: o.port ?? DEFAULT_API_PORT,
     guard,
     routes: async (req, res, path) =>
-      (await security.routes(req, res, path)) || (await manifest(req, res, path)) || pushService.routes(req, res, path),
+      (await security.routes(req, res, path)) || (await manifest(req, res, path)) || pushService.routes(req, res, path) || chatviewPages(req, res, path),
     onConnect: security.onConnect,
     hostName: () => hostName(security.serveIdentity),
   });
@@ -314,6 +344,7 @@ export async function startApp(o: AppOptions): Promise<App> {
     await inbox.start();
     usage.start();
     chat.start();
+    chatview.start();
     // Last: its first look seeds the triggers from the topics as they are now, so nothing already there is announced.
     pushService.start();
   } catch (e) {
@@ -322,6 +353,8 @@ export async function startApp(o: AppOptions): Promise<App> {
     panel.stop();
     // Each stop is safe on a driver that never started.
     await setup?.close();
+    chatview.stop();
+    history?.close();
     chat.stop();
     usage.stop();
     inbox.stop();
@@ -369,6 +402,8 @@ export async function startApp(o: AppOptions): Promise<App> {
       // handler herdr created but no longer knows is its own.
       await setup?.close();
       usage?.stop();
+      chatview.stop();
+      history?.close();
       chat.stop();
       inbox.stop();
       panorama.stop();

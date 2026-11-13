@@ -104,7 +104,9 @@ There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other 
 - turning it off ends the device's open transcript subscriptions at once with the same `stale forbidden`, without closing its socket, also when `devices.json` can't be written; nothing more is sent on them until a new `sub` is allowed;
 - with no gate configured the hub serves no transcript topic at all (fails closed).
 
-`GET /api/v1/chatview/<t>` (CV3) passes the same capabilities to the cookie check (`Security.requestDevice(req, topicCaps(topic))`). A `devices.json` written before CV1 has no `transcript.read` and reads as off; a bridge from before CV1 refuses to start on a file written by this one (strict schema), so there is no downgrade.
+`GET /api/v1/chatview/<t>` (CV3) passes the same capabilities to the cookie check (`Security.requestDevice(req, topicCaps(topic))`). `requestDevice` has no default for its capability list: every route names what it needs (`[]` for the socket's rights alone, as `GET /api/v1/push` does), so a new route can't grant by omission.
+
+A granted `chatview:<t>` subscription is written to Activity once ("Phone 1 opened the chat of t3"): at the `sub` that starts it, not at a repeated `sub` of a topic the connection already holds, nor when the subscription is checked again. A new connection is a new subscription and a new line. That line is the open's safeguard: while Activity can't be written, the `sub` is refused with `stale {reason: "audit_unavailable"}` (nothing is subscribed or sent; a later `sub` tries again), as `terminal.send` is refused. `timeline:<t>` (CV5) writes no open line of its own. A `devices.json` written before CV1 has no `transcript.read` and reads as off; a bridge from before CV1 refuses to start on a file written by this one (strict schema), so there is no downgrade.
 
 ### Rate limits
 
@@ -116,6 +118,7 @@ Per approved device, on top of the pairing limit above:
 | `act`s of any kind and outcome | 30 per 10 s | `res` `rate_limited` |
 | `terminal.send` (counted once the capability allows it) | 6 per 10 s | `res` `rate_limited` |
 | `terminal.keys` (counted once the capability allows it) | 10 per 10 s | `res` `rate_limited` |
+| `GET /api/v1/chatview/<t>` (counted once the capabilities allow it) | 20 per 10 s | `429 rate_limited` |
 
 A refusal for a limit is written to Activity once per filled window, not once per attempt, so a looping client can't flood the log. The windows slide: the next attempt is allowed once the oldest counted one is older than the window.
 
@@ -123,7 +126,7 @@ A refusal for a limit is written to Activity once per filled window, not once pe
 
 `activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers and lengths only, plus, for an answer, the option label the bridge resolved from its own inbox data. A label sent by the client is never logged. Examples: "Phone 1 sent 12 chars to t3", "Phone 1 answered Q119 (Option B)".
 
-A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send` and `terminal.keys` alone are refused (`audit_unavailable`) while the log is failing, because their audit line is their whole safeguard; the refusal's own line is the probe that clears the flag.
+A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send` and `terminal.keys` are refused (`audit_unavailable`) while the log is failing, because their audit line is their whole safeguard; the refusal's own line is the probe that clears the flag. So are a chat open (`stale audit_unavailable`) and an older chat page (`503 audit_unavailable`, CV3), whose lines are their record.
 
 ### Web Push (S17)
 
@@ -164,14 +167,14 @@ One JSON object per text frame, each with a `type`.
 | `welcome` | `api`, `bridge`, `epoch` | `epoch` is random per bridge start. |
 | `snap` | `topic`, `epoch`, `seq`, `data` | Full state of a topic. |
 | `patch` | `topic`, `seq`, `ops` | RFC 6902 operations (`add remove replace move copy test`); paths are RFC 6901 JSON Pointers. |
-| `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`, for `chat:<t>` `terminal_not_found`, `bad_terminal`, `too_many_chats`, `hc_missing`, and `forbidden` (CV1: the device lacks a capability the topic needs; it is not subscribed, or no longer, and gets nothing more on it). The field is open. A `stale` can come before any `snap` (a chat whose first read failed): the client shows the reason, it does not wait for a value. |
+| `stale` | `topic`, `reason` | Data may be out of date. Known reasons: `reconnecting`, `layout_without_remote`, `source_unavailable`, for `chat:<t>` `terminal_not_found`, `bad_terminal`, `too_many_chats`, `hc_missing` (`bad_terminal` and `too_many_chats` also for `chatview:<t>`), `forbidden` (CV1: the device lacks a capability the topic needs; it is not subscribed, or no longer, and gets nothing more on it), and `audit_unavailable` (CV3: a `chatview:<t>` open Activity could not record; refused like `forbidden`). The field is open. A `stale` can come before any `snap` (a chat whose first read failed): the client shows the reason, it does not wait for a value. |
 | `res` | `id`, `ok`, `code?`, `unknown_effect?`, `message?`, `closed?` | Result of an `act`. `code` is required when `ok` is false; `unknown_effect` is only valid when `ok` is false. `message` is plain text the PWA may show, in the plugin's own words (never answer text). `closed` (inbox acts) says the row is closed now, and why. |
 | `event` | `topic`, `name`, `data` | Fire-and-forget notification. |
 | `pong` | | Reply to `ping` (not in the plan's list; added so clients can detect dead sockets). |
 
 ### Topics
 
-`host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`, `keys` (S16b), and the chat view topics `chatview:<t>` and `timeline:<t>` (`docs/chatview.md` §4, §7; payloads defined by CV3 and CV5), which need `transcript.read` (see Capabilities).
+`host`, `plugins`, `panorama`, `inbox`, `usage` (polled every 15 s, only while subscribed), `chat:<t>` (any non-empty `<t>`), `setup`, `keys` (S16b), and the chat view topics `chatview:<t>` (below) and `timeline:<t>` (`docs/chatview.md` §4; payload defined by CV5), which need `transcript.read` (see Capabilities).
 
 Payload schemas defined so far: `host` is `HostState` (see mod-link v1), `plugins` is `{panorama, inbox, usage, hc, host}`, each `{state, detail?}`, `usage` is `UsageTopic` (below), `panorama` and `setup` are described below. The other payloads are defined by their slices; until then `snap.data` is open.
 
@@ -231,6 +234,34 @@ The desktop panel reaches `check`, `start` and `stop` through the mod link: the 
 Payload: `{terminal, lines, truncated?}`. `lines` is an array of lines, each an array of spans `{t, fg?, bg?, b?, d?, i?, u?, r?}`. `t` is printable text only; the bridge has already turned ANSI into these fields and dropped every other escape sequence and control character. `fg` and `bg` are a palette index 0 to 15 (the theme's ANSI colours) or `#rrggbb`. `r` is reverse video. A client renders `t` as text, never as HTML. At most 500 lines are kept (`truncated` says older ones were dropped).
 
 Source: while at least one client is subscribed, the bridge runs `hc read <t> --lines 200` once a second (never overlapping, backing off to 5 s while it fails) and `hc ls --json` on the first tick and every third one after, to notice a terminal that has closed (`hc read` of a finished terminal still answers, so only `hc ls` tells). Nothing runs with no subscriber, and at most 6 chats are read at once (`too_many_chats`). `hc events` is not used: it has not been tested against a live core (PLAN section 8). `hc ls --json` was recorded in the rig with hc 0.1.20: `{"hidden_finished":N,"terminals":[{"address":"t1","name":…,…}]}`; the bridge matches `<t>` against `address` only (`id`, `terminal` or `name` only for a record without one), and an output it does not understand is not a failure (the read decides). Every failure marks the topic `stale` at once, also before any value: `hc_missing` when hc can't be run (found neither on the bridge's PATH nor in `~/.local/bin` and the other fallback dirs), `terminal_not_found` when `hc ls` lacks `<t>` or `hc read` says `not_found` (sticky: while gone, only `hc ls` runs, every tick, and `hc read`'s answer from a finished terminal is never published, until `hc ls` lists `<t>` again), `source_unavailable` for any other failure or a timeout (4 s per command; a failing `hc ls` skips the read). The hc the bridge runs is resolved to an absolute path (looked up again every 30 s, and on every use while missing) and shared with the `plugins` probe, so the panel's Setup and the chat agree on it. The PWA shows a stale reason with no text yet as the screen's message, and says "No answer yet" after 10 s with neither text nor a reason. The topic needs the `view` capability and sends nothing to the terminal; input is `terminal.send` (S16, below).
+
+### `chatview:<t>` (CV3, chat view; read-only)
+
+An agent's conversation as chat items, read from its own history (`docs/chatview.md` §2, §3, §5, §7). Needs `view` and `transcript.read`; `<t>` must match `TERMINAL_ID` (else `stale bad_terminal`); at most 6 are read at once (`too_many_chats`). Schemas: `ChatviewTopic`, `ChatItem`, `ChatviewPage` in the protocol package; fixtures in `fixtures/bridge-api/chatview/` and `chatview-page/`.
+
+Payload `{terminal, harness, state: "ok"|"unavailable", reason?, items, older, rev, status}`:
+- `reason`, set exactly when `unavailable`: `harness` (not Claude Code: Codex and others keep the text view in v1), `no_panorama` (no lease owner, no feed, or no verified contract), `no_profiles` (herdr-agent-usage missing, unreadable or with no Claude profile), `no_binding` (panorama proves no session for this exact terminal, or no agent-usage root holds it), `reader_failed` (the reader failed, its file is not the one built with the bridge, or the SDK's shape is unexpected). `forbidden` is in the vocabulary (`CHATVIEW_REASONS`) but is only ever sent as `stale` (and 403 on the pages), never in the value.
+- `items`: the newest at most 100 items, oldest first, and the whole value at most 512 KB of JSON (the oldest are left out to fit). `older` says older items exist.
+- `rev`: random, new whenever the bridge starts over (another session, or a rewritten chain after a compaction or a rewind); every start-over is a fresh `snap`. Empty while `unavailable`.
+- `status`: `{state: "working"|"blocked"|"idle", since}`, the host topic's agent status (never the transcript): `working` with `since` = the last prompt's time ("Working · 1m 12s"), `blocked` ("Waiting for you"), `idle` (nothing).
+
+`ChatItem` = `{id, role, at}` plus, by role:
+- `you`: `text` (a prompt), `command: true` for a message that only wrapped a slash command (`text` is just the command, never its arguments), `cut: true` when a limit cut it;
+- `agent`: `text` (markdown, rendered as text elements by the phone), `cut?`;
+- `tools`: `tools: {kind, count, running, failed, names}` for a run of consecutive tool calls. `kind` is `shell`, `read`, `edit`, `search`, `subagent`, or `other` (also a run that mixes kinds). `names` has one line per call (at most 50): the tool's name, and for a file tool the file's base name ("Read · main.ts"). Never a command, an input or an output;
+- `ask`: `ask: {via, question, header, multi, options}`: `via: "claude"` is an AskUserQuestion call (one item per question, with its text and options); `via: "inbox"` is a herdr-inbox `ask_operator` call, with no text ("Asked you a question");
+- `divider`: `divider: "compact"` (from the compaction summary: "Earlier messages were summarised") or `"day"` (before the first item of each local day; the phone formats `at`);
+- `prompt` and `status` are defined for CV7 and CV8 and not produced yet.
+
+Ids are message uuids (with a suffix for a second item from one message, `day:` for a day divider); they are opaque to the phone and never name a session, a path or a config dir.
+
+What leaves the bridge: prompt and reply text, AskUserQuestion text and options, tool names, file base names and counts. What never does: tool inputs and outputs, thinking, `toolUseResult`, attachments, hook context and system prompts, subagent messages, transcript paths, config dir names and session ids. Every string goes through best-effort secret redaction first (`sk-ant-…`, `gh[pousr]_…`, `github_pat_…`, `AKIA…`/`ASIA…`, `xox?-…`, PEM private key blocks, `Authorization: Bearer …` become `[hidden]`), then each text block is cut at 16 KB and each message at 32 KB (UTF-8, between code points).
+
+Source: only panorama's proved join binds a session: the feed root at exactly `host == "herdr-core"`, `root.terminal == <t>`, joined to the one live host agent at that address (`agents().terminal_id`), with a verified `session_id` and an absolute `transcript`. An aged or stale feed, two roots or two agents at the address, or no session id is `no_binding`, never a guess; the host's program key decides `harness` first. The session is bound to an agent-usage root (CV2). While someone is subscribed, `root.transcript` is stat'ed once a second (size and mtime only; it is never opened), and the session is read through the reader child only when either changed. New items go out as a patch (a window that slides is removes at the front plus the new items); a rewritten chain is a fresh `snap` with a new `rev`. A read failure drops the items held (the phone never shows another binding's history) and retries after 5 s. A session the reader can't find while `root.transcript` has a size is `reader_failed`, not an empty chat.
+
+### `GET /api/v1/chatview/<t>?before=<id>&n=<1..50>[&rev=<rev>]` (CV3)
+
+Older items of an open chat view: up to `n` (default 50) items just before the item `before`, oldest first, as `ChatviewPage` `{items, older, rev}` (at most 512 KB). Read-only, from what the open topic already holds (no extra read), so the chat view must be open: `409 not_open` otherwise. `rev`, when sent, must be the current one (`409 rev_changed`); an id the bridge doesn't hold is `404 unknown_cursor`; bad arguments are `400`. Guards: those of every request (Host, the owner login; `503` while paused), then the device cookie (`401 unpaired`), `X-Remote-Api: 1` and, when the browser sends one, the exact Origin (`403 forbidden`), then `view` and `transcript.read` (`403 forbidden`), then 20 per 10 s per device (`429 rate_limited`; one Activity line per filled window). Activity records each page by count only: "Phone 1 loaded 50 earlier messages of t3"; while Activity can't be written the page is refused (`503 audit_unavailable`). `Cache-Control: no-store`.
 
 ### `terminal.send` (S16)
 

@@ -1,7 +1,7 @@
 import { bridgeApi } from "@herdr-remote/protocol";
 import type { Hub } from "../hub.js";
 import type { Json } from "../patch.js";
-import { FeedReader } from "./feed.js";
+import { FeedReader, type Contract, type FeedView } from "./feed.js";
 import { buildPanoramaTopic } from "./join.js";
 
 export const PANORAMA_TOPIC = "panorama";
@@ -25,6 +25,7 @@ export class PanoramaTopicDriver {
   private timer: NodeJS.Timeout | undefined;
   private inflight: Promise<void> | undefined;
   private running = false;
+  private last: { view: FeedView; contract: Contract | undefined } | undefined;
 
   constructor(private readonly opts: PanoramaTopicOptions) {
     this.reader = new FeedReader(opts.appHome, opts.now);
@@ -43,6 +44,14 @@ export class PanoramaTopicDriver {
     this.timer = undefined;
   }
 
+  /**
+   * The feed as of the last refresh (at most a second old) and the contract that validated it, for the chat view
+   * (CV3), which needs a root's `session_id` and `transcript`: fields the `panorama` topic never carries.
+   */
+  feedView(): { view: FeedView; contract: Contract | undefined } | undefined {
+    return this.last;
+  }
+
   /** Overlapping calls share one run. */
   refresh(): Promise<void> {
     this.inflight ??= this.run().finally(() => {
@@ -54,6 +63,7 @@ export class PanoramaTopicDriver {
   private async run(): Promise<void> {
     const view = await this.reader.read();
     if (!this.running) return;
+    this.last = { view, contract: this.reader.contractFor() };
     const hostRaw = this.opts.hub.get("host");
     if (hostRaw === undefined) return;
     const host = bridgeApi.HostTopic.safeParse(hostRaw);

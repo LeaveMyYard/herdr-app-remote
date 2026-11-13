@@ -4,6 +4,7 @@
 // one child run one at a time, so the 5 s limit is per call, not per queue. The parse cost stays in the
 // children and the bridge's own env is never touched.
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +35,8 @@ export type ReaderReply = { ok: true; value: unknown } | { ok: false; error: Rea
 
 export type ReaderEvent =
   | { kind: "spawn"; pid: number; projects: string }
+  /** The script's hash is not the expected one: nothing was started. */
+  | { kind: "refused"; projects: string; why: "hash" }
   | { kind: "kill"; pid: number; projects: string; why: "timeout" | "rss" | "too_large" | "protocol" | "evict" | "close" }
   | { kind: "idle"; pid: number; projects: string }
   | { kind: "exit"; pid: number; projects: string; code: number | null; signal: NodeJS.Signals | null };
@@ -41,6 +44,12 @@ export type ReaderEvent =
 export interface ReaderPoolOptions {
   /** Absolute path of the bundled child (`dist/claude-reader.mjs`, or `bin/claude-reader.mjs` when installed). */
   script: string;
+  /**
+   * The sha256 (hex) the child must have: the one built with this bridge (bundle.mjs injects it into bridge.mjs;
+   * the installer records the same file's hash in install.json). Checked before every spawn; a file with another
+   * hash (edited, swapped, or left from another build) is never run, and the call fails as `spawn`.
+   */
+  scriptSha256: string;
   /** HOME for the children. Default: the bridge user's home. Nothing else from the bridge's env is passed on. */
   home?: string;
   idleMs?: number;
@@ -132,6 +141,7 @@ export class ReaderPool {
   constructor(opts: ReaderPoolOptions) {
     this.o = {
       script: opts.script,
+      scriptSha256: opts.scriptSha256,
       home: opts.home ?? homedir(),
       idleMs: opts.idleMs ?? READER_IDLE_MS,
       max: opts.max ?? READER_MAX,
@@ -205,7 +215,21 @@ export class ReaderPool {
     return lru;
   }
 
+  /** Whether the script on disk is the one this bridge was built with. Read in one go, right before the spawn. */
+  private scriptOk(): boolean {
+    if (!/^[0-9a-f]{64}$/.test(this.o.scriptSha256)) return false;
+    try {
+      return createHash("sha256").update(readFileSync(this.o.script)).digest("hex") === this.o.scriptSha256;
+    } catch {
+      return false;
+    }
+  }
+
   private start(root: ClaudeRoot): Reader | undefined {
+    if (!this.scriptOk()) {
+      this.emit({ kind: "refused", projects: root.projects, why: "hash" });
+      return undefined;
+    }
     // Read access to the projects dir only, never the config dir itself (it holds `.credentials.json`). Node
     // checks the lexical path, so a symlinked `<configDir>/projects` needs both its own path and its realpath.
     const allow = [this.o.script, join(root.configDir, "projects"), root.projects].map((p) => `--allow-fs-read=${p}`);

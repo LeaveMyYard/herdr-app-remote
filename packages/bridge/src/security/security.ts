@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { bridgeApi } from "@herdr-remote/protocol";
-import type { ActHandler, ActResult, HubClient } from "../hub.js";
+import type { ActHandler, ActResult, GateMode, HubClient } from "../hub.js";
 import type { GuardVerdict } from "../server.js";
 import { AuditLog, cleanLabel, describeAct, safeId, type AuditEntry, type AuditOptions } from "./audit.js";
 import { ACTION_CAPS, CAPABILITIES, defaultCaps, EXPIRING, hasCap, isExpiring, topicCaps, untilKey, type Capability, type ExpiringCapability } from "./caps.js";
@@ -801,11 +801,12 @@ export class Security {
   }
 
   /**
-   * The device a request's cookie names, when it may hold a socket (approved, current, `view`, not paused) and, with
-   * `needs`, also has those capabilities in effect now. `GET /api/v1/chatview/<t>` (CV3) passes
-   * `topicCaps("chatview:<t>")`, so the chat history pages need exactly what the topic needs.
+   * The device a request's cookie names, when it may hold a socket (approved, current, `view`, not paused) and also
+   * has every capability in `needs` in effect now. `needs` is required, so no route grants by default: each route
+   * names what it needs, `[]` meaning the socket's rights only (`GET /api/v1/push`). `GET /api/v1/chatview/<t>`
+   * (CV3) passes `topicCaps("chatview:<t>")`, so the chat history pages need exactly what the topic needs.
    */
-  requestDevice(req: IncomingMessage, needs: readonly Capability[] = []): { id: string } | undefined {
+  requestDevice(req: IncomingMessage, needs: readonly Capability[]): { id: string } | undefined {
     const d = this.deviceFor(req);
     if (!this.mayView(d)) return undefined;
     const now = this.now();
@@ -820,7 +821,7 @@ export class Security {
    * topic needs only the socket. A
    * refused `sub` is written to Activity (identifiers only, throttled per device); the hub answers it `stale forbidden`.
    */
-  readonly mayRead = (client: HubClient, topic: string, recheck = false): boolean => {
+  readonly mayRead = (client: HubClient, topic: string, mode: GateMode = "sub"): boolean | "audit_unavailable" => {
     const needs = topicCaps(topic);
     // Every other topic: holding the socket is the check (the guard at upgrade, `onConnect`, and the drops), as before.
     if (needs.length === 0) return true;
@@ -828,16 +829,55 @@ export class Security {
     const d = id !== undefined ? this.store.get(id) : undefined;
     if (this.dropped.has(client) || !this.mayView(d)) return false;
     const now = this.now();
-    if (needs.every((c) => hasCap(d.caps, c, now))) return true;
+    const sep = topic.indexOf(":");
+    const chat = topic.slice(0, sep) === "chatview";
+    const term = safeId(topic.slice(sep + 1)) ?? "a terminal";
+    if (needs.every((c) => hasCap(d.caps, c, now))) {
+      // CV3: a granted chat open is in Activity once per subscription (not for a re-`sub` of the one it holds, nor a
+      // recheck). Its audit line is its safeguard, as for `terminal.send`: if Activity can't record it, it is refused.
+      if (chat && mode === "sub") {
+        try {
+          this.audit({ event: "topic", device: d.name, text: `${d.name} opened the chat of ${term}`, ok: true });
+        } catch {
+          return "audit_unavailable";
+        }
+      }
+      return true;
+    }
     // A recheck follows a switch the desktop just turned off, which Activity already says ("Phone 1: transcript.read off").
-    if (!recheck && this.topicRefusals.take(d.id).ok) {
-      const sep = topic.indexOf(":");
-      const what = topic.slice(0, sep) === "timeline" ? "the timeline" : "the chat";
-      const term = safeId(topic.slice(sep + 1)) ?? "a terminal";
+    if (mode !== "recheck" && this.topicRefusals.take(d.id).ok) {
+      const what = chat ? "the chat" : "the timeline";
       this.bestEffort(() => this.audit({ event: "topic", device: d.name, text: `${d.name} opened ${what} of ${term}: refused, chat history is off`, ok: false, code: "forbidden" }));
     }
     return false;
   };
+
+  /**
+   * Records that a device loaded older chat messages (CV3, `GET /api/v1/chatview/<t>`), by count only, never text.
+   * False when Activity could not record it: the page is then refused (`audit_unavailable`), as a chat open is.
+   */
+  auditChatPage(deviceId: string, terminal: string, count: number): boolean {
+    const d = this.store.get(deviceId);
+    if (!d) return false;
+    const term = safeId(terminal) ?? "a terminal";
+    const n = Math.max(0, Math.floor(count));
+    try {
+      this.audit({ event: "chatview.page", device: d.name, text: `${d.name} loaded ${n} earlier message${n === 1 ? "" : "s"} of ${term}`, ok: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** A known device's name, for an Activity line written elsewhere (the chat history pages). */
+  deviceName(id: string): string | undefined {
+    return this.store.get(id)?.name;
+  }
+
+  /** The one Origin a request from the PWA may carry, or null while there is no serve name. */
+  origin(): string | null {
+    return this.serve ? `https://${this.serve.host}` : null;
+  }
 
   /** A known device's name, and whether it is approved with `push` on as stored. */
   pushDevice(id: string): { name: string; push: boolean } | undefined {

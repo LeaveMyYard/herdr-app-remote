@@ -12,11 +12,14 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { claude } from "../../packages/bridge/dist/index.js";
+import { createHash } from "node:crypto";
+import { bridgeApi } from "../../packages/protocol/dist/index.js";
+import { chatview, claude, Hub } from "../../packages/bridge/dist/index.js";
 
 const REPO = resolve(import.meta.dirname, "../..");
 const FIX = join(REPO, "fixtures/claude");
 const SCRIPT = join(REPO, "packages/bridge/dist/claude-reader.mjs");
+const SCRIPT_SHA = createHash("sha256").update(readFileSync(SCRIPT)).digest("hex");
 const SDK_PKG = join(REPO, "packages/bridge/node_modules/@anthropic-ai/claude-agent-sdk/package.json");
 const PINNED = "0.3.312";
 const S1 = "11111111-1111-4111-8111-111111111111";
@@ -60,7 +63,7 @@ beforeAll(() => {
   cpSync(join(FIX, "agent-usage/config.toml"), join(home, ".config/agent-usage/config.toml"));
   appHome = join(home, ".config/herdr-app");
   mkdirSync(appHome, { recursive: true });
-  history = new claude.ClaudeHistory({ appHome, home, pool: { script: SCRIPT, home } });
+  history = new claude.ClaudeHistory({ appHome, home, pool: { script: SCRIPT, scriptSha256: SCRIPT_SHA, home } });
 });
 
 afterAll(() => {
@@ -144,7 +147,7 @@ describe("Claude reader rig", () => {
       symlinkSync(join(h2, "shared-projects"), join(h2, "claude-agent-1/projects"));
       mkdirSync(join(h2, ".config/agent-usage"), { recursive: true });
       writeFileSync(join(h2, ".config/agent-usage/config.toml"), `[[claude.profiles]]\nid = "agent-1"\nconfig_dir = "~/claude-agent-1"\n`);
-      const h = new claude.ClaudeHistory({ appHome: join(h2, ".config/herdr-app"), home: h2, pool: { script: SCRIPT, home: h2 } });
+      const h = new claude.ClaudeHistory({ appHome: join(h2, ".config/herdr-app"), home: h2, pool: { script: SCRIPT, scriptSha256: SCRIPT_SHA, home: h2 } });
       try {
         const b = await h.bind({ sessionId: S1, transcript: join(h2, "claude-agent-1/projects/-work-project-alpha", `${S1}.jsonl`), cwd: null });
         if (!b.ok) throw new Error(`not bound: ${JSON.stringify(b)}`);
@@ -180,5 +183,115 @@ describe("Claude reader rig", () => {
     expect(idle.ms).toBeGreaterThanOrEqual(300);
     expect(idle.ms).toBeLessThan(5000);
     expect((await run({ HOME: home })).code).toBe(2);
+  });
+});
+
+describe("chat view on the real reader (CV3)", () => {
+  const T = "t1";
+  const TOPIC = `chatview:${T}`;
+  let h3 = "";
+  let transcript = "";
+  const lines: string[] = [];
+
+  beforeAll(() => {
+    h3 = mkdtempSync(join(process.env.HERDR_REMOTE_TEST_TMP ?? tmpdir(), "rig-chatview-"));
+    cpSync(join(FIX, "roots/claude-1"), join(h3, "claude-agent-1"), { recursive: true });
+    mkdirSync(join(h3, ".config/agent-usage"), { recursive: true });
+    writeFileSync(join(h3, ".config/agent-usage/config.toml"), `[[claude.profiles]]\nid = "agent-1"\nconfig_dir = "~/claude-agent-1"\n`);
+    transcript = join(h3, "claude-agent-1/projects/-work-project-alpha", `${S1}.jsonl`);
+    // Without the fixture's half-written last line, so a line can be appended.
+    lines.push(...readFileSync(transcript, "utf8").split("\n").filter((l) => l.endsWith("}")));
+    writeFileSync(transcript, lines.join("\n") + "\n");
+  });
+  afterAll(() => {
+    if (h3) rmSync(h3, { recursive: true, force: true });
+  });
+
+  /** A fake host and a fake panorama feed v2 root that proves S1 at terminal t1. */
+  const host = {
+    spaces: [{ id: "space-1", name: "Project Alpha", focused: true }],
+    agents: [{ id: "agent-1", name: "Agent 1", harness: "claude", program: "claude", state: "idle", space_id: "space-1", terminal_id: T }],
+    terminals: [],
+    panes: [],
+    focused: { space_id: "space-1", pane_id: null, agent_id: null },
+    theme: { name: "Theme 1", mode: "dark" },
+    layout_name: "herdr-remote",
+    shared: { "panorama.feed.owner": "owner-1" },
+  };
+  const feed = () => ({
+    view: {
+      feed: { v: 2, generated_at: Date.now() / 1000, roots: [{ pane_id: "core:t1", host: "herdr-core", terminal: T, harness: "claude", session_id: S1, cwd: "/work/project-alpha", transcript, agents: [] }] },
+      stale: false,
+      aged: false,
+      error: null,
+    },
+    contract: {},
+  });
+
+  function world(sha = SCRIPT_SHA) {
+    const hub = new Hub({ bridgeVersion: "rig", mayRead: () => true });
+    hub.publish("host", host);
+    const history = new claude.ClaudeHistory({ appHome: join(h3, ".config/herdr-app"), home: h3, pool: { script: SCRIPT, scriptSha256: sha, home: h3 } });
+    const drv = new chatview.ChatviewTopicDriver({ hub, history, feed: feed as never, intervalMs: 1e9, map: { dayOf: (iso: string) => iso.slice(0, 10) } });
+    drv.start();
+    const got: { type: string; ops?: unknown[] }[] = [];
+    const conn = hub.connect({ send: (m: { type: string }) => void got.push(m), close: () => undefined });
+    return { hub, history, drv, got, conn };
+  }
+
+  it("binds through the feed, reads with the real SDK, and publishes the fixture's items", async () => {
+    const { hub, history, drv, got, conn } = world();
+    try {
+      await hub.handleRaw(conn, JSON.stringify({ type: "hello", api: 1 }));
+      await hub.handleRaw(conn, JSON.stringify({ type: "sub", topics: [TOPIC] }));
+      await drv.settled(TOPIC);
+      const v = hub.get(TOPIC) as { state: string; items: unknown[]; rev: string };
+      expect(bridgeApi.ChatviewTopic.safeParse(v).success).toBe(true);
+      expect(v.state).toBe("ok");
+      const fixture = JSON.parse(readFileSync(join(REPO, "fixtures/bridge-api/chatview/typical.json"), "utf8"));
+      expect(v.items).toEqual(fixture.items);
+      const text = JSON.stringify(got);
+      for (const never of [transcript, h3, S1, "claude-agent-1", "Fake thinking", "Fake test output"]) expect(text).not.toContain(never);
+
+      // A new line: the stat sees it, and it goes out as a patch.
+      const line = JSON.parse(lines.at(-1)!);
+      const next = { ...line, parentUuid: line.uuid, uuid: "a1000000-0000-4000-8000-000000000030", timestamp: "2026-01-02T10:02:00.000Z", type: "user", message: { role: "user", content: "Thanks, Agent 1." } };
+      delete next.requestId;
+      writeFileSync(transcript, [...lines, JSON.stringify(next)].join("\n") + "\n");
+      await drv.poll(TOPIC);
+      const patches = got.filter((m) => m.type === "patch");
+      expect(patches).toHaveLength(1);
+      expect((hub.get(TOPIC) as { items: { text?: string }[] }).items.at(-1)).toMatchObject({ role: "you", text: "Thanks, Agent 1." });
+
+      // A rewound chain (the later messages gone): a fresh snap with a new rev.
+      writeFileSync(transcript, lines.slice(0, 4).join("\n") + "\n");
+      await drv.poll(TOPIC);
+      expect(got.filter((m) => m.type === "snap")).toHaveLength(2);
+      expect((hub.get(TOPIC) as { rev: string }).rev).not.toBe(v.rev);
+    } finally {
+      drv.stop();
+      history.close();
+      writeFileSync(transcript, lines.join("\n") + "\n");
+    }
+  });
+
+  it("a reader file that is not the one built with the bridge never runs: reader_failed", async () => {
+    const { hub, history, drv, conn } = world("0".repeat(64));
+    try {
+      await hub.handleRaw(conn, JSON.stringify({ type: "hello", api: 1 }));
+      await hub.handleRaw(conn, JSON.stringify({ type: "sub", topics: [TOPIC] }));
+      await drv.settled(TOPIC);
+      expect(hub.get(TOPIC)).toMatchObject({ state: "unavailable", reason: "reader_failed" });
+      expect(history.pool.running).toBe(0);
+    } finally {
+      drv.stop();
+      history.close();
+    }
+  });
+
+  it("the built bridge.mjs carries the reader's hash, so it runs no other reader", () => {
+    const bundle = readFileSync(join(REPO, "packages/bridge/dist/bridge.mjs"), "utf8");
+    expect(bundle).toContain(JSON.stringify(SCRIPT_SHA));
+    expect(bundle).not.toContain("__HERDR_READER_SHA256__");
   });
 });
