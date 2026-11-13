@@ -178,7 +178,7 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
       if (value !== "") {
         setText((t) => (t === value ? "" : t));
         // CV8: the emptied box would turn Send into Stop in the same spot; a double tap must not stop the agent.
-        setSentHold(true);
+        setSentHold((n) => n + 1);
       }
       return;
     }
@@ -224,14 +224,17 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
   // brings Send back, so a message can still be queued. (The first-send question always holds text, so an empty box
   // already means none is open.)
   const [stopping, setStopping] = useState(false);
-  /** Just after a send emptied the box: Send stays (a no-op on an empty box) for {@link STOP_AFTER_SEND_MS}. */
-  const [sentHold, setSentHold] = useState(false);
+  /**
+   * Sends that just emptied the box (a count, so each send restarts the hold): Send stays (a no-op on an empty box)
+   * for {@link STOP_AFTER_SEND_MS} after the last one.
+   */
+  const [sentHold, setSentHold] = useState(0);
   useEffect(() => {
-    if (!sentHold) return;
-    const t = setTimeout(() => setSentHold(false), STOP_AFTER_SEND_MS);
+    if (sentHold === 0) return;
+    const t = setTimeout(() => setSentHold(0), STOP_AFTER_SEND_MS);
     return () => clearTimeout(t);
   }, [sentHold]);
-  const stoppable = variant === "chat" && input.stop?.enabled === true && working && !locked && text === "" && !sentHold;
+  const stoppable = variant === "chat" && input.stop?.enabled === true && working && !locked && text === "" && sentHold === 0;
   const onStop = async () => {
     const stop = input.stop;
     if (!stop || stopping) return;

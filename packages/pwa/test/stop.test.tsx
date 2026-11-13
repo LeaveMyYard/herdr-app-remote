@@ -78,8 +78,19 @@ describe("Stop in the composer (CV8)", () => {
       await user.click(slot());
       expect(press).not.toHaveBeenCalled();
       expect(send).toHaveBeenCalledTimes(1);
+      // A second send 600 ms later restarts the hold.
       await act(async () => {
-        vi.advanceTimersByTime(1_000);
+        vi.advanceTimersByTime(600);
+      });
+      await user.type(screen.getByRole("textbox"), "and the tests");
+      await user.click(slot());
+      expect(send).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(stopButton()).toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(500);
       });
       expect(stopButton()).not.toBeNull();
     } finally {
