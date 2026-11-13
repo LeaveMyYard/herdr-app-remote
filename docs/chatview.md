@@ -232,6 +232,8 @@ Anchor for `ask_operator`: herdr-inbox's question has `created_at`, and the matc
 
 **Implemented in CV6** (strip `usage.account`): the `usage` topic now keeps each entry's `paneActivity.panes[].paneId` (the terminal id the bridge passed in `--panes`). The timeline picks the one account whose entry lists `t` (`sameAccountAs` entries count as one; two accounts for one terminal draw nothing) and sends its label (profile name, else account label, else the provider label), its first window's use (as used, whichever way `limitPercent` counts) and the window's band as the tone. The chip links to `#/usage`. A pane that used no account in the report's window (collect-v1 lists only active panes) has no chip. While a timeline is open the bridge keeps the `usage` collect running (`UsageTopicDriver.hold`), as a Usage subscriber would. Accounts come only from agent-usage's report, as everywhere (§12.3).
 
+**Wired in CV5b** (PWA): for a Claude agent the phone wants `timeline:<t>` together with `chatview:<t>` (never for Codex or other harnesses), places the items with `placeTimeline` among the chat view's held items, and draws the strip as the chat header's second row (one rule under the strip). Inline acts are the Inbox's own `act` path (same payload with the row's `key` and `rev`, arm delays, one act in flight; an unknown effect reads `inbox` again). A `forbidden` timeline, a value the phone can't read, a value for another terminal, or a refused older page (the text view's "Chat history is off") draws no strip and no items; the chat itself is unaffected.
+
 ## 5. Security
 
 ### 5.1 Capability

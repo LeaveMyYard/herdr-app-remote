@@ -202,6 +202,13 @@ export function LiveApp({
     terminal === undefined || !chatAgent
       ? undefined
       : chatMode({ claude, harnessId: chatAgent.program ?? chatAgent.harness, topic: denied ? undefined : viewTopic, stale: denied ? "forbidden" : viewStale, waitedOut: waited });
+  // The plugin timeline (`timeline:<t>`, CV5) goes with the chat view: wanted with `chatview:<t>` and under the same
+  // capabilities. A refusal or a bad value only takes the timeline away; the chat goes on without it.
+  const timelineName = viewName !== null ? `timeline:${terminal}` : null;
+  useTopics(client, timelineName ? [timelineName] : [], timelineName !== null);
+  const timelineView = timelineName ? t[timelineName] : undefined;
+  const timelineData = useMemo(() => parsed(bridgeApi.TimelineTopic, timelineView?.data), [timelineView?.data]);
+  const timeline = timelineData !== undefined && timelineData.terminal === terminal && timelineView?.stale !== "forbidden" && !denied ? timelineData : undefined;
   // The text view's topics follow what is on screen too: a draft or an open Keys sheet holds it after the chat source is up.
   const textView = chatName !== null && (mode?.kind === "text" || shown === "text");
   useTopics(client, chatName ? [chatName] : [], textView);
@@ -257,6 +264,7 @@ export function LiveApp({
             terminal,
             input,
             ...(mode ? { mode, onShown: setShown, view: { topic: viewTopic, loadOlder, onForbidden } } : {}),
+            ...(timeline ? { timeline } : {}),
           }
         : chatAgent
           ? { topic: undefined, stale: "no_terminal" }

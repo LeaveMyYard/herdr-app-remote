@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import type { OlderResult } from "../bridge/chatview";
 import { useHostName } from "../bridge/host-name";
@@ -7,6 +7,7 @@ import { renderDefaultItem, Spinner, type ItemCtx } from "../chatview/Items";
 import * as W from "../chatview/words";
 import { ChatHead, useInputOn, type ChatAgent } from "./Chat";
 import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
+import { usePlaced, TimelineRows, type InlineTimeline } from "../timeline/inline";
 import * as K from "./keys-words";
 
 type Item = bridgeApi.ChatItem;
@@ -32,6 +33,8 @@ export interface ChatViewProps {
   /** A native prompt is open (CV7): the composer waits. */
   locked?: boolean;
   renderItem?: ((item: Item, prev: Item | undefined, draw: () => ReactNode) => ReactNode | undefined) | undefined;
+  /** Plugin items (`timeline:<t>`, CV5), placed among the items by `placeTimeline`. */
+  timeline?: InlineTimeline | undefined;
 }
 
 /** Scrolled this close to the end counts as following it. */
@@ -77,7 +80,7 @@ const isNews = (i: Item) => i.role !== "divider";
  * composer. The scroll follows the end unless the reader has scrolled up; then a button jumps back, counting what
  * arrived. Older pages load as the top is reached.
  */
-export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal, backHref = "#/agents", now = Date.now, strip, tail, locked, renderItem }: ChatViewProps) {
+export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal, backHref = "#/agents", now = Date.now, strip, tail, locked, renderItem, timeline }: ChatViewProps) {
   const host = useHostName();
   const { on, ranOut } = useInputOn(input, now);
   const [held, setHeld] = useState<Held>(() => initHeld(topic));
@@ -197,6 +200,8 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
   };
 
   const ctx: ItemCtx = { agent: agent.short ?? agent.name, working, now: t0 };
+  const placed = usePlaced(items, timeline);
+  const rows = (list: readonly bridgeApi.TimelineItem[] | undefined) => (timeline && list ? <TimelineRows items={list} act={timeline.act} now={t0} /> : null);
   const typing = on && input && terminal !== undefined ? { input, terminal } : null;
   const empty = items.length === 0;
   return (
@@ -232,19 +237,24 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
               {items.map((item, i) => {
                 const prev = items[i - 1];
                 const draw = () => renderDefaultItem(item, prev, ctx);
-                const node = renderItem?.(item, prev, draw) ?? draw();
-                return node === null || node === undefined ? null : (
-                  <div key={item.id} className="cv-item">
-                    {node}
-                  </div>
+                // An inbox ask the timeline anchored to is drawn as that item instead.
+                const swap = placed?.replace.get(item.id);
+                const node = swap ? null : (renderItem?.(item, prev, draw) ?? draw());
+                return (
+                  <Fragment key={item.id}>
+                    {rows(placed?.before.get(item.id))}
+                    {swap ? rows([swap]) : node === null || node === undefined ? null : <div className="cv-item">{node}</div>}
+                  </Fragment>
                 );
               })}
+              {rows(placed?.tail)}
               {tail}
               <StatusLine status={topic.status} now={now} />
             </div>
           )}
           {empty ? (
             <>
+              {rows(placed?.tail)}
               {tail}
               <StatusLine status={topic.status} now={now} />
             </>
