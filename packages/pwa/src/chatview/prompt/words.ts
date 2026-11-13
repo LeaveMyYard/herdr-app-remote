@@ -26,6 +26,9 @@ export function refusal(code: string | undefined, unknown: boolean, o: { agent: 
     case "prompt_changed":
     case "bad_choice":
       return ["The prompt changed. Look again.", "Nothing was pressed."];
+    case "prompt_moved":
+      // Keys were pressed (phase A) before the change was seen: nothing was answered (main, review round 1).
+      return ["The prompt changed. Look again.", "Nothing was answered."];
     case "prompt_gone":
       return [`Already answered on ${o.desk}.`];
     case "busy":
@@ -44,4 +47,4 @@ export function refusal(code: string | undefined, unknown: boolean, o: { agent: 
 }
 
 /** Results after which the card is dimmed and never offers a second press (§3a.4: nothing is pressed again by itself). */
-export const DIMS: ReadonlySet<string> = new Set(["prompt_changed", "prompt_gone", "bad_choice"]);
+export const DIMS: ReadonlySet<string> = new Set(["prompt_changed", "prompt_moved", "prompt_gone", "bad_choice"]);

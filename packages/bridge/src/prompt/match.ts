@@ -115,11 +115,42 @@ const allNumbered = (p: ScreenPrompt) => p.rows.every((r) => r.n !== null && r.c
 const range = (n: number) => Array.from({ length: n }, (_, i) => i);
 const hasEsc = (p: ScreenPrompt) => p.footer.some((f) => /\bEsc to cancel\b/.test(f));
 
+/** The first header line of a Bash permission block (H0). */
+export const BASH_HEADER = "Bash command";
+/** A dashed rule inside a block (H0: around the command of a permission, around a plan). */
+const DASHED = /^╌{10,}$/;
+
+/** The header lines between the first two dashed rules, or null when there are not exactly two. */
+export function commandRegion(header: readonly string[]): string[] | null {
+  const at = header.flatMap((l, i) => (DASHED.test(l) ? [i] : []));
+  if (at.length !== 2 || at[1]! - at[0]! < 2) return null;
+  return header.slice(at[0]! + 1, at[1]!);
+}
+
+/**
+ * A block shaped like a prompt the bridge knows (a Bash permission, an AskUserQuestion, a plan approval, the
+ * multi-select review). Such a block that no pending top-level call matches (a subagent's prompt, a transcript that
+ * lags) is a mismatch: read-only, never a generic card whose buttons would answer something the card doesn't show.
+ */
+function knownShape(p: ScreenPrompt): boolean {
+  return (
+    p.header.includes(BASH_HEADER) ||
+    p.title === PERMISSION_TITLE ||
+    p.title.endsWith(PLAN_TITLE_END) ||
+    p.title === REVIEW_TITLE ||
+    p.rows.some((r) => r.label === OTHER_SINGLE || r.label === OTHER_MULTI || r.label === CHAT_ABOUT || (r.n === null && r.label === "Submit") || r.check !== null)
+  );
+}
+
 function permission(t: PendingTool, p: ScreenPrompt): Match | null {
   if (t.name !== "Bash" || !isRecord(t.input) || typeof t.input.command !== "string") return null;
   const cmd = squash(t.input.command);
   if (cmd === "" || p.title !== PERMISSION_TITLE || !allNumbered(p) || !hasEsc(p)) return null;
-  if (!squash(p.header.join("")).includes(cmd)) return null;
+  // The command as the screen shows it: exactly the lines between the block's two dashed rules (H0), all of it.
+  // Equality, not "contains": a longer command on screen (`rm -rf … && cargo test`) is another command.
+  if (p.header[0] !== BASH_HEADER) return null;
+  const region = commandRegion(p.header);
+  if (region === null || squash(region.join("")) !== cmd) return null;
   const buttons = range(p.rows.length);
   return {
     kind: "permission",
@@ -239,6 +270,8 @@ export function matchPrompt(pending: readonly PendingTool[], screen: string): Ma
   // Two calls that both match (the same command twice) can't be told apart: read-only.
   if (found.length === 1) return found[0]!;
   if (found.length > 1) return unparsed(newest?.id ?? null, p.lines, newest?.at ?? null);
+  // A known prompt shape that no pending call matched: read-only.
+  if (knownShape(p)) return unparsed(newest?.id ?? null, p.lines, newest?.at ?? null);
   const unknown = [...pending].reverse().find((t) => !KNOWN.has(t.name));
   // A pending call of a known kind that the screen doesn't match: a mismatch, not a new kind of prompt.
   if (pending.length > 0 && unknown === undefined) return unparsed(newest!.id, p.lines, newest!.at);

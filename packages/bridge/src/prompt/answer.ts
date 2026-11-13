@@ -20,7 +20,7 @@ import type { Actor } from "../app/act.js";
 import { DEFAULT_BINARIES, type Binaries } from "../plugins/detect.js";
 import type { Runner, RunResult } from "../plugins/exec.js";
 import { readHc } from "../terminal/hc-act.js";
-import { isReview, matchPrompt, type Match, type PendingTool } from "./match.js";
+import { isReview, matchPrompt, REVIEW_TITLE, type Match, type PendingTool } from "./match.js";
 import { confirmOtherField, otherSendArgs } from "./other.js";
 import { parseScreen, PROMPT_READ_LINES } from "./screen.js";
 
@@ -32,8 +32,6 @@ export const READ_TIMEOUT_MS = 4_000;
 export const POST_CHECK_MS = 2_000;
 /** How long to wait for a redraw after a press before reading again. */
 export const SETTLE_MS = 150;
-/** Prompt ids answered recently, per terminal (a second answer to one is `prompt_gone`). */
-const CONSUMED_MAX = 32;
 
 /** The only keys this module presses: arrows and space in phase A, enter in phase B. */
 const PHASE_A_KEYS: ReadonlySet<string> = new Set(["up", "down", "space"]);
@@ -52,6 +50,12 @@ export interface PromptSource {
   fresh(terminal: string): Promise<{ pending: PendingTool[]; blocked: boolean } | null>;
   /** The card was answered: it is dropped and the topic looks again. */
   answered(terminal: string, promptId: string): void;
+  /**
+   * Whether `promptId` was answered through the bridge and the screen has not been seen without a prompt since (a
+   * second answer to it is `prompt_gone`). The topic forgets it once a look shows no prompt, so the same dialog
+   * asked again later gets a card again.
+   */
+  isAnswered(terminal: string, promptId: string): boolean;
 }
 
 export interface PromptAnswerOptions {
@@ -68,6 +72,8 @@ export interface PromptAnswerOptions {
 /** The refusal or result codes of this act (bridge-api PROMPT_ANSWER_CODES, plus hc's own). */
 const changed = (audit_label?: string): ActResult => ({ ok: false, code: "prompt_changed", ...(audit_label ? { audit_label } : {}) });
 const gone = (audit_label?: string): ActResult => ({ ok: false, code: "prompt_gone", ...(audit_label ? { audit_label } : {}) });
+/** `prompt_changed` after phase A already pressed keys (arrows, ticks, the first Enter of a multi-select): nothing was answered. */
+const moved = (audit_label?: string): ActResult => ({ ok: false, code: "prompt_moved", ...(audit_label ? { audit_label } : {}) });
 
 /** hc's refusals before anything was pressed (as for `terminal.keys`); anything else is an unknown effect. */
 const KEYS_REFUSED: Readonly<Record<string, string>> = {
@@ -109,7 +115,8 @@ export interface PromptAnswerActor extends Actor {
 export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
   const locks = new Set<string>();
   const inflight = new Map<string, Set<AbortController>>();
-  const consumed = new Map<string, string[]>();
+  /** Answers that pressed at least one key (`prompt_moved` instead of `prompt_changed`). */
+  const pressed = new WeakSet<AbortSignal>();
   const now = o.now ?? Date.now;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const bin = () => (o.binaries ?? DEFAULT_BINARIES).hc;
@@ -154,6 +161,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
   async function keys(t: string, ks: readonly string[], phase: "A" | "B", signal: AbortSignal): Promise<RunResult> {
     if (phase === "A" ? !ks.every((k) => PHASE_A_KEYS.has(k)) : !(ks.length === 1 && ks[0] === "enter")) throw new Error(`prompt: bad keys for phase ${phase}`);
     check(signal);
+    pressed.add(signal);
     return o.run(bin(), ["keys", "--json", "--", t, ...ks], { timeoutMs: o.pressTimeoutMs ?? PRESS_TIMEOUT_MS, signal });
   }
 
@@ -186,10 +194,6 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
   }
 
   function consume(t: string, id: string): void {
-    const list = consumed.get(t) ?? [];
-    list.push(id);
-    if (list.length > CONSUMED_MAX) list.shift();
-    consumed.set(t, list);
     o.source.answered(t, id);
   }
 
@@ -221,8 +225,10 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
 
   async function answer(a: bridgeApi.PromptAnswerArgs, signal: AbortSignal): Promise<ActResult> {
     const t = a.terminal;
+    /** The prompt is not what the card showed: "Nothing was pressed." until a key went, then "Nothing was answered." */
+    const refuse = () => (pressed.has(signal) ? moved(label) : changed(label));
     // Step 2: the card the phone was shown is the one published now.
-    if (consumed.get(t)?.includes(a.prompt_id)) return gone();
+    if (o.source.isAnswered(t, a.prompt_id)) return gone();
     const pub = o.source.current(t);
     if (!pub || pub.match.promptId !== a.prompt_id || pub.rev !== a.rev) return changed();
     const card = pub.match;
@@ -251,9 +257,9 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     const tOk = f !== null && f.blocked && (card.toolUseId === null ? true : pending.some((p) => p.id === card.toolUseId));
     // Step 4: the screen now.
     const v0 = await look(t, pending, signal);
-    if (v0 === null) return changed(label);
+    if (v0 === null) return refuse();
     if (!parseScreen(v0.text).ok) return gone(label);
-    if (!tOk || v0.m.promptId !== card.promptId || v0.m.prompt === null) return changed(label);
+    if (!tOk || v0.m.promptId !== card.promptId || v0.m.prompt === null) return refuse();
     const p = v0.m.prompt;
     const m = v0.m;
     pendingFor.set(m, pending);
@@ -266,7 +272,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
         const fail = phaseAFailed(await keys(t, ks, "A", signal), label);
         if (fail) return fail;
         await sleep(SETTLE_MS);
-        if (!at(await look(t, pending, signal), card.promptId, row)) return changed(label);
+        if (!at(await look(t, pending, signal), card.promptId, row)) return refuse();
       }
       // Phase B: Enter alone.
       return settle(t, m, await keys(t, ["enter"], "B", signal), KEYS_REFUSED, label, signal);
@@ -275,7 +281,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     if ("picks" in c) {
       const want = new Set(c.picks.map((i) => m.buttons[i]!));
       // The Other box must stay empty: typing there was not recorded (H0).
-      if (m.otherRow !== null || p.rows.some((r, i) => r.check === true && !m.buttons.includes(i))) return changed(label);
+      if (m.otherRow !== null || p.rows.some((r, i) => r.check === true && !m.buttons.includes(i))) return refuse();
       let cur = p.cursor;
       let marks = p.rows.map((r) => r.check);
       // Phase A, one row at a time: move, tick, and verify the cursor and the box.
@@ -285,7 +291,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
         if (fail) return fail;
         await sleep(SETTLE_MS);
         const v = await look(t, pending, signal);
-        if (!at(v, card.promptId, row) || v!.m.prompt!.rows[row]!.check !== want.has(row)) return changed(label);
+        if (!at(v, card.promptId, row) || v!.m.prompt!.rows[row]!.check !== want.has(row)) return refuse();
         cur = row;
         marks = v!.m.prompt!.rows.map((r) => r.check);
       }
@@ -298,9 +304,9 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
         await sleep(SETTLE_MS);
       }
       const v = await look(t, pending, signal);
-      if (!at(v, card.promptId, submit)) return changed(label);
+      if (!at(v, card.promptId, submit)) return refuse();
       const rows = v!.m.prompt!.rows;
-      if (!m.buttons.every((i) => rows[i]!.check === want.has(i)) || rows[m.buttons.length]!.check !== false) return changed(label);
+      if (!m.buttons.every((i) => rows[i]!.check === want.has(i)) || rows[m.buttons.length]!.check !== false) return refuse();
       // Phase B, first Enter: Submit opens the review step (H0); nothing is decided yet.
       const r1 = await keys(t, ["enter"], "B", signal);
       const r1res = readHc(r1, KEYS_REFUSED, "unknown_effect");
@@ -309,9 +315,11 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
       // The review must list exactly the picks, with the cursor on "Submit answers".
       const end = now() + (o.postCheckMs ?? POST_CHECK_MS);
       let review: { text: string } | null = null;
+      let last: string | null = null;
       for (;;) {
         await sleep(SETTLE_MS);
         const text = await read(t, signal);
+        if (text !== null) last = text;
         const rv = text === null ? null : parseScreen(text);
         if (rv?.ok && isReview(rv.prompt, picked) && rv.prompt.cursor === 0) {
           review = { text: text! };
@@ -319,8 +327,15 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
         }
         if (now() >= end) break;
       }
-      // Enter on Submit was pressed, but the answer is only sent from the review: nothing was decided.
-      if (review === null) return changed(label);
+      if (review === null) {
+        // Enter on Submit went, but no review with the picks came. The question still on screen, or a review of other
+        // picks: nothing was answered. Anything else (the prompt left, another took its place): that Enter may have
+        // landed elsewhere while hc waited for the desk (R6), so the effect is unknown.
+        const lv = last === null ? null : parseScreen(last);
+        if (last !== null && matchPrompt(pending, last).promptId === card.promptId) return refuse();
+        if (lv?.ok && lv.prompt.title === REVIEW_TITLE) return refuse();
+        return { ok: false, code: "unknown_effect", unknown_effect: true, audit_label: label };
+      }
       // The post-check watches the review screen leave, or the original call's result.
       const reviewCard: Match = { ...m, promptId: matchPrompt([], review.text).promptId };
       pendingFor.set(reviewCard, []);
@@ -341,7 +356,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     }
     const fresh = await read(t, signal);
     const conf = fresh === null ? null : confirmOtherField(t, fresh, { promptId: card.promptId, toolUseId: card.toolUseId!, pending }, now());
-    if (conf === null) return changed(label);
+    if (conf === null) return refuse();
     check(signal);
     const argv = otherSendArgs(conf, t, card.promptId, c.other, now());
     const r = await o.run(bin(), argv, { timeoutMs: o.pressTimeoutMs ?? PRESS_TIMEOUT_MS, signal });

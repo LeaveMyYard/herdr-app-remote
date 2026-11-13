@@ -116,7 +116,7 @@ describe("--force is unreachable from every other path", () => {
   it("an unconfirmed field: the cursor never reached Other", async () => {
     const { rec, s, act, term } = all("ask-single", [ASK1]);
     term.keysReply = () => ({ code: 0, stdout: "{}", stderr: "" });
-    expect((await act("prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { other: "x" } })).code).toBe("prompt_changed");
+    expect((await act("prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { other: "x" } })).code).toBe("prompt_moved");
     expect(forced(rec.calls)).toBe(false);
   });
 
@@ -126,7 +126,7 @@ describe("--force is unreachable from every other path", () => {
       term.screen = moveCursor(screen("ask-single"), 4);
       return { code: 0, stdout: "{}", stderr: "" };
     };
-    expect((await act("prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { other: "x" } })).code).toBe("prompt_changed");
+    expect((await act("prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { other: "x" } })).code).toBe("prompt_moved");
     expect(forced(rec.calls)).toBe(false);
   });
 
@@ -168,5 +168,17 @@ describe("the guard itself (fails if it is deleted)", () => {
     expect(() => otherSendArgs(f, "t3", card.promptId, "hi", 1000 + OTHER_CONFIRM_MAX_MS + 1)).toThrow();
     const g = confirmOtherField("t3", screen("ask-other"), exp, 1000)!;
     expect(() => otherSendArgs(g, "t3", card.promptId, "a\nb", 1500)).toThrow();
+  });
+});
+
+describe("the confirm footer (review L3)", () => {
+  it("the Other field is confirmed only with the H0 footer (Enter to select …)", () => {
+    const card = matchPrompt([ASK1], screen("ask-single"));
+    const exp = { promptId: card.promptId, toolUseId: ASK1.id, pending: [ASK1] };
+    const other = screen("ask-other");
+    expect(confirmOtherField("t3", other, exp, 1000)).not.toBeNull();
+    // A field being edited shows another footer: not the recorded shape.
+    const editing = other.replace(/^Enter to select .*$/m, "Esc to cancel · ctrl+g to edit in VS Code");
+    expect(confirmOtherField("t3", editing, exp, 1000)).toBeNull();
   });
 });

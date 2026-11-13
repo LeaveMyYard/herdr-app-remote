@@ -160,6 +160,7 @@ export async function startApp(o: AppOptions): Promise<App> {
       current: (t) => promptSourceRef.current?.current(t),
       fresh: (t) => promptSourceRef.current?.fresh(t) ?? Promise.resolve(null),
       answered: (t, id) => promptSourceRef.current?.answered(t, id),
+      isAnswered: (t, id) => promptSourceRef.current?.isAnswered(t, id) ?? false,
     },
   });
   const actors: Actor[] = [

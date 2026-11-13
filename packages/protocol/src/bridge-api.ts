@@ -946,8 +946,11 @@ export type PromptAnswerArgs = z.infer<typeof PromptAnswerArgs>;
 
 /**
  * `res.code` of a refused `prompt.answer`:
- * - `prompt_changed`: the card, the transcript or the screen is not what the phone was shown, or the cursor did not
- *   land where phase A aimed: nothing was decided ("The prompt changed. Look again." / "Nothing was pressed.");
+ * - `prompt_changed`: the card, the transcript or the screen is not what the phone was shown, before any key was
+ *   pressed ("The prompt changed. Look again." / "Nothing was pressed.");
+ * - `prompt_moved`: the same, found after phase A already pressed keys (arrows, multi-select ticks, the Enter that
+ *   opens the review step), so the desk's prompt may show them, but nothing was answered ("The prompt changed. Look
+ *   again." / "Nothing was answered.");
  * - `prompt_gone`: the prompt is no longer on the screen ("Already answered on desk-1.");
  * - `busy`: another answer runs for this terminal, or hc refused because the terminal is busy ("desk-1 is typing.
  *   Try again in a moment.");
@@ -957,7 +960,7 @@ export type PromptAnswerArgs = z.infer<typeof PromptAnswerArgs>;
  * With `unknown_effect: true` (code `unknown_effect`, `timeout` or `cancelled`) Enter or the Other text may have
  * reached the agent ("Agent 1 may have got your answer. Look before you answer again."). The phone never retries.
  */
-export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_gone", "busy", "bad_choice", "forbidden", "audit_unavailable", "unknown_effect"] as const;
+export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_moved", "prompt_gone", "busy", "bad_choice", "forbidden", "audit_unavailable", "unknown_effect"] as const;
 
 // ---- terminal keys (S16b): the special-keys menu ----
 //

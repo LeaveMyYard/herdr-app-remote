@@ -56,3 +56,6 @@
 .pc-refusal-text{gap:2px}
 .pc-muted{color:var(--t-muted)}
 .pc-code{padding:1px 5px;border-radius:4px;background:var(--t-surface);border:1px solid var(--t-border);font-size:12.5px}
+/* The composer while a prompt card is open (board PhoneChatView perm: chat_foot('locked')): a dim send, a quiet field. */
+.hd .chat-form[data-locked] .chat-send:disabled{opacity:1;background:var(--t-raised);color:var(--t-dim)}
+.hd .chat-form[data-locked] .chat-text{border-color:var(--t-border)}

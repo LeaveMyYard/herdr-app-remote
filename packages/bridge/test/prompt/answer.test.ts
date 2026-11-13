@@ -119,7 +119,7 @@ describe("prompt.answer: refusals press nothing", () => {
   it("phase A lands elsewhere (the screen moved under it): no Enter", async () => {
     const { term, answer } = setup("permission", [BASH]);
     term.keysReply = () => ({ code: 0, stdout: "{}", stderr: "" }); // pressed, but the cursor didn't move
-    expect((await answer({ option: 2 })).code).toBe("prompt_changed");
+    expect((await answer({ option: 2 })).code).toBe("prompt_moved");
     expect(term.keys).toEqual([["down", "down"]]);
   });
 
@@ -218,7 +218,7 @@ describe("prompt.answer: multi-select", () => {
     term.beforeRead = () => {
       if (term.screen.includes("Review your answers")) term.screen = term.screen.replace(/→ .*/, "→ Typecheck");
     };
-    expect((await answer({ picks: [0] })).code).toBe("prompt_changed");
+    expect((await answer({ picks: [0] })).code).toBe("prompt_moved");
     expect(term.keys.filter((k) => k[0] === "enter").length).toBe(1);
     expect(term.answered).toBeNull();
   });
@@ -254,7 +254,7 @@ describe("prompt.answer: Other", () => {
   it("the field not confirmed (the cursor didn't reach Other): refused, no --force", async () => {
     const { term, answer } = setup("ask-single", [ASK1]);
     term.keysReply = () => ({ code: 0, stdout: "{}", stderr: "" });
-    expect((await answer({ other: "x" })).code).toBe("prompt_changed");
+    expect((await answer({ other: "x" })).code).toBe("prompt_moved");
     expect(term.forced).toBe(false);
     expect(term.calls.some((c) => c[0] === "send")).toBe(false);
   });
@@ -264,7 +264,52 @@ describe("prompt.answer: Other", () => {
     term.beforeRead = (n) => {
       if (n === 1) term.screen = term.screen.replace("Option C", "Option Z");
     };
-    expect((await answer({ other: "x" })).code).toBe("prompt_changed");
+    expect((await answer({ other: "x" })).code).toBe("prompt_moved");
     expect(term.forced).toBe(false);
+  });
+});
+
+describe("prompt.answer: review round 1", () => {
+  it("M1: the first Enter on Submit and then no review, the prompt gone: unknown_effect, never a second Enter", async () => {
+    const { term, answer } = setup("ask-multi", [ASKM]);
+    // Enter lands somewhere else while hc waited for the desk (R6): the prompt closes without a review.
+    term.keysReply = (a) => {
+      if (a.includes("enter")) {
+        term.screen = IDLE;
+        return { code: 0, stdout: "{}", stderr: "" };
+      }
+      return undefined;
+    };
+    const r = await answer({ picks: [0] });
+    expect(r).toMatchObject({ ok: false, code: "unknown_effect", unknown_effect: true });
+    expect(term.keys.filter((k) => k[0] === "enter").length).toBe(1);
+  });
+
+  it("M1: the first Enter and the question still on screen: nothing was answered (prompt_moved)", async () => {
+    const { term, answer } = setup("ask-multi", [ASKM]);
+    term.keysReply = (a) => (a.includes("enter") ? { code: 0, stdout: "{}", stderr: "" } : undefined);
+    expect((await answer({ picks: [0] })).code).toBe("prompt_moved");
+  });
+
+  it("L1: a refusal before any key is prompt_changed; after phase A pressed, prompt_moved", async () => {
+    const a = setup("permission", [BASH]);
+    a.term.screen = screen("permission").replace("4. No", "4. Nope");
+    expect((await a.answer({ option: 2 })).code).toBe("prompt_changed");
+    expect(a.term.keys).toEqual([]);
+    const b = setup("permission", [BASH]);
+    b.term.keysReply = () => ({ code: 0, stdout: "{}", stderr: "" });
+    expect((await b.answer({ option: 2 })).code).toBe("prompt_moved");
+  });
+
+  it("L4: the source decides what is answered: once it forgets (a screen without a prompt), the same id answers again", async () => {
+    const { s, answer, term } = setup("permission", [BASH]);
+    const card = s.card;
+    expect((await answer({ option: 0 })).ok).toBe(true);
+    s.setPublished({ match: card, rev: "rev-1" });
+    expect((await answer({ option: 0 })).code).toBe("prompt_gone");
+    s.state.answered.length = 0;
+    term.screen = screen("permission");
+    term.answered = null;
+    expect((await answer({ option: 0 })).ok).toBe(true);
   });
 });

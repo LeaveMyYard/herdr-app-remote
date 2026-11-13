@@ -118,6 +118,7 @@ describe("chatview prompt cards", () => {
     expect(f).toEqual({ pending: [{ id: BASH.id, name: "Bash", input: BASH.input, at: expect.any(String) }], blocked: true });
     drv.promptSource.answered("t1", cur.match.promptId);
     expect(card()).toBeUndefined();
+    expect(drv.promptSource.isAnswered("t1", cur.match.promptId)).toBe(true);
     await drv.settled(TOPIC);
     // Still on screen (the desk hasn't redrawn yet): not published again.
     await poll();
@@ -125,6 +126,11 @@ describe("chatview prompt cards", () => {
     env.screen = IDLE;
     await poll();
     expect(card()!.kind).toBe("unparsed");
+    // The screen showed no prompt: the same dialog asked again is a new card (review L4), and no longer "answered".
+    expect(drv.promptSource.isAnswered("t1", cur.match.promptId)).toBe(false);
+    env.screen = screen("permission");
+    await poll();
+    expect(card()!.prompt_id).toBe(cur.match.promptId);
   });
 
   it("no prompts option: never a card", async () => {

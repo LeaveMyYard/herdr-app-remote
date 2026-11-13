@@ -371,3 +371,43 @@ describe("ChatRoute", () => {
     expect(screen.getByRole("log", { name: "Conversation" })).toBeInTheDocument();
   });
 });
+
+describe("prompt cards in the chat view (CV7)", () => {
+  const card: Item = {
+    id: "prompt-1",
+    role: "prompt",
+    at: null,
+    prompt_id: "1".repeat(64),
+    rev: "r1",
+    kind: "permission",
+    title: "Do you want to proceed?",
+    summary: "cargo test -p parser",
+    options: [{ label: "Yes" }, { label: "No" }],
+    state: "open",
+  };
+
+  it("draws the card, locks the composer, and says nothing more than the card does", () => {
+    const input = { enabled: true, until: null, send: vi.fn(async () => ({ ok: true })) };
+    view(topic([ai("a1", "Running the parser tests next."), card], { status: { state: "blocked", since: null } }), { terminal: "t1", input, promptAct: vi.fn() });
+    expect(screen.getByRole("region", { name: "Permission request" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Answer the prompt above first")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    // "Waiting for you" is not drawn: the card already says it.
+    expect(screen.queryByText(W.WAITING)).toBeNull();
+  });
+
+  it("a press sends prompt.answer for this terminal with the card's id and rev", async () => {
+    const promptAct = vi.fn(async () => ({ ok: false, code: "prompt_changed" }));
+    view(topic([card], { status: { state: "blocked", since: null } }), { terminal: "t1", promptAct });
+    await userEvent.click(screen.getByRole("button", { name: /^No/ }));
+    expect(promptAct).toHaveBeenCalledWith("prompt.answer", { terminal: "t1", prompt_id: "1".repeat(64), rev: "r1", choice: { option: 1 } });
+    expect(screen.getByRole("alert")).toHaveTextContent("The prompt changed. Look again.");
+  });
+
+  it("without a card the composer is open and the waiting line shows", () => {
+    const input = { enabled: true, until: null, send: vi.fn(async () => ({ ok: true })) };
+    view(topic([ai("a1", "Hi.")], { status: { state: "blocked", since: null } }), { terminal: "t1", input });
+    expect(screen.queryByPlaceholderText("Answer the prompt above first")).toBeNull();
+    expect(screen.getByText(W.WAITING)).toBeInTheDocument();
+  });
+});

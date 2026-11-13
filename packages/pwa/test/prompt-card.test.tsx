@@ -133,6 +133,7 @@ describe("PromptCard", () => {
 
   it.each([
     [{ ok: false, code: "prompt_changed" }, ["The prompt changed. Look again.", "Nothing was pressed."], true],
+    [{ ok: false, code: "prompt_moved" }, ["The prompt changed. Look again.", "Nothing was answered."], true],
     [{ ok: false, code: "prompt_gone" }, ["Already answered on desk-1."], true],
     [{ ok: false, code: "unknown_effect", unknown_effect: true }, ["Agent 1 may have got your answer. Look before you answer again."], true],
     [{ ok: false, code: "timeout", unknown_effect: true }, ["Agent 1 may have got your answer. Look before you answer again."], true],

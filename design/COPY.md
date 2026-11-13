@@ -75,7 +75,8 @@ Rows for the Claude Code chat view, from `docs/chatview.md` §11. These rows are
 | ● | Card: plan | `new (CV7)` | - | PLAN · Ready to start? · Show the whole plan › · the screen's labels · under "No, keep planning": Tell Agent 1 what to change | CV7 | auto-mode option pressable |
 | ● | Card: can't parse | `new (CV7)` | - | Agent 1 asks · the screen's lines, read-only · Answer it on desk-1. | CV7 | no buttons |
 | ● | Card: locked composer | `new (CV7)` | - | Answer the prompt above first | CV7 | - |
-| ● | Prompt: changed | `new (CV7, prompt_changed)` | - | The prompt changed. Look again. / Nothing was pressed. | CV7 | - |
+| ● | Prompt: changed | `new (CV7, prompt_changed)` | - | The prompt changed. Look again. / Nothing was pressed. | CV7 | no key was sent |
+| ● | Prompt: changed after keys | `new (CV7, prompt_moved)` | - | The prompt changed. Look again. / Nothing was answered. | CV7 | phase A keys were sent (main, 2026-11-13, review round 1) |
 | ● | Prompt: gone | `new (CV7, prompt_gone)` | - | Already answered on desk-1. | CV7 | - |
 | ● | Prompt: desk busy | `new (CV7, busy)` | - | desk-1 is typing. Try again in a moment. | CV7 | - |
 | ● | Prompt: unknown effect | `new (CV7, unknown_effect)` | - | Agent 1 may have got your answer. Look before you answer again. | CV7 | never invites a second press |

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import claudeIcon from "../assets/claude.svg";
 import { Markdown } from "./markdown";
+import { PromptCard, type PromptAct } from "./prompt/PromptCard";
 import * as W from "./words";
 
 type Item = bridgeApi.ChatItem;
@@ -13,7 +14,14 @@ export interface ItemCtx {
   /** The host says the agent is working: a call with no result yet shows a spinner only then. */
   working: boolean;
   now: number;
+  /**
+   * Native prompt cards (CV7): the terminal, the desktop's name and how to send `prompt.answer`. Without it a card is
+   * still drawn, and a press says the phone is not connected.
+   */
+  prompt?: { terminal: string; desk: string; act: PromptAct } | undefined;
 }
+
+const offline: PromptAct = () => Promise.resolve({ ok: false, code: "offline" });
 
 export function Spinner({ size = 12 }: { size?: number }) {
   return <i className="spin work-spinner" data-vis-mask="" style={{ width: size, height: size }} role="img" aria-label="Working" />;
@@ -126,6 +134,7 @@ export function renderDefaultItem(item: Item, prev: Item | undefined, ctx: ItemC
     case "ask":
       return <AskCard item={item} />;
     case "prompt":
+      return <PromptCard item={item} terminal={ctx.prompt?.terminal ?? ""} agent={ctx.agent} desk={ctx.prompt?.desk ?? ""} act={ctx.prompt?.act ?? offline} />;
     case "status":
       return null;
   }

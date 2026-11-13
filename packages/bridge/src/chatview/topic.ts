@@ -23,6 +23,7 @@ import { diff } from "../patch.js";
 import type { Contract, FeedView } from "../panorama/feed.js";
 import { mapMessages, newest, type MapOptions } from "./map.js";
 import { cardRev, matchPrompt, pendingTools, promptItem, type Match, type PendingTool } from "../prompt/match.js";
+import { parseScreen } from "../prompt/screen.js";
 import type { PromptSource, PublishedPrompt } from "../prompt/answer.js";
 
 type ChatItem = bridgeApi.ChatItem;
@@ -445,9 +446,14 @@ export class ChatviewTopicDriver {
       const text = await pr.read(w.terminal);
       if (w.stopped) return;
       if (text !== null) {
+        // A screen with no prompt block: whatever was answered is over, and the same dialog asked again is new.
+        if (!parseScreen(text).ok) w.answered = [];
         const m: Match = matchPrompt(w.pending, text);
         if (!w.answered.includes(m.promptId)) next = { match: m, rev: cardRev(pr.revKey, m) };
       }
+    } else if (w.last?.state === "ok" && w.agentState !== null && w.agentState !== "waiting") {
+      // Not blocked: no prompt is open, so nothing answered is still on screen.
+      w.answered = [];
     }
     if ((next?.rev ?? null) === (w.card?.rev ?? null) && (next?.match.promptId ?? null) === (w.card?.match.promptId ?? null)) return;
     w.card = next;
@@ -467,6 +473,7 @@ export class ChatviewTopicDriver {
       if (!read.ok) return null;
       return { pending: pendingTools(read.messages), blocked: r.agentState === "waiting" };
     },
+    isAnswered: (t, id) => this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${t}`)?.answered.includes(id) ?? false,
     answered: (t, id) => {
       const w = this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${t}`);
       if (!w) return;

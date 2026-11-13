@@ -103,7 +103,8 @@ async function prompt(name, args, trigger, marker) {
   const T = pending();
   const m = P.matchPrompt(T, read(t));
   let pub = { match: m, rev: 'rev-1' };
-  const source = { current: () => pub, fresh: async () => ({ pending: pending(), blocked: true }), answered: () => { pub = undefined; } };
+  const answered = new Set();
+  const source = { current: () => pub, fresh: async () => ({ pending: pending(), blocked: true }), answered: (_t, id) => { answered.add(id); pub = undefined; }, isAnswered: (_t, id) => answered.has(id) };
   const actor = P.promptAnswerActor({ run, source, binaries: { hc: 'hc' } });
   const answer = (choice, rev = 'rev-1') => actor(client, 'prompt.answer', { terminal: t, prompt_id: m.promptId, rev, choice });
   return { t, m, answer, toolUseId: m.toolUseId };
@@ -243,7 +244,9 @@ const forcedSince = (i) => calls.slice(i).filter((a) => a.includes('--force'));
   for (const l of transcriptLines()) for (const b of (Array.isArray(l.message?.content) ? l.message.content : [])) {
     if (b.type === 'tool_result' && b.tool_use_id === p.toolUseId) landed = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
   }
-  // Recorded, not judged: whether a killed hc send still reaches the terminal once the draft wait ends.
+  // The bridge reports a killed send as an unknown effect; SECURITY.md and PLAN say it did not land with hc 0.1.20.
+  // Asserted, so an hc that delivers a killed send later turns the rig red and the docs get revisited.
+  check('draft-killed: the send hc was killed for did not land, 60 s after the kill', !(landed !== null && landed.includes('Project Alpha answer 4')), landed?.slice(0, 200) ?? null);
   note({ killedSendLanded: landed !== null && landed.includes('Project Alpha answer 4'), killedSendResult: landed?.slice(0, 200) ?? null, screen: read(p.t).split('\n').slice(-12) });
 }
 for (const t of terms) { try { hc('kill', t); } catch { /* already gone */ } }

@@ -180,6 +180,7 @@ export function source(term: FakeTerm, pending: PendingTool[], o: { blocked?: bo
       state.answered.push(id);
       pub = undefined;
     },
+    isAnswered: (_t, id) => state.answered.includes(id),
   };
   return { src, state, card: m, setPublished: (p: PublishedPrompt | undefined) => (pub = p) };
 }

@@ -75,6 +75,11 @@ export function PromptTail({ terminal, items, agent, desk }: { terminal: string;
   );
 }
 
+/** Keeps a refused card for a terminal as a press would (the demo board's `changed` state). */
+export function seedPromptTail(terminal: string, item: PromptItem, code: string): void {
+  keep(terminal, { item, code, unknown: false });
+}
+
 /** Forgets the refusals kept (tests). */
 export function resetPromptTails(): void {
   kept.clear();
