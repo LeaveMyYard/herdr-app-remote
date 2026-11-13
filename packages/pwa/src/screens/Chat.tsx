@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import claudeIcon from "../assets/claude.svg";
 import codexIcon from "../assets/codex.svg";
@@ -8,6 +8,7 @@ import { useHostName } from "../bridge/host-name";
 import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
 import { KeysButton } from "./KeysSheet";
 import * as W from "./keys-words";
+import { noticeWords, type NoticeKind } from "../chatview/words";
 
 const HARNESS_ICON = { claude: claudeIcon, codex: codexIcon } as const;
 
@@ -40,6 +41,12 @@ export interface ChatProps {
   input?: ChatInput | undefined;
   /** The terminal the composer sends to; required for the composer to show. */
   terminal?: string | undefined;
+  /** Why this is the text view and not the chat view (§6); closable. */
+  viewNotice?: NoticeKind | null | undefined;
+  /** A row under the header (CV5's swarm and account strip). */
+  strip?: ReactNode;
+  /** The chat view boards' taller header (14 px more under the status bar); set by `ChatRoute`. */
+  roomy?: boolean;
   now?: () => number;
   /** Demo data only (the PhoneKeys board's states): the Keys sheet open at first, and the key shown as pressed. */
   demoSheet?: { open: boolean; pressed: string | null };
@@ -51,7 +58,7 @@ export interface ChatProps {
  * Whether the composer shows: on, and not past its expiry. Re-renders when the expiry passes. `ranOut` is when a
  * grant this screen saw running out did (the board's "Typing turned off at 21:40"), or null.
  */
-function useInputOn(input: ChatInput | undefined, now: () => number): { on: boolean; ranOut: number | null } {
+export function useInputOn(input: ChatInput | undefined, now: () => number): { on: boolean; ranOut: number | null } {
   const until = input?.enabled ? input.until : null;
   // The last limit seen while typing was on: after it passes, /api/v1/me reads off with no limit at all.
   const seen = useRef<number | null>(null);
@@ -123,7 +130,7 @@ function loadFit(): boolean {
   }
 }
 
-function Status({ status }: { status: AgentStatus }) {
+export function Status({ status }: { status: AgentStatus }) {
   switch (status) {
     case "needs-you":
       return <span className="needs-pill">Needs you</span>;
@@ -136,11 +143,60 @@ function Status({ status }: { status: AgentStatus }) {
   }
 }
 
+/** The header both views share: back, the agent, its status mark, and `right` (the text view's Aa). */
+export function ChatHead({ agent, backHref, right, roomy }: { agent: ChatAgent; backHref: string; right?: ReactNode; roomy?: boolean | undefined }) {
+  return (
+    <header className={`row nf chat-head${roomy ? " chat-head-roomy" : ""}`}>
+      <a href={backHref} aria-label="Back" className="row nf chat-back">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <path d="M15 5l-7 7 7 7" />
+        </svg>
+      </a>
+      <div className="z row f1 chat-title">
+        <img className="hn" src={HARNESS_ICON[agent.harness]} alt="" width={14} height={14} />
+        <span className="nf tr chat-name">{agent.name}</span>
+        <span className="f1 tr chat-folder">{agent.folder}</span>
+        <Status status={agent.status} />
+      </div>
+      {right}
+    </header>
+  );
+}
+
+/** Why the chat view isn't here, with a close for the session (§6). */
+const closedNotices = new Set<string>();
+export function ViewNotice({ id, kind }: { id: string; kind: NoticeKind }) {
+  const host = useHostName();
+  const key = `${id}:${kind}`;
+  const [closed, setClosed] = useState(() => closedNotices.has(key));
+  if (closed) return null;
+  const w = noticeWords(kind, host);
+  return (
+    <div className="row nf chat-vnotice">
+      <span className="nf chat-vnotice-ic" aria-hidden="true">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+          <path d="M4 5h16v11H9l-5 4z" />
+        </svg>
+      </span>
+      <span className="col f1 chat-vnotice-t">
+        <span>{w.title}</span>
+        <span className="chat-vnotice-b">{w.body}</span>
+      </span>
+      <button type="button" aria-label="Close" className="row nf chat-vnotice-x" onClick={() => { closedNotices.add(key); setClosed(true); }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 /**
  * The chat: the terminal's text, an inbox banner when a question waits, and a footer. With `terminal.input` on, the
  * footer is the key bar and composer (S16); otherwise it says typing is off.
  */
-export function Chat({ agent, topic, stale, question, backHref = "#/agents", input, terminal, now = Date.now, demoSheet, boardSlot }: ChatProps) {
+export function Chat({ agent, topic, stale, question, backHref = "#/agents", input, terminal, viewNotice, strip, roomy, now = Date.now, demoSheet, boardSlot }: ChatProps) {
   const host = useHostName();
   const { on, ranOut } = useInputOn(input, now);
   const typing = on && input && terminal !== undefined ? { input, terminal } : null;
@@ -181,22 +237,13 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
   const waitedOut = useElapsed(terminal ?? agent.name, CHAT_WAIT_MS);
   return (
     <>
-      <header className="row nf chat-head">
-        <a href={backHref} aria-label="Back" className="row nf chat-back">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path d="M15 5l-7 7 7 7" />
-          </svg>
-        </a>
-        <div className="z row f1 chat-title">
-          <img className="hn" src={HARNESS_ICON[agent.harness]} alt="" width={14} height={14} />
-          <span className="nf tr chat-name">{agent.name}</span>
-          <span className="f1 tr chat-folder">{agent.folder}</span>
-          <Status status={agent.status} />
-        </div>
+      <ChatHead roomy={roomy} agent={agent} backHref={backHref} right={
         <button type="button" aria-label="Fit width" aria-pressed={fit} className="mono row nf chat-fit" onClick={toggleFit}>
           Aa
         </button>
-      </header>
+      } />
+      {strip}
+      {viewNotice ? <ViewNotice id={terminal ?? agent.name} kind={viewNotice} /> : null}
       <main className="col f1 chat-main">
         {notice ? (
           <div role="status" className="nf chat-notice">

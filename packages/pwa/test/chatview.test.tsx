@@ -1,0 +1,307 @@
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import type { bridgeApi } from "@herdr-remote/protocol";
+import { HostNameProvider } from "../src/bridge/host-name";
+import { applyTopic, initHeld, prepend } from "../src/chatview/merge";
+import { inline, Markdown, safeHref } from "../src/chatview/markdown";
+import { chatMode } from "../src/chatview/mode";
+import * as W from "../src/chatview/words";
+import { ChatView } from "../src/screens/ChatView";
+import { ChatRoute } from "../src/screens/ChatRoute";
+import type { ChatAgent } from "../src/screens/Chat";
+import { chatTopic } from "../src/chat-fixtures";
+
+// Fake data only.
+type Item = bridgeApi.ChatItem;
+const agent: ChatAgent = { name: "Agent 1", folder: "~/code/alpha", harness: "claude", status: "working" };
+const NOW = Date.parse("2026-11-13T21:14:12Z");
+const topic = (items: Item[], extra: Partial<bridgeApi.ChatviewTopic> = {}): bridgeApi.ChatviewTopic => ({
+  terminal: "t1",
+  harness: "claude",
+  state: "ok",
+  items,
+  older: false,
+  rev: "r1",
+  status: { state: "idle", since: null },
+  ...extra,
+});
+const you = (id: string, text: string): Item => ({ id, role: "you", at: null, text });
+const ai = (id: string, text: string): Item => ({ id, role: "agent", at: null, text });
+const tools = (id: string, kind: bridgeApi.ToolKind, count: number, o: { running?: number; failed?: number; names?: string[] } = {}): Item => ({
+  id,
+  role: "tools",
+  at: null,
+  tools: { kind, count, running: o.running ?? 0, failed: o.failed ?? 0, names: o.names ?? [] },
+});
+const view = (t: bridgeApi.ChatviewTopic, p: Partial<Parameters<typeof ChatView>[0]> = {}) => render(<HostNameProvider name="desk-1"><ChatView agent={agent} topic={t} now={() => NOW} {...p} /></HostNameProvider>);
+
+describe("markdown", () => {
+  it("never makes elements from raw html, and keeps it as text", () => {
+    const { container } = render(<Markdown text={'<img src=x onerror="alert(1)"><script>alert(1)</script>\n\n<b>bold</b>'} />);
+    expect(container.querySelector("img, script, b")).toBeNull();
+    expect(container.textContent).toContain("<script>alert(1)</script>");
+  });
+
+  it("links only http, https and mailto, and always with noopener", () => {
+    expect(safeHref("javascript:alert(1)")).toBeNull();
+    expect(safeHref("data:text/html,x")).toBeNull();
+    expect(safeHref(" //evil.example")).toBeNull();
+    expect(safeHref("https://example.com/a?b=1")).toBe("https://example.com/a?b=1");
+    const { container } = render(<Markdown text="[ok](https://example.com) [bad](javascript:alert(1))" />);
+    const a = container.querySelectorAll("a");
+    expect(a).toHaveLength(1);
+    expect(a[0]).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    expect(container.textContent).toContain("[bad](javascript:alert(1))");
+  });
+
+  it("renders lists, code, emphasis, headings, quotes and tables", () => {
+    const md = "# Title\n\n- one\n  - nested\n- two\n\n1. a\n2. b\n\n**bold** *it* `code` ~~gone~~\n\n```sh\nnpm test\n```\n\n> quoted\n\n| a | b |\n|---|---|\n| 1 | 2 |";
+    const { container } = render(<Markdown text={md} />);
+    expect(container.querySelector("[role=heading]")).toHaveTextContent("Title");
+    expect(container.querySelectorAll("ul ul li")).toHaveLength(1);
+    expect(container.querySelector("ol")?.children).toHaveLength(2);
+    expect(container.querySelector("strong")).toHaveTextContent("bold");
+    expect(container.querySelector("em")).toHaveTextContent("it");
+    expect(container.querySelector("del")).toHaveTextContent("gone");
+    expect(container.querySelector("pre code")?.textContent).toBe("npm test");
+    expect(container.querySelector("blockquote")).toHaveTextContent("quoted");
+    expect(container.querySelectorAll("td")).toHaveLength(2);
+  });
+
+  it("stays linear on hostile input", () => {
+    const t0 = performance.now();
+    for (const s of ["[".repeat(32768), "*".repeat(32768), "`".repeat(32768), "[a](".repeat(8000), "**a ".repeat(8000), "- ".repeat(16000), "> ".repeat(16000), "| a ".repeat(8000) + "\n" + "|-".repeat(8000)]) {
+      render(<Markdown text={s} />).unmount();
+    }
+    expect(performance.now() - t0).toBeLessThan(8000);
+    expect(inline("**a**")).toHaveLength(1);
+  });
+});
+
+describe("merge", () => {
+  const A = you("a", "1");
+  const B = ai("b", "2");
+  const C = you("c", "3");
+  const D = ai("d", "4");
+  it("keeps older pages when the window slides, and the topic wins from its first item", () => {
+    let h = initHeld(topic([B, C], { older: true }));
+    h = prepend(h, { items: [A], older: false, rev: "r1" }, "b");
+    expect(h.items.map((i) => i.id)).toEqual(["a", "b", "c"]);
+    const h2 = applyTopic(h, topic([C, D], { older: true }));
+    expect(h2.items.map((i) => i.id)).toEqual(["a", "b", "c", "d"]);
+    expect(h2.older).toBe(false);
+  });
+  it("starts over for another rev or a window that joins nothing", () => {
+    const h = prepend(initHeld(topic([B, C], { older: true })), { items: [A], older: false, rev: "r1" }, "b");
+    expect(applyTopic(h, topic([B, C], { rev: "r2" })).items.map((i) => i.id)).toEqual(["b", "c"]);
+    expect(applyTopic(h, topic([D])).items.map((i) => i.id)).toEqual(["d"]);
+  });
+  it("ignores a page for another rev, or one that no longer sits before the head", () => {
+    const h = initHeld(topic([B, C], { older: true }));
+    expect(prepend(h, { items: [A], older: false, rev: "r9" }, "b")).toBe(h);
+    expect(prepend(h, { items: [A], older: false, rev: "r1" }, "x")).toBe(h);
+  });
+});
+
+describe("chatMode", () => {
+  const ok = topic([]);
+  it("chooses the view and the notice", () => {
+    const base = { claude: true, harnessId: "claude", topic: undefined, stale: null };
+    expect(chatMode(base)).toEqual({ kind: "pending" });
+    expect(chatMode({ ...base, topic: ok })).toEqual({ kind: "chat" });
+    expect(chatMode({ ...base, claude: false, harnessId: "codex" })).toEqual({ kind: "text", notice: "codex" });
+    expect(chatMode({ ...base, claude: false, harnessId: "gemini" })).toEqual({ kind: "text", notice: null });
+    expect(chatMode({ ...base, topic: ok, stale: "forbidden" })).toEqual({ kind: "text", notice: "forbidden" });
+    expect(chatMode({ ...base, topic: { ...ok, state: "unavailable", reason: "no_binding" } })).toEqual({ kind: "text", notice: "no_binding" });
+    expect(chatMode({ ...base, stale: "audit_unavailable" })).toEqual({ kind: "text", notice: "reader_failed" });
+    expect(chatMode({ ...base, waitedOut: true })).toEqual({ kind: "text", notice: "reader_failed" });
+  });
+});
+
+describe("words", () => {
+  it("has the approved copy", () => {
+    expect(W.toolsLabel("shell", 1, false)).toBe("Ran 1 shell command");
+    expect(W.toolsLabel("shell", 2, false)).toBe("Ran 2 shell commands");
+    expect(W.toolsLabel("read", 3, false)).toBe("Read 3 files");
+    expect(W.toolsLabel("read", 2, true)).toBe("Reading 2 files");
+    expect(W.toolsLabel("edit", 2, false)).toBe("Edited 2 files");
+    expect(W.toolsLabel("search", 4, false)).toBe("Searched 4 times");
+    expect(W.toolsLabel("subagent", 3, false)).toBe("Ran 3 subagents");
+    expect(W.toolsLabel("other", 2, false)).toBe("Used 2 tools");
+    expect(W.failedLabel("shell", 1)).toBe("1 command failed");
+    expect(W.jumpLabel(4)).toBe("4 new");
+    expect(W.jumpLabel(0)).toBe("Latest");
+    expect(W.elapsed(72_000)).toBe("1m 12s");
+    expect(W.noticeWords("forbidden", "desk-1")).toEqual({ title: "Chat history is off for this phone", body: "Turn it on in Remote on desk-1." });
+  });
+  it("labels days in local time", () => {
+    const d = new Date(2026, 10, 13, 21, 2).toISOString();
+    expect(W.dayLabel(d, new Date(2026, 10, 13, 22).getTime())).toBe("Today 21:02");
+    expect(W.dayLabel(d, new Date(2026, 10, 14, 8).getTime())).toBe("Yesterday 21:02");
+    expect(W.dayLabel(d, new Date(2026, 10, 20, 8).getTime())).toBe("13 Nov 21:02");
+  });
+});
+
+describe("ChatView", () => {
+  it("draws bubbles, replies as markdown and tool rows with their counts", () => {
+    view(topic([you("1", "Hello <b>there</b>"), ai("2", "Reply with `code`"), tools("3", "shell", 2), tools("4", "read", 3, { running: 1 })], { status: { state: "working", since: new Date(NOW - 72_000).toISOString() } }));
+    expect(screen.getByText("Hello <b>there</b>")).toBeInTheDocument();
+    expect(screen.getByText("code").tagName).toBe("CODE");
+    expect(screen.getByText("Ran 2 shell commands")).toBeInTheDocument();
+    expect(screen.getByText("Reading 3 files")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Working · 1m 12s");
+  });
+
+  it("shows no spinner for a call with no result while the agent is idle", () => {
+    view(topic([tools("1", "read", 2, { running: 2 })]));
+    expect(screen.getByText("Read 2 files")).toBeInTheDocument();
+  });
+
+  it("expands a row to its call names, and shows a failed row as such", async () => {
+    view(topic([tools("1", "shell", 2, { names: ["Bash", "Bash"] }), tools("2", "shell", 1, { failed: 1 })]));
+    await userEvent.click(screen.getByRole("button", { name: /Ran 2 shell commands/ }));
+    expect(screen.getAllByText("Bash")).toHaveLength(2);
+    expect(screen.getByText("1 command failed")).toBeInTheDocument();
+  });
+
+  it("says Waiting for you when blocked, and nothing when idle", () => {
+    const { unmount } = view(topic([ai("1", "hi")], { status: { state: "blocked", since: null } }));
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for you");
+    unmount();
+    view(topic([ai("1", "hi")]));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("shows chips, dividers, the cut mark and the inbox question row", () => {
+    view(topic([{ id: "d", role: "divider", at: null, divider: "compact" }, { id: "c", role: "you", at: null, text: "/compact", command: true }, { id: "y", role: "you", at: null, text: "long", cut: true }, { id: "q", role: "ask", at: null, ask: { via: "inbox", question: null, header: null, multi: false, options: [] } }]));
+    expect(screen.getByText("Earlier messages were summarised")).toBeInTheDocument();
+    expect(screen.getByText("/compact")).toBeInTheDocument();
+    expect(screen.getByText("Cut here")).toBeInTheDocument();
+    expect(screen.getByText("Asked you a question")).toBeInTheDocument();
+  });
+
+  it("says when there are no messages yet", () => {
+    view(topic([]));
+    expect(screen.getByText("No messages yet")).toBeInTheDocument();
+    expect(screen.getByText("New session in ~/code/alpha. What you send appears here.")).toBeInTheDocument();
+  });
+
+  it("has a text composer only: no key bar, no Keys menu, and the chat view's placeholder", () => {
+    view(topic([ai("1", "hi")]), { input: { enabled: true, until: null, send: async () => ({ ok: true }) }, terminal: "t1" });
+    expect(screen.getByPlaceholderText("Message Agent 1…")).toBeInTheDocument();
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Keys/ })).toBeNull();
+  });
+
+  it("is read-only with the copy when typing is off", () => {
+    view(topic([ai("1", "hi")]), { input: { enabled: false, until: null, send: async () => ({ ok: true }) }, terminal: "t1" });
+    expect(screen.getByText("Read-only here. Typing is off for this phone.")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("locks the composer while a prompt is open", () => {
+    view(topic([ai("1", "hi")]), { input: { enabled: true, until: null, send: async () => ({ ok: true }) }, terminal: "t1", locked: true });
+    expect(screen.getByPlaceholderText("Answer the prompt above first")).toHaveAttribute("readonly");
+  });
+
+  it("lets a slot draw an item, give the default back, and add a tail", () => {
+    view(topic([you("1", "mine"), ai("2", "theirs")]), {
+      tail: <p>the tail</p>,
+      renderItem: (item, _prev, draw) => (item.id === "1" ? <p>replaced</p> : <><p>before</p>{draw()}</>),
+    });
+    expect(screen.queryByText("mine")).toBeNull();
+    expect(screen.getByText("replaced")).toBeInTheDocument();
+    expect(screen.getByText("before")).toBeInTheDocument();
+    expect(screen.getByText("theirs")).toBeInTheDocument();
+    expect(screen.getByText("the tail")).toBeInTheDocument();
+  });
+
+  describe("older pages and the jump button", () => {
+    const geometry = (el: HTMLElement, g: { height: number; client: number; top: number }) => {
+      Object.defineProperty(el, "scrollHeight", { configurable: true, value: g.height });
+      Object.defineProperty(el, "clientHeight", { configurable: true, value: g.client });
+      el.scrollTop = g.top;
+    };
+
+    it("loads the page before the first item when the top is reached, keeps the order, and says it is loading", async () => {
+      let done: (r: unknown) => void = () => undefined;
+      const loadOlder = vi.fn(() => new Promise((res) => { done = res; })) as unknown as NonNullable<Parameters<typeof ChatView>[0]["loadOlder"]>;
+      view(topic([you("b", "second")], { older: true }), { loadOlder });
+      // The screen is short, so the first page is asked for without a scroll.
+      expect(loadOlder).toHaveBeenCalledWith("b", "r1");
+      expect(screen.getByText("Loading earlier messages…")).toBeInTheDocument();
+      await act(async () => done({ ok: true, page: { items: [you("a", "first")], older: false, rev: "r1" } }));
+      const log = screen.getByRole("log");
+      expect(within(log).getAllByText(/first|second/).map((e) => e.textContent)).toEqual(["first", "second"]);
+      expect(screen.queryByText("Loading earlier messages…")).toBeNull();
+    });
+
+    it("offers Show earlier messages when a page fails, and asks again on tap", async () => {
+      const loadOlder = vi.fn().mockResolvedValueOnce({ ok: false, code: "failed" }).mockResolvedValue({ ok: true, page: { items: [], older: false, rev: "r1" } });
+      view(topic([you("b", "second")], { older: true }), { loadOlder });
+      await act(async () => undefined);
+      await userEvent.click(await screen.findByRole("button", { name: "Show earlier messages" }));
+      expect(loadOlder).toHaveBeenCalledTimes(2);
+    });
+
+    it("drops to the text view's notice path on 403 by calling onForbidden", async () => {
+      const onForbidden = vi.fn();
+      view(topic([you("b", "second")], { older: true }), { loadOlder: async () => ({ ok: false, code: "forbidden" }), onForbidden });
+      await act(async () => undefined);
+      expect(onForbidden).toHaveBeenCalled();
+    });
+
+    it("counts what arrived while scrolled up, and jumps to the end", async () => {
+      const t1 = topic([you("1", "a"), ai("2", "b")]);
+      const { rerender } = view(t1);
+      const log = screen.getByRole("log");
+      geometry(log, { height: 2000, client: 500, top: 0 });
+      fireEvent.scroll(log);
+      expect(screen.getByRole("button", { name: /Latest/ })).toBeInTheDocument();
+      const t2 = topic([you("1", "a"), ai("2", "b"), ai("3", "c"), tools("4", "shell", 1)]);
+      rerender(<HostNameProvider name="desk-1"><ChatView agent={agent} topic={t2} now={() => NOW} /></HostNameProvider>);
+      const jump = screen.getByRole("button", { name: /new/ });
+      expect(jump).toHaveTextContent("2 new");
+      await userEvent.click(jump);
+      expect(screen.queryByRole("button", { name: /new|Latest/ })).toBeNull();
+    });
+  });
+});
+
+describe("ChatRoute", () => {
+  const text = { agent, topic: chatTopic, terminal: "t1", input: { enabled: true, until: null, send: async () => ({ ok: true }) } };
+  const r = (mode: Parameters<typeof ChatRoute>[0]["mode"], t?: bridgeApi.ChatviewTopic) => (
+    <HostNameProvider name="desk-1"><ChatRoute mode={mode} text={text} view={{ topic: t }} /></HostNameProvider>
+  );
+
+  it("shows no text view while pending, and the notice with the text view when unavailable", () => {
+    const { rerender } = render(r({ kind: "pending" }));
+    expect(screen.queryByRole("log", { name: "Terminal output" })).toBeNull();
+    rerender(r({ kind: "text", notice: "no_binding" }));
+    expect(screen.getByText("Can't match this agent to its history")).toBeInTheDocument();
+    expect(screen.getByRole("log", { name: "Terminal output" })).toBeInTheDocument();
+  });
+
+  it("closes a notice for the session", async () => {
+    render(r({ kind: "text", notice: "codex" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText("No chat view for Codex yet")).toBeNull();
+  });
+
+  it("waits to move to the chat view while a draft is typed, then moves", async () => {
+    const { rerender } = render(r({ kind: "text", notice: "reader_failed" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Message to the agent" }), "half a thought");
+    rerender(r({ kind: "chat" }, topic([ai("1", "hi")])));
+    expect(screen.getByRole("log", { name: "Terminal output" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message to the agent" })).toHaveValue("half a thought");
+    await userEvent.clear(screen.getByRole("textbox", { name: "Message to the agent" }));
+    expect(screen.getByRole("log", { name: "Conversation" })).toBeInTheDocument();
+  });
+
+  it("moves at once when nothing is open", () => {
+    const { rerender } = render(r({ kind: "text", notice: "reader_failed" }));
+    rerender(r({ kind: "chat" }, topic([ai("1", "hi")])));
+    expect(screen.getByRole("log", { name: "Conversation" })).toBeInTheDocument();
+  });
+});
