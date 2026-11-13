@@ -16,12 +16,13 @@ export {
   CONNECT_LIMIT,
   ACT_LIMIT,
   KIND_LIMITS,
+  TOPIC_REFUSAL_LOG_LIMIT,
   type AuditHealth,
   type DeviceView,
   type SecurityOptions,
   type ServeIdentity,
 } from "./security.js";
-export { ACTION_CAPS, CAPABILITIES, defaultCaps, hasCap, type Capability, type Caps } from "./caps.js";
+export { ACTION_CAPS, CAPABILITIES, defaultCaps, hasCap, topicCaps, type Capability, type Caps } from "./caps.js";
 export { AuditLog, describeAct, ACTIVITY_FILE, type AuditEntry } from "./audit.js";
 export { DeviceStore, DEVICES_FILE, type Device } from "./devices.js";
 export { qrSvg, qrMatrix } from "./qr.js";

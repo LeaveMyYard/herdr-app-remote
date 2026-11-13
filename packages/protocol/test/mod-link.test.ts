@@ -49,6 +49,12 @@ describe("panel acts", () => {
     expect(modLink.checkPanelAct("device.cap", { id: ID, cap: "terminal.input", on: true, minutes: 0 }).ok).toBe(false);
     expect(modLink.checkPanelAct("remote.pause", { force: true }).ok).toBe(false);
   });
+  it("device.cap switches transcript.read (CV1) on and off, never with a time limit", () => {
+    expect(modLink.checkPanelAct("device.cap", { id: ID, cap: "transcript.read", on: true })).toEqual({ ok: true, kind: "device.cap", args: { id: ID, cap: "transcript.read", on: true } });
+    expect(modLink.checkPanelAct("device.cap", { id: ID, cap: "transcript.read", on: false }).ok).toBe(true);
+    expect(modLink.checkPanelAct("device.cap", { id: ID, cap: "transcript.read", on: true, minutes: 60 })).toEqual({ ok: false, error: "bad_args" });
+    expect(modLink.EXPIRING_CAPS).not.toContain("transcript.read");
+  });
   it("the run allowlist is unchanged: navigate only", () => {
     expect(modLink.RUN_ALLOWLIST).toEqual(["agent.focus", "pane.focus", "space.select", "tab.select"]);
   });

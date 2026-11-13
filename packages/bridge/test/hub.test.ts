@@ -341,3 +341,85 @@ describe("toRes", () => {
     expect(bridgeApi.Res.safeParse(r).success).toBe(true);
   });
 });
+
+describe("topic gate (CV1)", () => {
+  /** A client acting as `deviceId`, joined and greeted. */
+  async function joinAs(hub: ReturnType<typeof newHub>, deviceId: string) {
+    const got: bridgeApi.ServerMessage[] = [];
+    const client = { principal: { deviceId }, send: (m: bridgeApi.ServerMessage) => void got.push(m), close: () => undefined };
+    const conn = hub.connect(client);
+    const send = (m: unknown) => hub.handleRaw(conn, JSON.stringify(m));
+    await send({ type: "hello", api: 1 });
+    return { got, send, client };
+  }
+
+  it("without a gate, fails closed: transcript topics are refused, others served", async () => {
+    const hub = newHub();
+    hub.publish("chatview:t3", { secret: "Question Title 123" });
+    hub.publish("host", HOST(1));
+    const seen: [string, number][] = [];
+    hub.watchPrefix("chatview:", (t, n) => seen.push([t, n]));
+    const { client, send } = await join(hub);
+    await send({ type: "sub", topics: ["chatview:t3", "timeline:t3", "host"] });
+    expect(client.ofType("stale")).toEqual([
+      { type: "stale", topic: "chatview:t3", reason: "forbidden" },
+      { type: "stale", topic: "timeline:t3", reason: "forbidden" },
+    ]);
+    expect(client.ofType("snap").map((s) => s.topic)).toEqual(["host"]);
+    // The source never hears of a refused subscriber.
+    expect(seen).toEqual([]);
+    hub.publish("chatview:t3", { secret: "Question Title 124" });
+    expect(client.ofType("patch")).toEqual([]);
+    expect(JSON.stringify(client.got)).not.toContain("Question Title");
+  });
+
+  it("asks the gate at every sub, and a refused topic is not counted against the topic limit", async () => {
+    let allow = false;
+    const asked: [string, string, boolean | undefined][] = [];
+    const hub = newHub({
+      mayRead: (c, t, recheck) => {
+        asked.push([c.principal?.deviceId ?? "", t, recheck]);
+        return !bridgeApi.isTranscriptTopic(t) || allow;
+      },
+    });
+    hub.publish("chatview:t3", { n: 1 });
+    const a = await joinAs(hub, "d-a");
+    await a.send({ type: "sub", topics: ["chatview:t3"] });
+    expect(a.got.filter((m) => m.type === "snap")).toEqual([]);
+    expect(asked).toEqual([["d-a", "chatview:t3", undefined]]);
+    for (let i = 0; i < 80; i++) await a.send({ type: "sub", topics: [`chatview:t${i}`] });
+    expect(hub.topicCount).toBe(1);
+    allow = true;
+    await a.send({ type: "sub", topics: ["chatview:t3"] });
+    expect(a.got.filter((m) => m.type === "snap")).toMatchObject([{ topic: "chatview:t3", data: { n: 1 } }]);
+  });
+
+  it("recheck ends exactly the subscriptions the gate now refuses, for that device only", async () => {
+    const allowed = new Set(["d-a", "d-b"]);
+    const hub = newHub({ mayRead: (c, t) => !bridgeApi.isTranscriptTopic(t) || allowed.has(c.principal?.deviceId ?? "") });
+    hub.publish("chatview:t3", { n: 1 });
+    hub.publish("host", HOST(1));
+    const counts: number[] = [];
+    hub.watchSubscribers("chatview:t3", (n) => counts.push(n));
+    const a = await joinAs(hub, "d-a");
+    const b = await joinAs(hub, "d-b");
+    await a.send({ type: "sub", topics: ["chatview:t3", "host"] });
+    await b.send({ type: "sub", topics: ["chatview:t3"] });
+    expect(counts).toEqual([1, 2]);
+    allowed.delete("d-a");
+    hub.recheck("d-a");
+    expect(a.got.filter((m) => m.type === "stale")).toEqual([{ type: "stale", topic: "chatview:t3", reason: "forbidden" }]);
+    expect(counts).toEqual([1, 2, 1]);
+    const na = a.got.length;
+    hub.publish("chatview:t3", { n: 2 });
+    hub.publish("host", HOST(2));
+    // a keeps host, loses the chat; b keeps the chat.
+    expect(a.got.slice(na).map((m) => (m as { topic?: string }).topic)).toEqual(["host"]);
+    expect(b.got.filter((m) => m.type === "patch")).toHaveLength(1);
+    // A recheck that changes nothing sends nothing.
+    const nb = b.got.length;
+    hub.recheck("d-b");
+    hub.recheck();
+    expect(b.got.length).toBe(nb);
+  });
+});

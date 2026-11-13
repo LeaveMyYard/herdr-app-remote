@@ -18,12 +18,27 @@ export const PLUGIN_NAMES = ["panorama", "inbox", "usage", "hc", "host"] as cons
 export const PluginName = z.enum(PLUGIN_NAMES);
 export type PluginName = z.infer<typeof PluginName>;
 
-/** `host`, `plugins`, `panorama`, `inbox`, `usage`, `setup`, `keys` or `chat:<t>`. */
+/**
+ * `host`, `plugins`, `panorama`, `inbox`, `usage`, `setup`, `keys`, `chat:<t>`, or a chat view topic
+ * (`chatview:<t>`, `timeline:<t>`; docs/chatview.md §4, §7), whose payloads their slices (CV3, CV5) define.
+ */
 export const Topic = z.union([
   z.enum(["host", "plugins", "panorama", "inbox", "usage", "setup", "keys"]),
   z.string().regex(/^chat:.+$/),
+  z.string().regex(/^(chatview|timeline):.+$/),
 ]);
 export type Topic = z.infer<typeof Topic>;
+
+/**
+ * Topics that carry agents' conversations (CV1, docs/chatview.md §5.1). Besides `view` they need the
+ * `transcript.read` capability: a `sub` without it is answered `stale {reason: "forbidden"}` and nothing is
+ * sent, and losing the capability ends the subscription the same way. `GET /api/v1/chatview/<t>` needs it too.
+ */
+export const TRANSCRIPT_TOPIC_PREFIXES = ["chatview:", "timeline:"] as const;
+/** Whether `topic` is a {@link TRANSCRIPT_TOPIC_PREFIXES} topic. */
+export function isTranscriptTopic(topic: string): boolean {
+  return TRANSCRIPT_TOPIC_PREFIXES.some((p) => topic.startsWith(p));
+}
 
 // ---- GET /api/v1/meta ----
 
@@ -870,8 +885,12 @@ export const Patch = z.object({
 });
 
 /** Known reasons; the field stays open so the bridge can add more without a version bump. */
-export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable", "terminal_not_found", "bad_terminal", "too_many_chats", "hc_missing"] as const;
-/** `hc_missing`: a chat could not run `hc` (not on the bridge's PATH nor in `~/.local/bin`). */
+export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable", "terminal_not_found", "bad_terminal", "too_many_chats", "hc_missing", "forbidden"] as const;
+/**
+ * `hc_missing`: a chat could not run `hc` (not on the bridge's PATH nor in `~/.local/bin`). `forbidden` (CV1): the
+ * device lacks a capability the topic needs (`transcript.read` for {@link TRANSCRIPT_TOPIC_PREFIXES}); the bridge
+ * did not subscribe it, or ended its subscription, and sends nothing more on the topic until a new `sub`.
+ */
 export type StaleReason = (typeof STALE_REASONS)[number];
 export const Stale = z.object({
   type: z.literal("stale"),

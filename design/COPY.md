@@ -68,7 +68,7 @@ Rows for the Claude Code chat view, from `docs/chatview.md` §11. These rows are
 | ● | Notice: no match | `new (CV4)` | - | Can't match this agent to its history / Showing the terminal. | CV4 | reason `no_binding` |
 | ● | Notice: reader failed | `new (CV4)` | - | Can't read this agent's history right now / Showing the terminal. | CV4 | reason `reader_failed` |
 | ● | Notice: history off | `new (CV4)` | - | Chat history is off for this phone / Turn it on in Remote on desk-1. | CV4 | reason `forbidden` |
-| ● | Panel: Chat history | `mod panel.js CAPS` | - | Chat history / Lets this phone read agents' conversations, not just the screen. | CV4 | capability `transcript.read`, off by default |
+| ● | Panel: Chat history | `mod panel.js CAPS` | - | Chat history / Lets this phone read agents' conversations, not just the screen. | CV1 | capability `transcript.read`, off by default |
 | ● | Panel: Answer prompts | `mod panel.js CAPS` | - | Answer prompts / Lets this phone approve commands, answer Claude's questions and stop an agent. | CV7 | capability `prompt.answer`, off by default, with expiry |
 | ● | Card: permission | `new (CV7)` | - | PERMISSION · Allow this command? · Shell command · the screen's labels as buttons (Yes / Yes, and don't ask again for: cargo test * / No) · under No: Then tell Agent 1 what to do instead | CV7 | labels come from the screen, all pressable |
 | ● | Card: question | `new (CV7)` | - | QUESTION · Other: type your own answer… · [Answer] · Next: 2 picked · [Skip] | CV7 | answers only on Answer |

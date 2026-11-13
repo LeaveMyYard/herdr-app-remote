@@ -5,7 +5,7 @@ import type { IncomingMessage } from "node:http";
 import jsQRModule from "jsqr";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuditLog, describeAct, cleanLabel } from "../src/security/audit.js";
-import { ACTION_CAPS, defaultCaps, hasCap } from "../src/security/caps.js";
+import { ACTION_CAPS, defaultCaps, hasCap, topicCaps } from "../src/security/caps.js";
 import { DeviceStore, newDeviceId } from "../src/security/devices.js";
 import { readCookie, singleHeader } from "../src/security/headers.js";
 import { qrMatrix, qrSvg } from "../src/security/qr.js";
@@ -43,6 +43,16 @@ describe("capabilities", () => {
   it("defaults: view and inbox.answer on, the rest off", () => {
     const c = defaultCaps();
     expect([c.view, c["inbox.answer"], c.navigate, c["terminal.input"], c.push]).toEqual([true, true, false, false, false]);
+    // CV1: chat history is off for every device until the desktop turns it on.
+    expect(c["transcript.read"]).toBe(false);
+  });
+
+  it("transcript.read (CV1) has no expiry and is needed by the transcript topics only", () => {
+    expect(hasCap({ ...defaultCaps(), "transcript.read": true }, "transcript.read", 1e15)).toBe(true);
+    expect(hasCap(defaultCaps(), "transcript.read", 0)).toBe(false);
+    expect(topicCaps("chatview:t3")).toEqual(["transcript.read"]);
+    expect(topicCaps("timeline:vps/t7")).toEqual(["transcript.read"]);
+    for (const t of ["host", "chat:t3", "inbox", "keys", "chat:chatview:t3"]) expect(topicCaps(t), t).toEqual([]);
   });
 
   it("terminal.keys expires on its own clock (S16b), whatever terminal.input says", () => {
@@ -156,6 +166,20 @@ describe("device store", () => {
     expect(() => new DeviceStore(dir)).toThrow(/invalid/);
     await writeFile(join(dir, "devices.json"), "{not json");
     expect(() => new DeviceStore(dir)).toThrow();
+  });
+
+  it("transcript.read (CV1): a file without it reads as off; a non-boolean or an unknown cap is refused", async () => {
+    const d = dev();
+    const caps = { ...d.caps } as Record<string, unknown>;
+    delete caps["transcript.read"];
+    await writeFile(join(dir, "devices.json"), JSON.stringify({ v: 1, paused: false, devices: [{ ...d, caps }] }));
+    expect(new DeviceStore(dir).get(d.id)?.caps["transcript.read"]).toBe(false);
+    for (const bad of [{ ...caps, "transcript.read": "yes" }, { ...caps, "transcript.read": 1 }, { ...caps, "transcript.read.until": null }, { ...caps, "transcript.write": true }]) {
+      await writeFile(join(dir, "devices.json"), JSON.stringify({ v: 1, paused: false, devices: [{ ...d, caps: bad }] }));
+      expect(() => new DeviceStore(dir), JSON.stringify(bad)).toThrow(/invalid/);
+    }
+    await writeFile(join(dir, "devices.json"), JSON.stringify({ v: 1, paused: false, devices: [{ ...d, caps: { ...caps, "transcript.read": true } }] }));
+    expect(new DeviceStore(dir).get(d.id)?.caps["transcript.read"]).toBe(true);
   });
 
   it("tightens a too-open existing file to 0600", async () => {

@@ -493,6 +493,39 @@ describe("startApp: topics over the link", () => {
     expect(app!.security.activity().some((e) => e.text.includes("sent 4 chars to t3: result unknown"))).toBe(true);
   });
 
+  it("transcript topics (CV1) need transcript.read: refused without it, served with it, ended when it goes off", async () => {
+    await start();
+    const cookie = await paired();
+    const id = app!.security.devices()[0]!.id;
+    // A stand-in for the CV3 source: the hub holds a value, so a granted sub would snap at once.
+    app!.hub.publish("chatview:t3", { terminal: "t3", text: "Question Title 123" });
+    app!.hub.publish("timeline:t3", { terminal: "t3", items: [] });
+    const p = await phone(cookie);
+    send(p, { type: "hello", api: 1 });
+    send(p, { type: "sub", topics: ["chatview:t3", "timeline:t3", "host"] });
+    const isStale = (t: string) => (m: bridgeApi.ServerMessage) => m.type === "stale" && m.topic === t;
+    expect(await p.until(isStale("chatview:t3"))).toEqual({ type: "stale", topic: "chatview:t3", reason: "forbidden" });
+    await p.until(isStale("timeline:t3"));
+    expect(p.msgs.some((m) => m.type === "snap" && m.topic !== "host")).toBe(false);
+    expect(app!.security.activity().map((e) => e.text)).toContain("Phone 1 opened the chat of t3: refused, chat history is off");
+
+    app!.security.setCap(id, "transcript.read", true);
+    send(p, { type: "sub", topics: ["chatview:t3", "timeline:t3"] });
+    expect(await p.until(snapOf("chatview:t3"))).toMatchObject({ data: { text: "Question Title 123" } });
+    await p.until(snapOf("timeline:t3"));
+
+    const n = p.msgs.length;
+    app!.security.setCap(id, "transcript.read", false);
+    await p.until((m) => p.msgs.indexOf(m) >= n && m.type === "stale" && m.topic === "chatview:t3");
+    await p.until((m) => p.msgs.indexOf(m) >= n && m.type === "stale" && m.topic === "timeline:t3");
+    app!.hub.publish("chatview:t3", { terminal: "t3", text: "Question Title 124" });
+    // The socket stays open (view is untouched), and a ping round trip proves nothing more came on the topic.
+    send(p, { type: "ping" });
+    await p.until((m) => p.msgs.indexOf(m) >= n && m.type === "pong");
+    expect(p.msgs.slice(n).filter((m) => (m.type === "patch" || m.type === "snap") && m.topic === "chatview:t3")).toEqual([]);
+    expect(JSON.stringify(p.msgs)).not.toContain("Question Title 124");
+  });
+
   it("terminal.keys presses a menu entry's keys only with terminal.keys; Activity names the entry, never the label", async () => {
     await start();
     const off = await phone(await paired({ terminal: true }));

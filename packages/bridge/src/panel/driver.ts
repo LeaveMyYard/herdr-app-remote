@@ -160,6 +160,7 @@ export class PanelDriver {
             "terminal.input": d.caps["terminal.input"],
             "terminal.keys": d.caps["terminal.keys"],
             push: d.caps.push,
+            "transcript.read": d.caps["transcript.read"],
           },
           terminal_input_until: d.terminal_input_until,
           terminal_keys_until: d.terminal_keys_until,

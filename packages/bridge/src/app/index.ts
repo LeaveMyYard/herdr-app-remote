@@ -149,6 +149,8 @@ export async function startApp(o: AppOptions): Promise<App> {
     keys,
     navigateActor(o.link),
   ];
+  // Security's topic cut reaches the hub, which is built after it.
+  const hubRef: { current?: Hub } = {};
   // The desktop panel (S13) hears of security changes and new pairing requests through these two.
   const panelRef: { current?: PanelDriver } = {};
   // Tailscale setup (S14); assigned once the API port is known.
@@ -171,6 +173,8 @@ export async function startApp(o: AppOptions): Promise<App> {
       if (cap !== "terminal.input") keys.cancel(id ?? undefined);
     },
     onAuditHealth: (h) => log({ event: "audit_health", ok: h.ok, failures: h.failures }),
+    // Chat history turned off (CV1): its open `chatview:<t>` / `timeline:<t>` subscriptions end now.
+    onTopicsCut: (id) => hubRef.current?.recheck(id),
     onPending: (d) => {
       o.link.notify("info", "Approve a new phone?", "link", "open_panel");
       o.onPending?.(d);
@@ -183,7 +187,10 @@ export async function startApp(o: AppOptions): Promise<App> {
   const hub = new Hub({
     bridgeVersion: o.bridgeVersion ?? BRIDGE_VERSION,
     onAct: (client, kind, args) => (serving() ? security.act(client, kind, args) : { ok: false, code: "funnel" }),
+    // The topic guard (CV1): `chatview:<t>` and `timeline:<t>` need `transcript.read` on top of `view`.
+    mayRead: security.mayRead,
   });
+  hubRef.current = hub;
 
   // The key menu as topic `keys`. An edited keys.json is published within KEYS_REFRESH_MS (or at the next press); a
   // damaged one is set aside and said in Activity and the log, by reason only (never the file's content).
