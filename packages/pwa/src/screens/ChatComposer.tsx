@@ -4,7 +4,7 @@ import { useHostName } from "../bridge/host-name";
 import { KeysButton, type KeysInput } from "./KeysSheet";
 import * as W from "./keys-words";
 import { useReportBusy } from "../chatview/busy";
-import { composerPlaceholder, LOCKED } from "../chatview/words";
+import { composerPlaceholder, LOCKED, stopLabel, stopWords } from "../chatview/words";
 
 /** The bridge's answer to `terminal.send`. */
 export interface SendOutcome {
@@ -22,6 +22,11 @@ export interface ChatInput {
   send: (text: string) => Promise<SendOutcome>;
   /** The special-keys menu (S16b), opened from the key bar. */
   keys?: KeysInput | undefined;
+  /**
+   * Stop (CV8, chat view only): `agent.stop`, under `prompt.answer` (`enabled` from `/api/v1/me`; the bridge checks
+   * again). Resolves with the bridge's `res`; never retried.
+   */
+  stop?: { enabled: boolean; press: () => Promise<SendOutcome> } | undefined;
 }
 
 /**
@@ -81,6 +86,9 @@ export function clockOf(ms: number): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/** After a send empties the box, Stop is not offered for this long (CV8): a double tap on Send never stops the agent. */
+export const STOP_AFTER_SEND_MS = 1_000;
+
 /** Under this much time left, the typing line turns amber and counts down. */
 export const SOON_MS = 10 * 60_000;
 
@@ -121,7 +129,7 @@ const CLOCK = (
  * bar's own keys are ⏎ (Enter alone) and `/`, which only types a slash into the composer. Esc, Tab, Shift-Tab,
  * Ctrl-C and the arrows are in the Keys sheet (S16b), opened from the bar so none is tapped by accident.
  */
-export function ChatComposer({ terminal, agentName, input, now = Date.now, demoSheet, variant = "text", locked = false }: {
+export function ChatComposer({ terminal, agentName, input, now = Date.now, demoSheet, variant = "text", locked = false, working = false }: {
   terminal: string;
   agentName: string;
   input: ChatInput;
@@ -132,6 +140,8 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
   variant?: "text" | "chat";
   /** Chat view only: a native prompt is open (CV7), so typing waits. */
   locked?: boolean;
+  /** Chat view only: the host says the agent is working (CV8: an empty composer offers Stop). */
+  working?: boolean;
 }) {
   const host = useHostName();
   useMinuteTick(input.until !== null, now);
@@ -165,7 +175,11 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
     setSending(false);
     if (r.ok) {
       // Only the text that went is cleared: an Enter alone leaves a draft where it is.
-      if (value !== "") setText((t) => (t === value ? "" : t));
+      if (value !== "") {
+        setText((t) => (t === value ? "" : t));
+        // CV8: the emptied box would turn Send into Stop in the same spot; a double tap must not stop the agent.
+        setSentHold((n) => n + 1);
+      }
       return;
     }
     setNote(sendWords(r, host));
@@ -204,6 +218,37 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (text !== "") submit(text.replace(/\r\n?/g, "\n"));
+  };
+
+  // CV8: while the agent works and nothing is typed, the send button is Stop (the board's working states). Typing
+  // brings Send back, so a message can still be queued. (The first-send question always holds text, so an empty box
+  // already means none is open.)
+  const [stopping, setStopping] = useState(false);
+  /**
+   * Sends that just emptied the box (a count, so each send restarts the hold): Send stays (a no-op on an empty box)
+   * for {@link STOP_AFTER_SEND_MS} after the last one.
+   */
+  const [sentHold, setSentHold] = useState(0);
+  useEffect(() => {
+    if (sentHold === 0) return;
+    const t = setTimeout(() => setSentHold(0), STOP_AFTER_SEND_MS);
+    return () => clearTimeout(t);
+  }, [sentHold]);
+  const stoppable = variant === "chat" && input.stop?.enabled === true && working && !locked && text === "" && sentHold === 0;
+  const onStop = async () => {
+    const stop = input.stop;
+    if (!stop || stopping) return;
+    setStopping(true);
+    setNote(null);
+    let r: SendOutcome;
+    try {
+      r = await stop.press();
+    } catch {
+      r = { ok: false, code: "failed", unknown_effect: true };
+    }
+    setStopping(false);
+    // Done: the chat view shows "Stopped by you" from the transcript; nothing to say here.
+    if (!r.ok) setNote(stopWords(r, { agent: agentName, desk: host }));
   };
 
   const busy = sending || asking !== null || locked;
@@ -269,11 +314,19 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
           autoCorrect="off"
           spellCheck={false}
         />
-        <button type="submit" aria-label="Send" className="row nf chat-send" disabled={busy}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
-            <path d="M12 19V5M6 11l6-6 6 6" />
-          </svg>
-        </button>
+        {stoppable || stopping ? (
+          <button type="button" aria-label={stopLabel(agentName)} className="row nf chat-send chat-stop" disabled={stopping} onClick={() => void onStop()}>
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" />
+            </svg>
+          </button>
+        ) : (
+          <button type="submit" aria-label="Send" className="row nf chat-send" disabled={busy}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+              <path d="M12 19V5M6 11l6-6 6 6" />
+            </svg>
+          </button>
+        )}
       </form>
     </>
   );

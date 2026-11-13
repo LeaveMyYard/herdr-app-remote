@@ -22,6 +22,27 @@ describe("chat items (§3)", () => {
     expect(map([user(1, "caveat", { meta: true }), system(2), user(3, "   ")])).toEqual([]);
   });
 
+  it("Claude Code's interrupt marker (Esc while working, CV8) is a stopped status row, not a bubble", () => {
+    const items = map([
+      user(1, "Split the parser"),
+      agent(2, "Agent 1 is working on Project Alpha."),
+      user(3, [text("[Request interrupted by user]")]),
+      agent(4, [tool("b1", "Bash", { command: "x" })]),
+      user(5, [result("b1", true)]),
+      user(6, [text("[Request interrupted by user for tool use]")]),
+    ]);
+    expect(items.filter((i) => i.role === "status")).toEqual([
+      { id: U(3), role: "status", at: AT(3), status: "stopped" },
+      { id: U(6), role: "status", at: AT(6), status: "stopped" },
+    ]);
+    expect(items.some((i) => i.role === "you" && i.text.includes("interrupted"))).toBe(false);
+    for (const i of items) expect(bridgeApi.ChatItem.safeParse(i).success).toBe(true);
+    // Exactly the marker: anything else the person wrote stays their bubble.
+    expect(map([user(1, "[Request interrupted by user] and then go on")])).toEqual([{ id: U(1), role: "you", at: AT(1), text: "[Request interrupted by user] and then go on" }]);
+    expect(map([user(1, [text("[Request interrupted by user]"), text("more")])])[0]!.role).toBe("you");
+    expect(map([user(1, "[request interrupted by user]")])[0]!.role).toBe("you");
+  });
+
   it("a slash command is a one-line chip, never its arguments; command output and reminders show nothing", () => {
     const items = map([
       user(1, "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>keep Project Alpha secret notes</command-args>"),

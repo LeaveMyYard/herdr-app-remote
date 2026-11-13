@@ -42,6 +42,45 @@ export const composerPlaceholder = (agent: string) => `Message ${agent}…`;
 export const LOCKED = "Answer the prompt above first";
 export const TYPING_OFF = "Read-only here. Typing is off for this phone.";
 
+// Stop (CV8): COPY.md "Stop: button / done / not working". The other refusal lines are this slice's (plain, in the
+// style of the prompt cards' refusals; listed in the PR): cooldown, unknown effect, forbidden, rate limit, audit.
+export const stopLabel = (agent: string) => `Stop ${agent}`;
+/** "Stopped by you · 21:14", the phone's local time. */
+export const stoppedAt = (iso: string | null): string => {
+  if (!iso) return "Stopped by you";
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? `Stopped by you · ${two(d.getHours())}:${two(d.getMinutes())}` : "Stopped by you";
+};
+/** What the composer says for a refused or unknown Stop. */
+export function stopWords(r: { code?: string | undefined; unknown_effect?: boolean | undefined }, o: { agent: string; desk: string }): string {
+  if (r.unknown_effect) return `${o.agent} may have been stopped. Look before you stop it again.`;
+  switch (r.code) {
+    case "not_working":
+      return `${o.agent} already stopped.`;
+    case "prompt_open":
+      return LOCKED;
+    case "busy":
+      // Another answer, Stop, message or key press runs into that terminal (a typing desk makes hc hold the press instead).
+      return `Something else is being sent to ${o.agent}. Try again in a moment.`;
+    case "desk_draft":
+      return `${o.desk} has unsent text in ${o.agent}'s box. Nothing was pressed.`;
+    case "cooldown":
+      return `${o.agent} was just stopped. Try again in a few seconds.`;
+    case "forbidden":
+      return `Stop is off for this phone. Turn on Answer prompts in Remote on ${o.desk}.`;
+    case "rate_limited":
+      return "Too many presses. Wait a moment and try again.";
+    case "audit_unavailable":
+      return "Not stopped: the activity log can't be written. Nothing was pressed.";
+    case "offline":
+      return "Not connected to the desktop. Nothing was pressed.";
+    case "paused":
+      return "Remote access is paused on the desktop. Nothing was pressed.";
+    default:
+      return `Not stopped (${r.code ?? "failed"}). Nothing was pressed.`;
+  }
+}
+
 /** "1m 12s", "12s", "1h 2m". */
 export function elapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));

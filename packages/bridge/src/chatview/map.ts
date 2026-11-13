@@ -1,5 +1,6 @@
 // What to render (docs/chatview.md §3): checked Claude messages (claude/messages.ts) to chat items. Pure: no I/O.
 //
+// - Claude Code's interrupt marker (Esc while working) is a `status: "stopped"` row ("Stopped by you · 21:14", CV8);
 // - a user's text is a "you" bubble; text that only wraps a slash command is a chip ("/compact"); other wrappers
 //   Claude Code writes into the user turn (command output, bash mode, reminders) show nothing;
 // - a user message with only tool results shows nothing of its own: it closes the tool calls it answers;
@@ -307,6 +308,12 @@ interface Run {
   kinds: Set<ToolKind>;
 }
 
+/**
+ * The user turns Claude Code 2.1.323 writes when Esc interrupts it (rig, fixtures/claude-prompts/2.1.323/manifest.json
+ * `stop`): while it streams a reply, and while a tool runs or a permission dialog is cancelled. Exactly these texts.
+ */
+export const INTERRUPTED: ReadonlySet<string> = new Set(["[Request interrupted by user]", "[Request interrupted by user for tool use]"]);
+
 /** Maps a session's checked messages, oldest first, to chat items, oldest first. */
 export function mapMessages(messages: readonly ClaudeMessage[], o: MapOptions = {}): ChatItem[] {
   const dayOf = o.dayOf ?? localDay;
@@ -360,6 +367,12 @@ export function mapMessages(messages: readonly ClaudeMessage[], o: MapOptions = 
         } else if (b.type === "text") texts.push(b.text);
       }
       if (texts.length === 0) continue;
+      // Esc while the agent worked (CV8): Claude Code writes its own marker as a user turn. A status row, not a bubble.
+      if (texts.every((t) => INTERRUPTED.has(t.trim()))) {
+        run = null;
+        push({ id: nextId(), role: "status", at: m.at, status: "stopped" });
+        continue;
+      }
       const w = userText(texts);
       if (w === "hidden") continue;
       run = null;

@@ -29,7 +29,10 @@ class FakeHistory {
 }
 
 const drivers: ChatviewTopicDriver[] = [];
+/** The feed's root for t1; a test can swap it (another session) without a look. */
+let feedRoot = claudeRoot;
 afterEach(() => {
+  feedRoot = claudeRoot;
   for (const d of drivers.splice(0)) d.stop();
 });
 
@@ -42,7 +45,7 @@ async function setup(state: HostState["agents"][number]["state"], messages: Clau
   const drv = new ChatviewTopicDriver({
     hub,
     history,
-    feed: (): FeedSnapshot => ({ view: { feed: mkFeed([claudeRoot()]), stale: false, aged: false, error: null }, contract: {} as Contract, at: 1_000_000 }),
+    feed: (): FeedSnapshot => ({ view: { feed: mkFeed([feedRoot()]), stale: false, aged: false, error: null }, contract: {} as Contract, at: 1_000_000 }),
     intervalMs: 1e9,
     now: () => 1_000_000,
     stat: () => Promise.resolve(env.stat),
@@ -152,5 +155,43 @@ describe("chatview prompt cards", () => {
     await c.send({ type: "sub", topics: [TOPIC] });
     await drv.settled(TOPIC);
     expect((hub.get(TOPIC) as unknown as bridgeApi.ChatviewTopic).items.some((i) => i.role === "prompt")).toBe(false);
+  });
+});
+
+describe("Stop's view of the chat view (CV8)", () => {
+  it("the host's state only for an open, good chat view; a published card shows", async () => {
+    const working = await setup("working", bashTurn, null);
+    expect(working.drv.stopSource.state("t1")).toEqual({ working: true, blocked: false });
+    expect(working.drv.stopSource.hasCard("t1")).toBe(false);
+    // Another terminal has no open chat view.
+    expect(working.drv.stopSource.state("t2")).toBeNull();
+    const blocked = await setup("waiting", bashTurn, screen("permission"));
+    expect(blocked.drv.stopSource.state("t1")).toEqual({ working: false, blocked: true });
+    expect(blocked.drv.stopSource.hasCard("t1")).toBe(true);
+    const idle = await setup("idle", bashTurn, IDLE);
+    expect(idle.drv.stopSource.state("t1")).toEqual({ working: false, blocked: false });
+  });
+
+  it("is null once the binding is gone (the host no longer has the agent there)", async () => {
+    const { hub, drv } = await setup("working", bashTurn, null);
+    const h = hostState();
+    hub.publish("host", { ...h, agents: h.agents.filter((a) => a.id !== "agent-1") } as unknown as Json);
+    expect(drv.stopSource.state("t1")).toBeNull();
+  });
+
+  it("is null when the terminal now runs another Claude session than the one the chat view holds (final pass L1)", async () => {
+    const { drv } = await setup("working", bashTurn, null);
+    expect(drv.stopSource.state("t1")).toEqual({ working: true, blocked: false });
+    feedRoot = () => root({ terminal: "t1", harness: "claude", session_id: "22222222-2222-4222-8222-222222222222", transcript: TRANSCRIPT, cwd: "/work/project-alpha" });
+    expect(drv.stopSource.state("t1")).toBeNull();
+  });
+
+  it("is null while the chat view is not good (reader_failed), though the host still says working (final pass L2)", async () => {
+    const { drv, history, env, value, poll } = await setup("working", bashTurn, null);
+    history.read = () => Promise.resolve({ ok: false, reason: "reader_failed", detail: "shape" });
+    env.stat = { size: 200, mtimeMs: 2 };
+    await poll();
+    expect(value().state).toBe("unavailable");
+    expect(drv.stopSource.state("t1")).toBeNull();
   });
 });

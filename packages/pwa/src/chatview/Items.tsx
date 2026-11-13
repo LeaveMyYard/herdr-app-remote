@@ -136,6 +136,12 @@ export function renderDefaultItem(item: Item, prev: Item | undefined, ctx: ItemC
     case "prompt":
       return <PromptCard item={item} terminal={ctx.prompt?.terminal ?? ""} agent={ctx.agent} desk={ctx.prompt?.desk ?? ""} act={ctx.prompt?.act ?? offline} />;
     case "status":
-      return null;
+      // CV8: "Stopped by you · 21:14", from Claude Code's own interrupt marker in the transcript.
+      return (
+        <div className="row cv-stopped">
+          <span className="nf cv-stopped-dot" aria-hidden="true" />
+          {W.stoppedAt(item.at)}
+        </div>
+      );
   }
 }

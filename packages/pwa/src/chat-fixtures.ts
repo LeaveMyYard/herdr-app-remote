@@ -81,7 +81,7 @@ export function typingDemo(state: string | null): { input: ChatInput; now: () =>
   };
 }
 
-// ---- chat view boards (design/PhoneChatView; `?fixture=chatview&view=<chat|history|new|off|codex>`) ----
+// ---- chat view boards (design/PhoneChatView; `?fixture=chatview&view=<chat|history|new|off|codex|perm|changed|stop>`) ----
 
 /** Today at hh:mm:ss on this device's clock. */
 function today(h: number, m: number, s = 0, days = 0): Date {
@@ -155,7 +155,8 @@ export function chatviewDemo(state: string | null): ChatviewDemo | null {
   const clock = today(21, 14, 12).getTime();
   const until = today(21, 40).getTime();
   const ok = async () => ({ ok: true });
-  const input = (enabled: boolean): ChatInput => ({ enabled, until: enabled ? until : null, send: ok });
+  // Stop (CV8) is on wherever typing is: the board's working states show it in the composer.
+  const input = (enabled: boolean): ChatInput => ({ enabled, until: enabled ? until : null, send: ok, stop: { enabled, press: ok } });
   const agent: ChatAgent = { name: "Agent 1", folder: "~/code/alpha", harness: "claude", status: "working" };
   const base = { terminal: "t2", harness: "claude", state: "ok" as const, older: false, rev: "demo-rev-1" };
   const working = { state: "working" as const, since: iso(today(21, 13, 0)) };
@@ -191,6 +192,11 @@ export function chatviewDemo(state: string | null): ChatviewDemo | null {
       seedPromptTail("t2", item, "prompt_changed");
       // The board draws no working line under the refusal (only the header's spinner), so the topic's status is idle.
       return { mode: { kind: "chat" }, topic: { ...base, items, status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent, promptAct };
+    }
+    // CV8: stopped from the phone. The transcript's interrupt marker is the status row; the agent is idle again.
+    case "stop": {
+      const items: Item[] = [...todayItems.slice(0, -1), tools("m-6", "read", 2, ["Read · README.md", "Read · parse.md"], today(21, 10)), { id: "m-7", role: "status", at: iso(today(21, 14)), status: "stopped" }];
+      return { mode: { kind: "chat" }, topic: { ...base, items, status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent: { ...agent, status: "idle" }, timeline: demoTimeline("chat") };
     }
     case "codex":
       return { mode: { kind: "text", notice: "codex" }, text: chatTopic, input: { ...input(true), keys: { enabled: true, menu: demoKeysMenu, press: ok } }, now: () => clock, agent: { name: "Agent 3", folder: "~/code/alpha", harness: "codex", status: "working" } };

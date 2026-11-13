@@ -204,11 +204,12 @@ describe("fetchTerminalInput (/api/v1/me)", () => {
 
   it("reads 200, says off for 401 and 403, and keeps what it had (null) for anything else", async () => {
     reply(200, { device: { caps: { "terminal.input": true }, terminal_input_until: null } });
-    expect(await fetchTerminalInput()).toEqual({ enabled: true, until: null, keys: { enabled: false, until: null } });
+    const off = { enabled: false, until: null };
+    expect(await fetchTerminalInput()).toEqual({ enabled: true, until: null, keys: off, prompts: off });
     reply(401);
-    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null, keys: { enabled: false, until: null } });
+    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null, keys: off, prompts: off });
     reply(403);
-    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null, keys: { enabled: false, until: null } });
+    expect(await fetchTerminalInput()).toEqual({ enabled: false, until: null, keys: off, prompts: off });
     reply(503);
     expect(await fetchTerminalInput()).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
@@ -219,13 +220,16 @@ describe("fetchTerminalInput (/api/v1/me)", () => {
 describe("terminalInputOf (/api/v1/me)", () => {
   it("reads the capability and expiry, and anything odd as off", () => {
     const off = { enabled: false, until: null };
-    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: 5 } })).toEqual({ enabled: true, until: 5, keys: off });
-    expect(terminalInputOf({ device: { caps: { "terminal.input": "yes" } } })).toEqual({ ...off, keys: off });
-    expect(terminalInputOf(null)).toEqual({ ...off, keys: off });
-    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: "soon" } })).toEqual({ enabled: true, until: null, keys: off });
+    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: 5 } })).toEqual({ enabled: true, until: 5, keys: off, prompts: off });
+    expect(terminalInputOf({ device: { caps: { "terminal.input": "yes" } } })).toEqual({ ...off, keys: off, prompts: off });
+    expect(terminalInputOf(null)).toEqual({ ...off, keys: off, prompts: off });
+    expect(terminalInputOf({ device: { caps: { "terminal.input": true }, terminal_input_until: "soon" } })).toEqual({ enabled: true, until: null, keys: off, prompts: off });
     // terminal.keys (S16b) is read on its own.
-    expect(terminalInputOf({ device: { caps: { "terminal.keys": true }, terminal_keys_until: 9 } })).toEqual({ ...off, keys: { enabled: true, until: 9 } });
-    expect(terminalInputOf({ device: { caps: { "terminal.keys": 1 }, terminal_keys_until: "x" } })).toEqual({ ...off, keys: off });
+    expect(terminalInputOf({ device: { caps: { "terminal.keys": true }, terminal_keys_until: 9 } })).toEqual({ ...off, keys: { enabled: true, until: 9 }, prompts: off });
+    expect(terminalInputOf({ device: { caps: { "terminal.keys": 1 }, terminal_keys_until: "x" } })).toEqual({ ...off, keys: off, prompts: off });
+    // prompt.answer (CV7), which Stop (CV8) needs, is read on its own too.
+    expect(terminalInputOf({ device: { caps: { "prompt.answer": true }, prompt_answer_until: 7 } })).toEqual({ ...off, keys: off, prompts: { enabled: true, until: 7 } });
+    expect(terminalInputOf({ device: { caps: { "prompt.answer": "true" } } })).toEqual({ ...off, keys: off, prompts: off });
   });
 });
 

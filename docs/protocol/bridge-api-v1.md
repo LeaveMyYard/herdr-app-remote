@@ -92,7 +92,7 @@ Checked by the bridge for every `act`:
 | `terminal.keys` | off; turned on from the desktop only, can expire (S16b) | `terminal.keys` |
 | `push` | off | `push.subscribe`, `push.unsubscribe` |
 | `transcript.read` | off; turned on from the desktop only, no expiry (CV1) | no `act`; the transcript topics `chatview:<t>` and `timeline:<t>` and `GET /api/v1/chatview/<t>` (below) |
-| `prompt.answer` | off; turned on from the desktop only, can expire (CV7) | `prompt.answer` (and `agent.stop`, CV8) |
+| `prompt.answer` | off; turned on from the desktop only, can expire (CV7) | `prompt.answer` and `agent.stop` (CV8) |
 
 There is no generic `run`, no `exec` and no arbitrary `herdr-app do`. Any other kind is refused and logged.
 
@@ -120,6 +120,7 @@ Per approved device, on top of the pairing limit above:
 | `terminal.send` (counted once the capability allows it) | 6 per 10 s | `res` `rate_limited` |
 | `terminal.keys` (counted once the capability allows it) | 10 per 10 s | `res` `rate_limited` |
 | `prompt.answer` (counted once the capability allows it) | 6 per 10 s | `res` `rate_limited` |
+| `agent.stop` (counted once the capability allows it; plus a 3 s cooldown per terminal) | 6 per 10 s | `res` `rate_limited` (`cooldown` for the terminal's) |
 | `GET /api/v1/chatview/<t>` (counted once the capabilities allow it) | 20 per 10 s | `429 rate_limited` |
 
 A refusal for a limit is written to Activity once per filled window, not once per attempt, so a looping client can't flood the log. The windows slide: the next attempt is allowed once the oldest counted one is older than the window.
@@ -128,7 +129,7 @@ A refusal for a limit is written to Activity once per filled window, not once pe
 
 `activity.jsonl` (mode 0600, rotated at 1 MiB, 3 old files kept) records pairing, approvals, revocations, capability changes, pause, connections and every `act` with its outcome. Entries never hold free text or terminal input. They carry identifiers and lengths only, plus, for an answer, the option label the bridge resolved from its own inbox data. A label sent by the client is never logged. Examples: "Phone 1 sent 12 chars to t3", "Phone 1 answered Q119 (Option B)".
 
-A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send`, `terminal.keys` and `prompt.answer` are refused (`audit_unavailable`) while the log is failing, because their audit line is their whole safeguard; the refusal's own line is the probe that clears the flag. So are a chat open (`stale audit_unavailable`) and an older chat page (`503 audit_unavailable`, CV3), whose lines are their record.
+A write to `activity.jsonl` that fails (a full disk, a broken file) is flagged: the desktop panel's Status shows "Activity log can't be written" until a write goes through again, and the bridge logs `audit_health`. The action whose line was lost has already been decided and still completes. `terminal.send`, `terminal.keys`, `prompt.answer` and `agent.stop` are refused (`audit_unavailable`) while the log is failing, because their audit line is their whole safeguard; the refusal's own line is the probe that clears the flag. So are a chat open (`stale audit_unavailable`) and an older chat page (`503 audit_unavailable`, CV3), whose lines are their record.
 
 ### Web Push (S17)
 
@@ -295,6 +296,10 @@ Older items of an open chat view: up to `n` (default 50) items just before the i
 
 **`act prompt.answer {terminal, prompt_id, rev, choice}`** (`PromptAnswerArgs`) needs `prompt.answer`. `choice` is `{option: i}` (an index into `options`; not for a multi-select), `{picks: [i…]}` (a multi-select question's options, at least one, distinct) or `{other: text}` (a single-select question with `other`; 1 to 2000 characters, one line: no newline, tab or other control character, and not starting with `!`, `/` or `#`). While an answer runs in a terminal, `terminal.send` and `terminal.keys` into it answer `busy`. An Enter or Other send that hc held over 1 s for the desk is `unknown_effect` even when the prompt is gone. The bridge refuses with nothing pressed when the card is not the one it publishes now or the screen differs (`prompt_changed`; `prompt_moved` when the difference shows only after phase A pressed arrows or ticks, which decide nothing), the prompt left the screen (`prompt_gone`), another answer runs for the terminal or hc kept phase A waiting (`busy`), or the choice doesn't fit the card (`bad_choice`). It presses arrow keys (and space for a multi-select tick), reads the screen again, and presses Enter only when the cursor is on the expected row of the same prompt; an Other answer pastes the text with `hc send --force` only after a fresh read confirms the prompt's own Other field is active. A multi-select whose first Enter (on Submit) brings no review step, while the question is gone from the screen, is `unknown_effect`. After Enter, a prompt still on screen and a call still pending after 2 s is `unknown_effect` (`unknown_effect: true`); so are hc failures that may have pressed (`timeout`, `cancelled` when the device lost `prompt.answer`). Nothing is pressed again by itself. Activity: "Phone 1 answered a permission prompt in t3: option 1 of 3 (Yes)", "Phone 1 answered a question in t3: own answer (12 chars)"; never the command, question or Other text.
 
+### Stop: `agent.stop` (CV8)
+
+`docs/chatview.md` §3a.6. **`act agent.stop {terminal}`** (`AgentStopArgs`, nothing else) needs `prompt.answer`. The bridge presses Esc once (`hc keys --json -- <t> esc`), never `hc send` and never `--force`, under the per-terminal lock it shares with `prompt.answer` (while either runs, the other and `terminal.send`/`terminal.keys` into that terminal answer `busy`); while a `terminal.send` or `terminal.keys` into the terminal is in flight, Stop answers `busy` too. It refuses with nothing pressed when: a Stop was pressed in that terminal less than 3 s ago (`cooldown`, from the end of the press; a margin: in the rig two Escs 300 ms apart opened Claude Code's Rewind menu, one second Esc 0.3 to 3.5 s after an interrupt did not); no chat view of the terminal is open and bound (`not_open`); the host says blocked, or a prompt card is published, or a fresh screen shows a prompt block (`prompt_open`: Esc would cancel the prompt); the composer holds unsent desk text (`desk_draft`); the host does not say working, or the screen's last line lacks the footer segment "esc to interrupt" (`not_working`); the screen can't be read (`screen_unreadable`). The state is checked again after the read. A press hc held over 1 s for the desk is `unknown_effect`; so is a footer still saying "esc to interrupt" 2 s after the press, and hc failures that may have pressed (`timeout`, `cancelled` when the device lost `prompt.answer`). A press that timed out or was killed keeps the terminal locked 1 s more (`busy`), while hc is still being killed. Nothing is pressed again by itself. The result shows in `chatview:<t>` as a `status: "stopped"` item, made from Claude Code's own interrupt marker in the transcript. Activity: "Phone 1 stopped the agent in t3" (", held 2 s while the desk was typing").
+
 ### `terminal.keys` and the `keys` topic (S16b)
 
 Special keys (Esc, Tab, Shift-Tab, Ctrl-C, arrows) are pressed from a menu the desktop defines. The phone names a menu entry; it never sends key names, so the menu is the whole of what a phone can press.
@@ -360,7 +365,7 @@ Special keys (Esc, Tab, Shift-Tab, Ctrl-C, arrows) are pressed from a menu the d
 | `paused` | remote access is paused |
 | `internal_error` | the handler threw; always with `unknown_effect: true` |
 | `rate_limited` | the device is over a rate limit (see Rate limits) |
-| `audit_unavailable` | `terminal.send`, `terminal.keys` or `prompt.answer` while Activity can't be written |
+| `audit_unavailable` | `terminal.send`, `terminal.keys`, `prompt.answer` or `agent.stop` while Activity can't be written |
 
 The device is re-checked before every `act`, so a revoke or pause refuses the next one. An `act` that is already running when it lands still completes.
 

@@ -21,6 +21,7 @@ import { DEFAULT_BINARIES, type Binaries } from "../plugins/detect.js";
 import type { Runner, RunResult } from "../plugins/exec.js";
 import { readHc } from "../terminal/hc-act.js";
 import { isReview, matchPrompt, REVIEW_TITLE, type Match, type PendingTool } from "./match.js";
+import { TerminalLocks } from "./lock.js";
 import { confirmOtherField, otherSendArgs } from "./other.js";
 import { parseScreen, PROMPT_READ_LINES } from "./screen.js";
 
@@ -75,6 +76,8 @@ export interface PromptAnswerOptions {
   postCheckMs?: number;
   /** See {@link HELD_MS}. */
   heldMs?: number;
+  /** The per-terminal lock, shared with `agent.stop` (CV8). Default: a lock of its own. */
+  locks?: TerminalLocks;
 }
 
 /** The refusal or result codes of this act (bridge-api PROMPT_ANSWER_CODES, plus hc's own). */
@@ -123,7 +126,7 @@ export interface PromptAnswerActor extends Actor {
 }
 
 export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
-  const locks = new Set<string>();
+  const locks = o.locks ?? new TerminalLocks();
   const inflight = new Map<string, Set<AbortController>>();
   /** Answers that pressed at least one key (`prompt_moved` instead of `prompt_changed`). */
   const pressed = new WeakSet<AbortSignal>();
@@ -136,9 +139,8 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     const parsed = bridgeApi.PromptAnswerArgs.safeParse(args);
     if (!parsed.success) return { ok: false, code: "bad_args" };
     const a = parsed.data;
-    // One answer at a time per terminal, whichever device sends it.
-    if (locks.has(a.terminal)) return { ok: false, code: "busy" };
-    locks.add(a.terminal);
+    // One answer (or Stop, CV8) at a time per terminal, whichever device sends it.
+    if (!locks.take(a.terminal)) return { ok: false, code: "busy" };
     const device = client.principal?.deviceId ?? "";
     const ac = new AbortController();
     let set = inflight.get(device);
@@ -150,7 +152,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
       if (e instanceof Aborted) return { ok: false, code: "cancelled", unknown_effect: true };
       throw e;
     } finally {
-      locks.delete(a.terminal);
+      locks.release(a.terminal);
       set.delete(ac);
       if (set.size === 0) inflight.delete(device);
     }

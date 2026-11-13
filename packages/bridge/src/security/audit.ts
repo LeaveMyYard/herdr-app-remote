@@ -91,6 +91,11 @@ export function describeAct(kind: string, args: Record<string, unknown>, label?:
       const at = target("terminal", "a terminal");
       return `answered ${what || "a prompt"} in ${at}${detail ? `: ${detail}` : ""}`;
     }
+    case "agent.stop": {
+      // CV8: the bridge's own words only ("held 2 s while the desk was typing"); the phone sends nothing else.
+      const detail = label !== undefined ? cleanLabel(label, 80) : "";
+      return `stopped the agent in ${target("terminal", "a terminal")}${detail ? `, ${detail}` : ""}`;
+    }
     case "inbox.answer": {
       const what = labelOrLength(label, args);
       return `answered ${inboxTarget(args, "a question")}${what}`;

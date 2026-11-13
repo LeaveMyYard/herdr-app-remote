@@ -109,6 +109,8 @@ export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([
   ["terminal.keys", { max: 10, windowMs: 10_000 }],
   // CV7: answering a native prompt (docs/chatview.md §3a.4).
   ["prompt.answer", { max: 6, windowMs: 10_000 }],
+  // CV8: Stop. Each terminal also has its own 3 s cooldown (prompt/stop.ts).
+  ["agent.stop", { max: 6, windowMs: 10_000 }],
 ]);
 /**
  * Refused transcript subscriptions written to Activity per device per window (CV1). A phone with chat history off
@@ -116,7 +118,7 @@ export const KIND_LIMITS: ReadonlyMap<string, Limit> = new Map([
  */
 export const TOPIC_REFUSAL_LOG_LIMIT: Limit = { max: 4, windowMs: 60_000 };
 /** Kinds that must not run while the Activity log can't be written: their whole safeguard is the audit line. */
-const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send", "terminal.keys", "prompt.answer"]);
+const NEEDS_AUDIT: ReadonlySet<string> = new Set(["terminal.send", "terminal.keys", "prompt.answer", "agent.stop"]);
 /** Kinds the security layer answers itself, never handed to the inner handler. */
 const LOCAL_KINDS: ReadonlySet<string> = new Set(["pair.transfer"]);
 /** What Activity calls each transcript topic ("Phone 1 opened the chat of t3"). A new prefix must be named here. */

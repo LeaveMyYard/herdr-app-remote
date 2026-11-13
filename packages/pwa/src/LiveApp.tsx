@@ -245,6 +245,17 @@ export function LiveApp({
               return r;
             },
           },
+          // CV8: Stop in the chat view's composer (`agent.stop`, under `prompt.answer`). Never retried.
+          stop: {
+            enabled: typing.view.prompts?.enabled === true,
+            press: async () => {
+              const r = await client.act("agent.stop", { terminal });
+              if (!r.ok && r.code === "forbidden") typing.refresh();
+              // It may have stopped the agent: show the chat view as it is now.
+              if (r.unknown_effect && viewName) client.refresh(viewName);
+              return r;
+            },
+          },
           send: async (text) => {
             const r = await client.act("terminal.send", { terminal, text });
             // The desktop turned it off (or it ran out): read the device again, so the composer goes.

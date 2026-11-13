@@ -46,6 +46,22 @@ describe("recorded Claude Code prompt screens (H0)", () => {
     expect(screen("plan")).toMatch(/❯ 1\. Yes, and use auto mode\n {5}2\. Yes, manually approve edits\n {5}3\. Tell Claude what to change/);
   });
 
+  it("Stop (CV8): the agent-stop scenario pins the same version; Esc's working footer and its effects", () => {
+    const stop = readFileSync(join(root, "rig/scenarios/agent-stop.sh"), "utf8");
+    expect(/^PINNED_CLAUDE_VERSION=(\S+)$/m.exec(stop)?.[1]).toBe(pin);
+    const last = (n: string) => screen(n).trimEnd().split("\n").at(-1)!;
+    expect(last("stop-working-stream")).toMatch(/· esc to interrupt ·/);
+    expect(last("stop-working-tool")).toMatch(/· esc to interrupt ·/);
+    for (const n of ["stop-idle", "stop-stream-after-esc", "stop-tool-after-esc", "stop-permission-after-esc"]) expect(last(n)).not.toMatch(/esc to interrupt/);
+    expect(screen("stop-stream-after-esc")).toMatch(/Interrupted · What should Claude do instead\?/);
+    expect(screen("stop-after-stop-double-esc")).toMatch(/\n {3}Rewind\n/);
+    for (const n of ["stop-second-esc-300ms", "stop-second-esc-3500ms"]) expect(screen(n)).not.toMatch(/\n {3}Rewind\n/);
+    expect(JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")).stop.secondEsc.every((x: { rewind: boolean }) => !x.rewind)).toBe(true);
+    expect(last("stop-working-draft")).not.toMatch(/esc to interrupt/);
+    const m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
+    expect(m.stop.key).toMatch(/^esc, once/);
+  });
+
   it("carry no machine-specific paths", () => {
     for (const n of readdirSync(dir).filter((f) => f.endsWith(".txt")).map((f) => f.slice(0, -4))) expect(screen(n)).not.toMatch(/\/home\/|\.claude|\/mnt\//);
   });
