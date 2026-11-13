@@ -24,6 +24,7 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "bridge-api/chat": bridgeApi.ChatTopic,
   "bridge-api/chatview": bridgeApi.ChatviewTopic,
   "bridge-api/chatview-page": bridgeApi.ChatviewPage,
+  "bridge-api/timeline": bridgeApi.TimelineTopic,
   "bridge-api/setup": bridgeApi.SetupTopic,
   "bridge-api/push-payload": bridgeApi.PushPayload,
   "bridge-api/push-subscribe": bridgeApi.PushSubscribeArgs,

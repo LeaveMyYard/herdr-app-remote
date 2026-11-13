@@ -833,11 +833,12 @@ export class Security {
     const chat = topic.slice(0, sep) === "chatview";
     const term = safeId(topic.slice(sep + 1)) ?? "a terminal";
     if (needs.every((c) => hasCap(d.caps, c, now))) {
-      // CV3: a granted chat open is in Activity once per subscription (not for a re-`sub` of the one it holds, nor a
-      // recheck). Its audit line is its safeguard, as for `terminal.send`: if Activity can't record it, it is refused.
-      if (chat && mode === "sub") {
+      // CV3/CV5: a granted chat or timeline open is in Activity once per subscription (not for a re-`sub` of the one
+      // it holds, nor a recheck). Its audit line is its safeguard, as for `terminal.send`: if Activity can't record
+      // it, it is refused.
+      if (mode === "sub") {
         try {
-          this.audit({ event: "topic", device: d.name, text: `${d.name} opened the chat of ${term}`, ok: true });
+          this.audit({ event: "topic", device: d.name, text: `${d.name} opened ${chat ? "the chat" : "the timeline"} of ${term}`, ok: true });
         } catch {
           return "audit_unavailable";
         }

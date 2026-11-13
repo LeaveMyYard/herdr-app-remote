@@ -34,7 +34,8 @@
         "header": null,
         "multi": false,
         "options": []
-      }
+      },
+      "tool_use_id": "toolu_01FakeAskOperator123"
     }
   ],
   "older": true,

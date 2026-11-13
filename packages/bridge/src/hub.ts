@@ -118,6 +118,8 @@ export class Hub {
   private readonly retired = new Map<string, number>();
   private readonly conns = new Set<ConnState>();
   private readonly prefixWatchers = new Set<{ prefix: string; fn: (topic: string, count: number) => void }>();
+  /** Bridge-side listeners of a topic's value (CV5: the timeline follows the inbox, panorama and chat view topics). */
+  private readonly valueWatchers = new Map<string, Set<() => void>>();
   private readonly onAct: ActHandler | undefined;
   private readonly mayRead: TopicGate;
 
@@ -176,6 +178,32 @@ export class Hub {
     };
   }
 
+  /**
+   * Calls `fn` after each publish that changes the value of `name` (or marks it stale). It never creates the topic
+   * and never counts as a subscriber. Returns a function that removes the listener.
+   */
+  watchValue(name: string, fn: () => void): () => void {
+    let set = this.valueWatchers.get(name);
+    if (!set) this.valueWatchers.set(name, (set = new Set()));
+    set.add(fn);
+    return () => {
+      set.delete(fn);
+      if (set.size === 0 && this.valueWatchers.get(name) === set) this.valueWatchers.delete(name);
+    };
+  }
+
+  private notifyValue(name: string): void {
+    const set = this.valueWatchers.get(name);
+    if (!set) return;
+    for (const fn of [...set]) {
+      try {
+        fn();
+      } catch {
+        // A listener's failure is its own: the publish already happened.
+      }
+    }
+  }
+
   /** Forgets a topic nobody subscribes to, so an open-ended family (`chat:<t>`) does not keep its last value forever. */
   discard(name: string): void {
     const t = this.topics.get(name);
@@ -184,6 +212,7 @@ export class Hub {
       this.retired.delete(name);
       this.retired.set(name, t.seq);
       if (this.retired.size > 1024) this.retired.delete(this.retired.keys().next().value as string);
+      this.notifyValue(name);
     }
   }
 
@@ -200,6 +229,7 @@ export class Hub {
       t.data = data;
       t.stale = null;
       this.rebase(name, t);
+      this.notifyValue(name);
       return;
     }
     const ops = opts.ops ?? diff(t.data, data);
@@ -210,6 +240,7 @@ export class Hub {
     if (t.log.length > LOG_SIZE) t.log.shift();
     const msg: ServerMessage = { type: "patch", topic: name, seq: t.seq, ops };
     for (const c of t.subscribers) c.client.send(msg);
+    this.notifyValue(name);
   }
 
   /** Marks a topic stale; the last value stays. Idempotent per reason. */
@@ -219,6 +250,7 @@ export class Hub {
     t.stale = reason;
     const msg: ServerMessage = { type: "stale", topic: name, reason };
     for (const c of t.subscribers) c.client.send(msg);
+    this.notifyValue(name);
   }
 
   /** New seq, drop the patch log (replay across a snap is meaningless), snap everyone. */

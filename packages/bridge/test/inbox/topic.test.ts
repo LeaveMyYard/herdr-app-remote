@@ -60,6 +60,16 @@ describe("inbox topic: reading the feed", () => {
     expect(d.tokenFor("group:999")).toBeUndefined();
   });
 
+  it("keeps a group's ask_operator tool_use_id on the bridge (CV5), shape-checked, and never publishes it", async () => {
+    const { d, hub } = await started({
+      feed: feedDoc({ minor: 1, entries: [group(123, { tool_use_id: "toolu_01Abc-_9" }), group(127, { tool_use_id: "bad id!" }), alertEntry(456, { tool_use_id: "toolu_x" })] }),
+    });
+    expect(JSON.stringify(hub.get("inbox"))).not.toContain("toolu_");
+    expect(d.toolUseIdOf("group:123")).toBe("toolu_01Abc-_9");
+    expect(d.toolUseIdOf("group:127")).toBeUndefined();
+    expect(d.toolUseIdOf("alert:456")).toBeUndefined();
+  });
+
   it("is stale when the feed is older than 15 s, unstamped or from the future, and still shows it", async () => {
     for (const generated_at of [NOW / 1000 - 20, NOW / 1000 + 30, null]) {
       const { topic } = await started({ feed: feedDoc({ generated_at }) });

@@ -240,11 +240,11 @@ describe("opening a chat (Activity, §5.3)", () => {
     s.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3", "timeline:t3", "keys"] }));
     await s.next(2);
     expect(opens()).toHaveLength(1);
-    s.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3"] }));
+    s.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3", "timeline:t3"] }));
     await s.next(3);
     expect(opens()).toHaveLength(1);
-    // The timeline (CV5) is not a chat open.
-    expect(activity().some((t) => t.includes("timeline"))).toBe(false);
+    // The timeline (CV5) is its own open, once per subscription too.
+    expect(activity().filter((t) => t === "Phone 1 opened the timeline of t3")).toHaveLength(1);
     s.ws.close();
     const s2 = await socket(cookie);
     s2.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3"] }));

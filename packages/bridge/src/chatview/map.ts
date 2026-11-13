@@ -401,7 +401,9 @@ export function mapMessages(messages: readonly ClaudeMessage[], o: MapOptions = 
       }
       if (isInboxAsk(b.name)) {
         run = null;
-        push({ id: nextId(), role: "ask", at: m.at, ask: { via: "inbox", question: null, header: null, multi: false, options: [] } });
+        // The call's id lets the inbox's own row take this place (CV5); an id of another shape is left off.
+        const tid = bridgeApi.TOOL_USE_ID.test(b.id) ? { tool_use_id: b.id } : {};
+        push({ id: nextId(), role: "ask", at: m.at, ask: { via: "inbox", question: null, header: null, multi: false, options: [] }, ...tid });
         continue;
       }
       if (calls.has(b.id)) continue;
