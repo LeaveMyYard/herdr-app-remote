@@ -62,10 +62,10 @@ cat > "$rig/fakebin/tailscale" <<'EOT'
 FAKE_TS_FIXTURES=/mnt/r/bin/tailscale-fixtures exec node /mnt/r/bin/fake-tailscale.mjs /mnt/r/ts "$@"
 EOT
 chmod +x "$rig/fakebin/tailscale"
-# The operator's Claude Code config (~/.claude*, ~/.claude.json*) is hidden inside the rig: a scenario that runs the
+# The operator's Claude Code state (~/.claude*, ~/.claude.json*, ~/.cache/claude*, ~/.local/state/claude*; not ~/.local/share/claude, where the binary lives) is hidden inside the rig: a scenario that runs the
 # claude binary must never be able to read real credentials, settings or transcripts, even by a wrong path.
 claude_hide=""
-for p in "$HOME"/.claude "$HOME"/.claude-* "$HOME"/.claude.json*; do
+for p in "$HOME"/.claude "$HOME"/.claude-* "$HOME"/.claude.json* "$HOME"/.cache/claude "$HOME"/.cache/claude-* "$HOME"/.local/state/claude "$HOME"/.local/state/claude-*; do
   if [ -d "$p" ] && [ ! -L "$p" ]; then claude_hide="$claude_hide --tmpfs $p"
   elif [ -e "$p" ] || [ -L "$p" ]; then claude_hide="$claude_hide --ro-bind /dev/null $p"; fi
 done

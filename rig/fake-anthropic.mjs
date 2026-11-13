@@ -114,10 +114,6 @@ createServer((req, res) => {
     const allText = messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : (m.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\n'))).join('\n');
     const trigger = Object.keys(SCRIPTS).find((k) => allText.includes(k));
     const used = (name) => messages.some((m) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_use' && b.name === name));
-    const sys = JSON.stringify(body.system ?? '');
-    const planPath = (sys.match(/(\/[^\s"\\`]*\/plans\/[^\s"\\`]+\.md)/) ?? [])[1];
-    if (planPath && !globalThis.loggedPlan) { globalThis.loggedPlan = 1; log({ planPath, ctx: sys.slice(Math.max(0, sys.indexOf('plan file') - 200), sys.indexOf('plan file') + 600) }); }
-    if (process.env.H0_DUMP) appendFileSync(logPath + '.bodies', JSON.stringify(body) + '\n');
     log({ url, model, tools: toolNames.length, toolNames: toolNames.join(','), toolResult, trigger: trigger ?? null, stream: !!body.stream });
     const wantPlan = trigger === 'H0-PLAN';
     const planFile = (JSON.stringify(messages).match(/(\/[^\s"\\`]*\/plans\/[^\s"\\`]+\.md)/) ?? [])[1];

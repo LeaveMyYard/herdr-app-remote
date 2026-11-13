@@ -27,6 +27,7 @@ const readAsync = (t) => new Promise((res) => {
 const keys = (t, ...k) => hc('keys', t, ...k);
 const version = execFileSync('claude', ['--version'], { encoding: 'utf8' }).trim();
 check(`claude is the pinned version ${pinned} (re-record the fixtures and move the pin together)`, version.split(' ')[0] === pinned, version);
+if (version.split(' ')[0] !== pinned) { note({ aborted: 'version is not the pin' }); process.exit(1); }
 
 // Claude Code's state in the rig's private HOME: onboarding done, the project trusted, the fake key pre-approved.
 writeFileSync(join(home, '.claude.json'), JSON.stringify({
@@ -36,7 +37,7 @@ writeFileSync(join(home, '.claude.json'), JSON.stringify({
 }));
 writeFileSync(join(rig, 'bin/launch-claude.sh'), `#!/bin/sh
 cd ${project}
-export ANTHROPIC_BASE_URL=http://127.0.0.1:${port} ANTHROPIC_API_KEY=sk-ant-api03-fakefakefakefakefakefakefakefake
+export ANTHROPIC_BASE_URL=http://127.0.0.1:${port} ANTHROPIC_API_KEY=fakekey-fakefakefakefakefake
 export DISABLE_TELEMETRY=1 DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 exec claude "$@"
 `, { mode: 0o755 });
@@ -51,11 +52,11 @@ const transcriptLines = () => {
   }
   return lines;
 };
-const pendingToolUse = (name) => {
+const pendingToolUse = (name, ignore = new Set()) => {
   const lines = transcriptLines();
   const done = new Set();
   for (const l of lines) for (const b of (Array.isArray(l.message?.content) ? l.message.content : [])) if (b.type === 'tool_result') done.add(b.tool_use_id);
-  for (const l of lines) if (l.type === 'assistant') for (const b of l.message.content ?? []) if (b.type === 'tool_use' && b.name === name && !done.has(b.id)) return b.id;
+  for (const l of lines) if (l.type === 'assistant') for (const b of l.message.content ?? []) if (b.type === 'tool_use' && b.name === name && !done.has(b.id) && !ignore.has(b.id)) return b.id;
   return null;
 };
 
@@ -78,7 +79,9 @@ const save = (name, text) => writeFileSync(join(out, `${name}.txt`), text.replac
 async function r5(t, toolName, marker, trigger) {
   let tFile = null;
   let id = null;
-  const timer = setInterval(() => { if (tFile === null && (id = pendingToolUse(toolName))) tFile = Date.now(); }, 5);
+  // Only tool_use ids that appear after the trigger is sent count (an earlier pending one would pass vacuously).
+  const old = new Set(transcriptLines().filter((l) => l.type === 'assistant').flatMap((l) => (l.message.content ?? []).filter((b) => b.type === 'tool_use').map((b) => b.id)));
+  const timer = setInterval(() => { if (tFile === null && (id = pendingToolUse(toolName, old))) tFile = Date.now(); }, 5);
   hc('send', t, trigger);
   const end = Date.now() + 30000;
   let screen = '';
@@ -89,7 +92,7 @@ async function r5(t, toolName, marker, trigger) {
   }
   clearInterval(timer);
   await sleep(0);
-  if (tFile === null && (id = pendingToolUse(toolName))) tFile = Date.now() + 1e9; // seen only after the screen
+  if (tFile === null && (id = pendingToolUse(toolName, old))) tFile = Date.now() + 1e9; // seen only after the screen
   return { screen, tFile, tScreen, id };
 }
 
@@ -132,7 +135,7 @@ async function dialogCase(name, args, trigger, tool, marker) {
   keys(t, 'down', 'down', 'down');
   await sleep(500);
   save('ask-other', read(t));
-  check('ask-single: Other row is the 4th option, "Type something."', /❯ 4\. Type something\./.test(read(t)));
+  check('ask-single: Other row is the 4th option (Type something.)', /❯ 4\. Type something\./.test(read(t)));
   const plain = spawnSync('hc', ['send', t, 'Project Alpha answer 1'], { encoding: 'utf8' });
   check('ask-single: plain hc send is refused while the terminal is blocked on its dialog', plain.status !== 0 && /"kind":"blocked"/.test(plain.stderr), plain.stderr.slice(0, 200));
   hc('send', '--force', t, 'Project Alpha answer 1');
@@ -181,7 +184,8 @@ writeFileSync(join(out, 'manifest.json'), `${JSON.stringify({
   keys: {
     multiSelectToggle: 'space or enter toggles the row under the cursor; down moves; Submit is the row after Other; Enter on it opens a review step with 1. Submit answers / 2. Cancel',
     other: 'hc send is refused while the terminal is blocked on a dialog (kind "blocked"); hc send --force on the Other row pastes the text and answers',
-    cursor: 'the row with the cursor starts with ❯',
+    cursor: 'the cursor ❯ must be searched only inside the block below the last full-width rule (the echoed user message also starts with ❯ at column 0); its column differs per dialog: 0 (ask), 1 (permission), 3 (plan)',
+    multiSelectPlusOther: 'NOT RECORDED: what typing on the "[ ] Type something" row of a multiSelect question does (checks the row? Enter toggles or submits?). CV7 must refuse {other} on a multiSelect question until this is recorded',
   },
   r5: cases,
 }, null, 2)}\n`);

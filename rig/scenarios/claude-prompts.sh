@@ -8,8 +8,8 @@ scenario_main() {
   hrc=$?
   # Isolation: the operator's real Claude config must be unreachable inside the rig (run.sh hides it).
   real_home=$(getent passwd "$(id -u)" | cut -d: -f6)
-  leak=$(find "$real_home"/.claude "$real_home"/.claude-* -mindepth 1 2>/dev/null | head -1)
-  assert_eq "$leak" "" "the real ~/.claude* dirs are empty inside the rig"
+  leak=$(find "$real_home"/.claude "$real_home"/.claude-* "$real_home"/.cache/claude "$real_home"/.cache/claude-* "$real_home"/.local/state/claude "$real_home"/.local/state/claude-* -mindepth 1 2>/dev/null | head -1)
+  assert_eq "$leak" "" "the real ~/.claude*, ~/.cache/claude*, ~/.local/state/claude* dirs are empty inside the rig"
   [ ! -s "$real_home/.claude.json" ] && pass "the real ~/.claude.json is empty inside the rig" || fail "real ~/.claude.json readable"
   kill $FAKE
   while IFS= read -r line; do

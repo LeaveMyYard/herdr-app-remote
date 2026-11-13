@@ -19,32 +19,33 @@
   "keys": {
     "multiSelectToggle": "space or enter toggles the row under the cursor; down moves; Submit is the row after Other; Enter on it opens a review step with 1. Submit answers / 2. Cancel",
     "other": "hc send is refused while the terminal is blocked on a dialog (kind \"blocked\"); hc send --force on the Other row pastes the text and answers",
-    "cursor": "the row with the cursor starts with ❯"
+    "cursor": "the cursor ❯ must be searched only inside the block below the last full-width rule (the echoed user message also starts with ❯ at column 0); its column differs per dialog: 0 (ask), 1 (permission), 3 (plan)",
+    "multiSelectPlusOther": "NOT RECORDED: what typing on the \"[ ] Type something\" row of a multiSelect question does (checks the row? Enter toggles or submits?). CV7 must refuse {other} on a multiSelect question until this is recorded"
   },
   "r5": [
     {
       "name": "permission",
       "tool": "Bash",
       "tool_use_before_dialog": true,
-      "lead_ms": 427
+      "lead_ms": 426
     },
     {
       "name": "ask-single",
       "tool": "AskUserQuestion",
       "tool_use_before_dialog": true,
-      "lead_ms": 430
+      "lead_ms": 434
     },
     {
       "name": "ask-multi",
       "tool": "AskUserQuestion",
       "tool_use_before_dialog": true,
-      "lead_ms": 428
+      "lead_ms": 414
     },
     {
       "name": "plan",
       "tool": "ExitPlanMode",
       "tool_use_before_dialog": true,
-      "lead_ms": 418
+      "lead_ms": 413
     }
   ]
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -47,6 +47,6 @@ describe("recorded Claude Code prompt screens (H0)", () => {
   });
 
   it("carry no machine-specific paths", () => {
-    for (const n of ["permission", "ask-single", "ask-multi", "plan"]) expect(screen(n)).not.toMatch(/\/home\/|\.claude|\/mnt\//);
+    for (const n of readdirSync(dir).filter((f) => f.endsWith(".txt")).map((f) => f.slice(0, -4))) expect(screen(n)).not.toMatch(/\/home\/|\.claude|\/mnt\//);
   });
 });
