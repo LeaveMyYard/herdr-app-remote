@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { detectDeficit, installIosVpFix, type VpInput } from "../src/ios-vp-fix";
 
 // Measured on an iPhone, iOS 26.6.1, standalone.
@@ -21,8 +21,13 @@ describe("detectDeficit", () => {
 describe("installIosVpFix", () => {
   let cleanup: () => void = () => undefined;
   const fix = () => document.documentElement.style.getPropertyValue("--ios-vp-fix");
+  beforeEach(() => {
+    // jsdom has no elementFromPoint; give the spies something to wrap.
+    document.elementFromPoint = () => null;
+  });
   afterEach(() => {
     cleanup();
+    delete (document as { elementFromPoint?: unknown }).elementFromPoint;
     document.body.innerHTML = "";
     vi.restoreAllMocks();
   });
