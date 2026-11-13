@@ -36,7 +36,7 @@ describe("every route renders inside the one app frame (.ph, extended by --ios-v
 
   it("chat has no frame-level height of its own and its read-only footer is not a fixed slot", () => {
     const app = css("app.css");
-    expect(app).toContain(".ph{position:fixed;inset:var(--kb-top, 0px) 0 var(--kb-bottom, calc(-1 * var(--ios-vp-fix, 0px))) 0;");
+    expect(app).toContain(".ph{position:fixed;inset:0 0 calc(-1 * var(--ios-vp-fix, 0px)) 0;");
     const foot = css("chat.css").match(/^\.chat-foot\{([^}]*)\}/m)?.[1] ?? "";
     expect(foot).not.toMatch(/(^|;)\s*height:/);
     expect(foot).toContain("calc(var(--sab) + 8px)");
