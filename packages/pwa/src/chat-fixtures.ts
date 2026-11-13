@@ -131,10 +131,12 @@ export interface ChatviewDemo {
 }
 
 /**
- * The board's timeline (PhoneChatView, every state: the strip; "Typing off": the question after the last reply;
+ * The board's timeline (PhoneChatView, every state: the strip, account only in "New"; "Typing off": the question after the last reply;
  * "History": the alert after yesterday's last reply). Placed by `at` among the demo items, as the live ones are.
  */
-function demoTimeline(state: "chat" | "off" | "history"): bridgeApi.TimelineTopic {
+function demoTimeline(state: "chat" | "off" | "history" | "new"): bridgeApi.TimelineTopic {
+  // "New": a fresh session with no panorama root has only the account chip.
+  if (state === "new") return { terminal: "t2", strip: [boardAccount], items: [] };
   const strip = [boardStrip, boardAccount];
   if (state === "off") {
     const asked = iso(today(21, 12, 12));
@@ -167,7 +169,7 @@ export function chatviewDemo(state: string | null): ChatviewDemo | null {
         timeline: demoTimeline("history"),
       };
     case "new":
-      return { mode: { kind: "chat" }, topic: { ...base, items: [], status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent: { name: "Agent 5", folder: "~/code/alpha", harness: "claude", status: "idle" } };
+      return { mode: { kind: "chat" }, topic: { ...base, items: [], status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent: { name: "Agent 5", folder: "~/code/alpha", harness: "claude", status: "idle" }, timeline: demoTimeline("new") };
     case "off":
       return { mode: { kind: "chat" }, topic: { ...base, items: todayItems.slice(2, 5), status: working }, input: input(false), now: () => clock, agent, timeline: demoTimeline("off") };
     case "codex":

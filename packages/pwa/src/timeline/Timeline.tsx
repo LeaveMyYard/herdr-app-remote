@@ -2,7 +2,7 @@
 // states "Typing off" and "History"; docs/chatview.md §4). Every act is the inbox's own (`inbox.answer`,
 // `inbox.dismiss`, `inbox.ack`, `inbox.retry`), sent for the row as the bridge published it (`key` + `rev`), with
 // the inbox's arm delays: a row takes no tap for a second after it arrives or changes, and a refusal re-arms it.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import { offlineAct, resultWords, type ActFn, type ActResult } from "../inbox/act";
 import { GRACE_MS, ROW_ARM_MS, useArmed, VIEW_ARM_MS } from "../inbox/arm";
@@ -235,14 +235,15 @@ function FallbackRow({ item }: { item: TimelineItem }) {
 
 const LONG_PRESS_MS = 500;
 
-/** The strip under the chat header: the panorama root's subagents ("6 subagents ›"), linked to Swarm. */
-export function TimelineStrip({ strip }: { strip: readonly bridgeApi.StripItem[] }) {
+/** The strip under the chat header: the panorama root's subagents ("6 subagents ›"), linked to Swarm; `end` goes last (the text view's Aa). */
+export function TimelineStrip({ strip, end }: { strip: readonly bridgeApi.StripItem[]; end?: ReactNode }) {
   if (strip.length === 0) return null;
   return (
     <div className="row nf tl-strip">
       {strip.map((s) => (
         <StripEntry key={s.key} item={s} />
       ))}
+      {end}
     </div>
   );
 }

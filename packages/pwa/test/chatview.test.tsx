@@ -36,6 +36,28 @@ const tools = (id: string, kind: bridgeApi.ToolKind, count: number, o: { running
 });
 const view = (t: bridgeApi.ChatviewTopic, p: Partial<Parameters<typeof ChatView>[0]> = {}) => render(<HostNameProvider name="desk-1"><ChatView agent={agent} topic={t} now={() => NOW} {...p} /></HostNameProvider>);
 
+/** Linear is about 4 and quadratic about 16; the bound sits between them with room for noise on a shared runner. */
+const GROWTH_MAX = 10;
+/**
+ * How much longer `run` takes on the full input than on a quarter of it, each the best of three runs after a warm-up.
+ * A quarter-size run under 1 ms counts as 1 ms, so timer noise on a tiny run can't make a large ratio.
+ */
+function growth(make: (k: number) => string, run: (text: string) => void): number {
+  const best = (text: string) => {
+    let min = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const t0 = performance.now();
+      run(text);
+      min = Math.min(min, performance.now() - t0);
+    }
+    return min;
+  };
+  const small = make(0.25);
+  const full = make(1);
+  run(small);
+  return best(full) / Math.max(best(small), 1);
+}
+
 describe("markdown", () => {
   it("never makes elements from raw html, and keeps it as text", () => {
     const { container } = render(<Markdown text={'<img src=x onerror="alert(1)"><script>alert(1)</script>\n\n<b>bold</b>'} />);
@@ -77,46 +99,44 @@ describe("markdown", () => {
     expect(a2?.textContent).toBe("https://ok.example");
   });
 
-  // Each case is one hostile line of at most 32 KB; a cubic or quadratic pattern takes seconds, a linear scan well under this.
-  const HOSTILE: [string, string][] = [
-    ["heading with a space run", "## Results" + " ".repeat(16000) + "done"],
-    ["heading with a hash and space run", "# a" + " #".repeat(8000) + " ".repeat(8000) + "x"],
-    ["fence with a space run", "```" + " ".repeat(32000) + "!"],
-    ["table separator candidate", "a | b\n" + "|" + " ".repeat(32000) + "x"],
-    ["table separator of dashes and spaces", "a | b\n" + "- ".repeat(16000)],
-    ["rule of spaced marks", "- - - " + " ".repeat(32000) + "x"],
-    ["brackets", "[".repeat(32768)],
-    ["stars", "*".repeat(32768)],
-    ["backticks", "`".repeat(32768)],
-    ["open links", "[a](".repeat(8000)],
-    ["empty brackets", "[]".repeat(16384)],
-    ["brackets with a stray close", "[a]]".repeat(8000)],
-    ["links with no closing paren", "[](".repeat(10000)],
-    ["stars before spaces", "*a *".repeat(8000)],
-    ["open bold", "**a ".repeat(8000)],
-    ["list markers", "- ".repeat(16000)],
-    ["quote markers", "> ".repeat(16000)],
-    ["nested lists", Array.from({ length: 600 }, (_, i) => " ".repeat(i % 40) + "- x").join("\n")],
+  // Each case is one hostile line of at most 32 KB at full size (k = 1). Wall-clock bounds flaked on shared CI
+  // runners, so the cases are timed by growth instead: four times the input should take about four times as long
+  // (linear), where a quadratic scan takes sixteen times. The best of three runs keeps a slow run from counting.
+  const HOSTILE: [string, (k: number) => string][] = [
+    ["heading with a space run", (k) => "## Results" + " ".repeat(16000 * k) + "done"],
+    ["heading with a hash and space run", (k) => "# a" + " #".repeat(8000 * k) + " ".repeat(8000 * k) + "x"],
+    ["fence with a space run", (k) => "```" + " ".repeat(32000 * k) + "!"],
+    ["table separator candidate", (k) => "a | b\n" + "|" + " ".repeat(32000 * k) + "x"],
+    ["table separator of dashes and spaces", (k) => "a | b\n" + "- ".repeat(16000 * k)],
+    ["rule of spaced marks", (k) => "- - - " + " ".repeat(32000 * k) + "x"],
+    ["brackets", (k) => "[".repeat(32768 * k)],
+    ["stars", (k) => "*".repeat(32768 * k)],
+    ["backticks", (k) => "`".repeat(32768 * k)],
+    ["open links", (k) => "[a](".repeat(8000 * k)],
+    ["empty brackets", (k) => "[]".repeat(16384 * k)],
+    ["brackets with a stray close", (k) => "[a]]".repeat(8000 * k)],
+    ["links with no closing paren", (k) => "[](".repeat(10000 * k)],
+    ["stars before spaces", (k) => "*a *".repeat(8000 * k)],
+    ["open bold", (k) => "**a ".repeat(8000 * k)],
+    ["list markers", (k) => "- ".repeat(16000 * k)],
+    ["quote markers", (k) => "> ".repeat(16000 * k)],
+    ["nested lists", (k) => Array.from({ length: 600 * k }, (_, i) => " ".repeat(i % 40) + "- x").join("\n")],
   ];
-  for (const [name, text] of HOSTILE) {
+  for (const [name, make] of HOSTILE) {
     it(`stays linear on ${name}`, () => {
-      const t0 = performance.now();
-      render(<Markdown text={text} />).unmount();
-      expect(performance.now() - t0).toBeLessThan(150);
+      expect(growth(make, (text) => render(<Markdown text={text} />).unmount())).toBeLessThan(GROWTH_MAX);
     });
   }
   // A code, bold or strike opener is itself the mark it looks for, so its search stops at the next opener. These
   // inputs make thousands of elements, so the scan is timed without the DOM.
-  const OPENERS: [string, string][] = [
-    ["backtick runs of mixed length", "``a`".repeat(8000)],
-    ["bold openers among single stars", "**a*".repeat(8000)],
-    ["strike openers among single tildes", "~~a~".repeat(8000)],
+  const OPENERS: [string, (k: number) => string][] = [
+    ["backtick runs of mixed length", (k) => "``a`".repeat(8000 * k)],
+    ["bold openers among single stars", (k) => "**a*".repeat(8000 * k)],
+    ["strike openers among single tildes", (k) => "~~a~".repeat(8000 * k)],
   ];
-  for (const [name, text] of OPENERS) {
+  for (const [name, make] of OPENERS) {
     it(`scans linearly on ${name}`, () => {
-      const t0 = performance.now();
-      inline(text);
-      expect(performance.now() - t0).toBeLessThan(250);
+      expect(growth(make, (text) => void inline(text))).toBeLessThan(GROWTH_MAX);
     });
   }
   it("renders a heading and a fence the same as before the hand-written scan", () => {

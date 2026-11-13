@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import type { OlderResult } from "../bridge/chatview";
 import { useHostName } from "../bridge/host-name";
@@ -7,10 +7,16 @@ import { renderDefaultItem, Spinner, type ItemCtx } from "../chatview/Items";
 import * as W from "../chatview/words";
 import { ChatHead, useInputOn, type ChatAgent } from "./Chat";
 import { ChatComposer, clockOf, type ChatInput } from "./ChatComposer";
-import { usePlaced, TimelineRows, type InlineTimeline } from "../timeline/inline";
+import { timelineRow, usePlaced, type InlineTimeline } from "../timeline/inline";
 import * as K from "./keys-words";
 
 type Item = bridgeApi.ChatItem;
+
+/**
+ * The row under the header. As a function it is given the text view's Aa (`end`) to draw on that row, as the board
+ * does when there is a strip; the chat view has no Aa and passes null.
+ */
+export type StripSlot = ReactNode | ((end: ReactNode) => ReactNode);
 
 export interface ChatViewProps {
   agent: ChatAgent;
@@ -28,7 +34,7 @@ export interface ChatViewProps {
    * every item: `undefined` means "draw the default", which it gets as `draw()`. `tail` comes after the last item,
    * before the status line.
    */
-  strip?: ReactNode;
+  strip?: StripSlot;
   tail?: ReactNode;
   /** A native prompt is open (CV7): the composer waits. */
   locked?: boolean;
@@ -201,13 +207,35 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
 
   const ctx: ItemCtx = { agent: agent.short ?? agent.name, working, now: t0 };
   const placed = usePlaced(items, timeline);
-  const rows = (list: readonly bridgeApi.TimelineItem[] | undefined) => (timeline && list ? <TimelineRows items={list} act={timeline.act} now={t0} /> : null);
+  // Chat items and timeline rows as one flat, keyed list: a timeline row that moves (a newer message arrives, its
+  // anchored ask loads, an older page goes in above) keeps its component, so an act in flight stays in flight.
+  const listRows: ReactNode[] = [];
+  const addRows = (list: readonly bridgeApi.TimelineItem[] | undefined) => {
+    if (timeline && list) for (const t of list) listRows.push(timelineRow(t, timeline.act, t0));
+  };
+  items.forEach((item, i) => {
+    addRows(placed?.before.get(item.id));
+    // An inbox ask the timeline anchored to is drawn as that item instead.
+    const swap = placed?.replace.get(item.id);
+    if (swap) return addRows([swap]);
+    const prev = items[i - 1];
+    const draw = () => renderDefaultItem(item, prev, ctx);
+    const node = renderItem?.(item, prev, draw) ?? draw();
+    if (node !== null && node !== undefined) {
+      listRows.push(
+        <div key={item.id} className="cv-item">
+          {node}
+        </div>,
+      );
+    }
+  });
+  addRows(placed?.tail);
   const typing = on && input && terminal !== undefined ? { input, terminal } : null;
   const empty = items.length === 0;
   return (
     <>
       <ChatHead roomy agent={agent} backHref={backHref} />
-      {strip}
+      {typeof strip === "function" ? strip(null) : strip}
       <main className="rel col f1 cv-main">
         <div ref={view} role="log" aria-label="Conversation" className="col f1 cv-scroll" tabIndex={0} onScroll={onScroll}>
           {empty ? (
@@ -218,47 +246,27 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
               <span className="cv-empty-t">{W.EMPTY_TITLE}</span>
               <span className="cv-empty-b">{W.emptyBody(agent.folder)}</span>
             </div>
-          ) : (
-            <div className="col cv-list">
-              {cur.older ? (
-                <div className="row cv-older">
-                  {loading ? (
-                    <span className="row cv-older-pill">
-                      <Spinner />
-                      {W.LOADING_OLDER}
-                    </span>
-                  ) : failed ? (
-                    <button type="button" className="row cv-older-pill" onClick={more}>
-                      {W.SHOW_OLDER}
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-              {items.map((item, i) => {
-                const prev = items[i - 1];
-                const draw = () => renderDefaultItem(item, prev, ctx);
-                // An inbox ask the timeline anchored to is drawn as that item instead.
-                const swap = placed?.replace.get(item.id);
-                const node = swap ? null : (renderItem?.(item, prev, draw) ?? draw());
-                return (
-                  <Fragment key={item.id}>
-                    {rows(placed?.before.get(item.id))}
-                    {swap ? rows([swap]) : node === null || node === undefined ? null : <div className="cv-item">{node}</div>}
-                  </Fragment>
-                );
-              })}
-              {rows(placed?.tail)}
-              {tail}
-              <StatusLine status={topic.status} now={now} />
-            </div>
-          )}
-          {empty ? (
-            <>
-              {rows(placed?.tail)}
-              {tail}
-              <StatusLine status={topic.status} now={now} />
-            </>
           ) : null}
+          {/* One list element in every state, so a row keeps its place in the tree (and its state) when it moves. */}
+          <div className="col cv-list">
+            {!empty && cur.older ? (
+              <div className="row cv-older">
+                {loading ? (
+                  <span className="row cv-older-pill">
+                    <Spinner />
+                    {W.LOADING_OLDER}
+                  </span>
+                ) : failed ? (
+                  <button type="button" className="row cv-older-pill" onClick={more}>
+                    {W.SHOW_OLDER}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {listRows}
+            {tail}
+            <StatusLine status={topic.status} now={now} />
+          </div>
         </div>
         {away || fresh > 0 ? (
           <button type="button" className="row cv-jump" onClick={jump}>

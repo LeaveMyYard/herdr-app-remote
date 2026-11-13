@@ -24,7 +24,7 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[];
   { ref: "PhoneChat", url: "/?fixture=chat#/chat/a-1", nav: false },
   // PhoneKeys (S16b): the key bar, Keys sheet, typing-time line and ran-out footer are compared; the text stays masked.
   ...(["bar", "menu", "off", "soon", "gone"] as const).map((s) => ({ ref: `PhoneKeys-${s}`, url: `/?fixture=chat&typing=${s}#/chat/a-1`, nav: false, skip: [SWITCHER], compare: ".chat-foot" })),
-  // CV4: the chat view, with the timeline strip (CV5b) drawn and compared under the header. The Stop button (CV8) and
+  // CV4: the chat view, with the timeline strip (CV5b) drawn and compared under the header ("new": account chip only). The Stop button (CV8) and
   // prompt cards (CV7) are not drawn yet, so those parts are skipped. The other board states (history, off) have
   // items from CV7 and I1 (the answered row) or a different scroll position and are checked by eye (screenshots in
   // the PRs); Codex's notice card is compared.

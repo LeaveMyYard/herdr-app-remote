@@ -138,7 +138,8 @@ export function pluginRows(p: bridgeApi.PluginsTopic | undefined): PluginRow[] {
 
 /** The chat view's timeline slots (CV5): the strip under the header and the items inline, acting through `act`. */
 function timelineSlots(t: bridgeApi.TimelineTopic, act: ActFn): NonNullable<ChatRouteProps["slots"]> {
-  return { strip: <TimelineStrip strip={t.strip} />, timeline: { items: t.items, act } };
+  // The text view draws its Aa on the strip row (board "Codex"); with no strip it stays in the header.
+  return { ...(t.strip.length > 0 ? { strip: (end: ReactNode) => <TimelineStrip strip={t.strip} end={end} /> } : {}), timeline: { items: t.items, act } };
 }
 
 function parts(hash: string): string[] {

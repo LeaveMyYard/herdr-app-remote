@@ -1,6 +1,9 @@
 /* Timeline items and the strip (CV5), after design/PhoneChatView ("Typing off": the inline question; "History":
    the alert row; every state: the strip under the header). Values are the board's. */
-.tl-strip{padding:0 16px 6px;gap:8px;border-bottom:1px solid var(--t-border)}
+/* The board's strip row is 36 px tall above a 6 px pad and its rule, with or without the subagent link. */
+.tl-strip{min-height:43px;padding:0 16px 6px;gap:8px;border-bottom:1px solid var(--t-border)}
+/* In the text view the strip row also carries Aa (PhoneChatView "Codex"). */
+.hd .tl-strip .chat-fit{width:40px;height:30px;border-radius:8px}
 /* Under the chat header the strip is part of it (the board draws one rule, under the strip). */
 .chat-head:has(+ .tl-strip){border-bottom:0}
 .hd .tl-strip-link{min-width:0;height:36px;gap:4px;font-size:12px;color:var(--t-muted)}

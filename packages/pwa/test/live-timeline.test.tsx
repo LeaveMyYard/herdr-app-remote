@@ -12,6 +12,13 @@ import { FakeSocket } from "./fake-socket";
 const FIX = resolve(dirname(fileURLToPath(import.meta.url)), "../../../fixtures");
 const read = (p: string) => JSON.parse(readFileSync(resolve(FIX, p), "utf8")) as Record<string, unknown>;
 const HOST = read("host/typical.json");
+/** HOST plus a second Claude agent (agent-3 on term-3). */
+const HOST2 = {
+  ...HOST,
+  agents: [...(HOST.agents as unknown[]), { id: "agent-3", name: "Agent 3", harness: "claude", state: "working", space_id: "space-1", terminal_id: "term-3" }],
+  terminals: [...(HOST.terminals as unknown[]), { id: "term-3", title: "Agent 3", space_id: "space-1", cols: 120, rows: 40 }],
+  panes: [...(HOST.panes as unknown[]), { id: "pane-4", space_id: "space-1", terminal_id: "term-3", kind: "terminal" }],
+};
 const CHAT: Record<string, unknown> = { ...read("bridge-api/chatview/typical.json"), terminal: "term-1" };
 const TIMELINE = read("bridge-api/timeline/typical.json");
 const FIRST_YOU = "Hello Agent 1. Please look at Project Alpha and run the tests.";
@@ -39,7 +46,7 @@ const armed = async () => {
   await flush();
 };
 
-async function open(agent: string, pruneMs = 10_000) {
+async function open(agent: string, pruneMs = 10_000, host: unknown = HOST) {
   window.location.hash = "#/agents";
   client = new BridgeClient({
     url: "wss://desk-1.example-tailnet.ts.net/api/v1/ws",
@@ -59,7 +66,7 @@ async function open(agent: string, pruneMs = 10_000) {
     s.open();
     s.recv({ type: "welcome", api: 1, bridge: "0.0.0", epoch: "e1" });
   });
-  await snap(s, "host", 1, HOST);
+  await snap(s, "host", 1, host);
   await go(`#/chat/${agent}`);
   return s;
 }
@@ -133,6 +140,56 @@ describe("LiveApp timeline: subscription", () => {
     expect(screen.getByText(FIRST_YOU)).toBeInTheDocument();
     expect(screen.queryByText("6 subagents")).toBeNull();
     expect(document.querySelector("[data-timeline]")).toBeNull();
+  });
+});
+
+describe("LiveApp timeline: two Claude terminals", () => {
+  it("moving to another Claude agent gives up the first timeline and wants the second, and draws only its own", async () => {
+    const s = await open("agent-1", 40, HOST2);
+    await snap(s, "chatview:term-1", 1, CHAT);
+    await snap(s, "timeline:term-1", 1, TIMELINE);
+    expect(screen.getByText("6 subagents")).toBeInTheDocument();
+    await go("#/chat/agent-3");
+    expect(subs(s)).toContain("timeline:term-3");
+    expect(subs(s)).toContain("chatview:term-3");
+    // term-1's timeline is still held by the client until the prune, but it is not term-3's: nothing is drawn.
+    await snap(s, "chatview:term-3", 1, { ...CHAT, terminal: "term-3" });
+    expect(screen.queryByText("6 subagents")).toBeNull();
+    await snap(s, "timeline:term-3", 1, { ...TIMELINE, terminal: "term-3", strip: [], items: [] });
+    expect(document.querySelector("[data-timeline]")).toBeNull();
+    // Past the prune delay the socket is replaced and only term-3's topics are asked for again.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    const next = sockets.at(-1)!;
+    expect(next).not.toBe(s);
+    await act(async () => {
+      next.open();
+      next.recv({ type: "welcome", api: 1, bridge: "0.0.0", epoch: "e1" });
+    });
+    await flush();
+    expect(subs(next)).toContain("timeline:term-3");
+    expect(subs(next)).not.toContain("timeline:term-1");
+  });
+});
+
+describe("LiveApp timeline: the text view (Claude, chat source unavailable)", () => {
+  it("draws the strip with Aa on its row, not in the header", async () => {
+    const s = await open("agent-1");
+    await snap(s, "chatview:term-1", 1, { terminal: "term-1", harness: "claude", state: "unavailable", reason: "reader_failed", items: [], older: false, rev: "", status: { state: "idle", since: null } });
+    await snap(s, "timeline:term-1", 1, TIMELINE);
+    const strip = document.querySelector(".tl-strip") as HTMLElement;
+    expect(within(strip).getByRole("button", { name: "Fit width" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Fit width" })).toHaveLength(1);
+    expect(document.querySelector(".chat-head .chat-fit")).toBeNull();
+  });
+
+  it("keeps Aa in the header when the strip is empty", async () => {
+    const s = await open("agent-1");
+    await snap(s, "chatview:term-1", 1, { terminal: "term-1", harness: "claude", state: "unavailable", reason: "reader_failed", items: [], older: false, rev: "", status: { state: "idle", since: null } });
+    await snap(s, "timeline:term-1", 1, { ...TIMELINE, strip: [] });
+    expect(document.querySelector(".tl-strip")).toBeNull();
+    expect(document.querySelector(".chat-head .chat-fit")).not.toBeNull();
   });
 });
 
