@@ -370,6 +370,7 @@ function Question(p: CardProps) {
         <button type="button" className="row f1 pc-answer" disabled={off || (last ? !canSend : false)} onClick={submit}>
           {last ? W.ANSWER : W.nextPicked(mine.length)}
         </button>
+        {/* Skip moves to the next question and sends nothing; hidden on the last or only one (operator Q521, 2026-11-13). */}
         {last ? null : (
           <button type="button" className="row nf pc-skip" disabled={off} onClick={() => setAt(at + 1)}>
             {W.SKIP}

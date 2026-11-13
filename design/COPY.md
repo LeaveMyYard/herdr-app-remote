@@ -71,7 +71,7 @@ Rows for the Claude Code chat view, from `docs/chatview.md` §11. These rows are
 | ● | Panel: Chat history | `mod panel.js CAPS` | - | Chat history / Lets this phone read agents' conversations, not just the screen. | CV1 | capability `transcript.read`, off by default |
 | ● | Panel: Answer prompts | `mod panel.js CAPS` | - | Answer prompts / Lets this phone approve commands, answer Claude's questions and stop an agent. | CV7 | capability `prompt.answer`, off by default, with expiry |
 | ● | Card: permission | `new (CV7)` | - | PERMISSION · Allow this command? · Shell command · the screen's labels as buttons (Yes / Yes, and don't ask again for: cargo test * / No) · under No: Then tell Agent 1 what to do instead | CV7 | labels come from the screen, all pressable |
-| ● | Card: question | `new (CV7)` | - | QUESTION · Other: type your own answer… · [Answer] · Next: 2 picked · [Skip] | CV7 | answers only on Answer |
+| ● | Card: question | `new (CV7)` | - | QUESTION · Other: type your own answer… · [Answer] · Next: 2 picked · [Skip] | CV7 | answers only on Answer; Skip only moves to the next question, hidden on the last or only one (operator Q521, 2026-11-13) |
 | ● | Card: plan | `new (CV7)` | - | PLAN · Ready to start? · Show the whole plan › · the screen's labels · under "No, keep planning": Tell Agent 1 what to change | CV7 | auto-mode option pressable |
 | ● | Card: can't parse | `new (CV7)` | - | Agent 1 asks · the screen's lines, read-only · Answer it on desk-1. | CV7 | no buttons |
 | ● | Card: locked composer | `new (CV7)` | - | Answer the prompt above first | CV7 | - |
