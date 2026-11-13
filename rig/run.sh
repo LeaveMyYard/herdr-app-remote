@@ -48,7 +48,7 @@ cp "$here/sidecar.mjs" "$here/inner.sh" "$here/lib.sh" "$rig/bin/"
 repo=$(cd "$here/.." && pwd -P)
 mkdir -p "$rig/home/.config/herdr-app/mods/herdr-app-remote"
 cp "$repo"/mod/herdr-app-remote/*.js "$repo"/mod/herdr-app-remote/*.svg "$repo"/mod/herdr-app-remote/mod.json "$rig/home/.config/herdr-app/mods/herdr-app-remote/"
-cp "$here/link-harness.mjs" "$here/inbox-harness.mjs" "$here/panel-harness.mjs" "$here/pairing-harness.mjs" "$here/serve-standin.mjs" "$here/phone.mjs" "$here/terminal-harness.mjs" "$here/keys-harness.mjs" "$rig/bin/"
+cp "$here/link-harness.mjs" "$here/inbox-harness.mjs" "$here/panel-harness.mjs" "$here/pairing-harness.mjs" "$here/serve-standin.mjs" "$here/phone.mjs" "$here/terminal-harness.mjs" "$here/keys-harness.mjs" "$here/chat-harness.mjs" "$rig/bin/"
 # `tailscale` inside the rig is always the fake CLI (it replays recorded outputs and keeps its serve config in
 # $rig/ts); the real one is never reachable: tailscaled's socket dir is hidden below and the fake comes first.
 mkdir -p "$rig/fakebin" "$rig/ts" "$rig/bin/tailscale-fixtures"
@@ -77,6 +77,7 @@ bwrap --dev-bind / / \
   --unshare-pid --proc /proc --unshare-net --die-with-parent --new-session \
   env -i PATH="/mnt/r/fakebin:$PATH" TERM=xterm-256color LANG="${LANG:-C.UTF-8}" \
     RIG=/mnt/r REPO="$repo" SECS="$secs" SCENARIO="$scenario" \
+    PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" \
     HOME=/mnt/r/home XDG_CONFIG_HOME=/mnt/r/home/.config XDG_STATE_HOME=/mnt/r/home/.local/state \
     XDG_RUNTIME_DIR=/mnt/r/run HERDR_APP_HOME=/mnt/r/home/.config/herdr-app \
     HC_SESSION="hws$$-$(date +%s)" \

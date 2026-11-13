@@ -20,8 +20,12 @@ First release candidate: phone access to herdr-app over Tailscale. Nothing here 
 - Phone pairing (S5b, PR #24): the `/pair#c=` screen in Safari, a dismissible "Add to Home Screen" prompt with a bell to reopen it, and the Home Screen app pairing itself on first launch through a one-time transfer code (`/pair#t=`; 10 minutes, single use, bound to the paired device, a second token for the same device, removed together with the first on revoke).
 - Tailscale setup in the panel: the five-step check, Start and Stop serving through `tailscale serve --bg`, the Linux operator fix command.
 - Web Push for new inbox questions, alerts and blocked agents, with generic payloads.
-- Isolated rig (`rig/`) with scenarios for isolation, install, link, host, panel, setup, pairing, inbox answers and terminal input.
+- Isolated rig (`rig/`) with scenarios for isolation, install, link, host, panel, setup, pairing, inbox answers, terminal input and chat (the real PWA in headless Chromium against the rig's own hc).
 - Protocol docs (`docs/protocol/`), SECURITY.md, RECIPE.md and the release script `scripts/release.sh`.
+
+### Fixed
+
+- Chat no longer loads forever: the bridge read `hc ls --json` with a guessed shape and never found hc 0.1.20's `address`, so every chat was `terminal_not_found` and never read. Every chat failure (hc missing, `hc ls` or `hc read` failing, an unknown terminal, a timeout) is now a visible message on the phone within seconds, and hc is found in `~/.local/bin` when herdr-app's PATH lacks it (`hc_missing` otherwise, also in the panel's Setup).
 
 ### Changed
 

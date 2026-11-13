@@ -1,11 +1,12 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import { App } from "../src/App";
 import { AnsiText, spanStyle } from "../src/components/AnsiText";
 import { chatAgent, chatQuestion, chatTopic } from "../src/chat-fixtures";
-import { Chat, ChatPicker } from "../src/screens/Chat";
+import { HostNameProvider } from "../src/bridge/host-name";
+import { CHAT_WAIT_MS, Chat, ChatPicker } from "../src/screens/Chat";
 
 const topic = (lines: bridgeApi.ChatLine[]): bridgeApi.ChatTopic => ({ terminal: "t3", lines });
 
@@ -86,8 +87,47 @@ describe("Chat", () => {
     expect(screen.getByText("Nothing on screen yet.")).toBeInTheDocument();
   });
 
+  it("stops saying it is waiting after a while with no text and no reason", () => {
+    vi.useFakeTimers();
+    try {
+      render(<Chat {...props} topic={undefined} terminal="t3" />);
+      expect(screen.getByText("Waiting for the terminal…")).toBeInTheDocument();
+      act(() => void vi.advanceTimersByTime(CHAT_WAIT_MS - 1));
+      expect(screen.queryByRole("alert")).toBeNull();
+      act(() => void vi.advanceTimersByTime(1));
+      expect(screen.getByRole("alert")).toHaveTextContent("No answer yet");
+      expect(screen.queryByText("Waiting for the terminal…")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["source_unavailable", "Can't read this terminal"],
+    ["terminal_not_found", "This terminal has closed"],
+    ["too_many_chats", "Too many chats are open"],
+    ["bad_terminal", "This isn't a terminal herdr knows"],
+    ["hc_missing", "hc isn't found"],
+    ["something_new", "Can't read this terminal"],
+  ])("with no text yet, a stale reason (%s) is the screen's message, not a spinner", (reason, title) => {
+    render(<Chat {...props} topic={undefined} stale={reason} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(title);
+    expect(screen.queryByText("Waiting for the terminal…")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("names the computer and Setup when hc is missing", () => {
+    render(
+      <HostNameProvider name="desk-1">
+        <Chat {...props} topic={undefined} stale="hc_missing" />
+      </HostNameProvider>,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Remote on desk-1 can't find herdr's hc command (looked on PATH and in ~/.local/bin). Remote's Setup on desk-1 shows it too.");
+  });
+
   it.each([
     ["source_unavailable", "Can't reach the terminal. Showing the last text."],
+    ["hc_missing", "The computer can't find herdr's hc command. Showing the last text."],
     ["terminal_not_found", "This terminal has closed."],
     ["too_many_chats", "Too many chats are open. Close one to read this."],
     ["bad_terminal", "This isn't a terminal herdr knows."],

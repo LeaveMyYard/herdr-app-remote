@@ -18,6 +18,9 @@
 .chat-term:focus-visible{outline:1px solid var(--t-accent);outline-offset:-1px}
 .cl{min-height:17.825px}
 .chat-empty{color:var(--t-dim)}
+.chat-error{font-family:Inter,system-ui,sans-serif;white-space:normal;padding:4px 0}
+.chat-error-title{margin:0 0 4px;font-size:14px;font-weight:600;color:var(--t-foreground)}
+.chat-error-body{margin:0;font-size:13px;line-height:1.45;color:var(--t-dim)}
 .chat-notice{padding:6px 12px;font-size:12px;color:var(--t-working);background:var(--t-background);border-bottom:1px solid var(--t-border)}
 .chat-banner{margin:8px 12px 0;min-height:44px;padding:0 12px 0 14px;gap:8px;border-radius:8px;background:var(--cf);border:1px solid var(--cb);font-size:13px}
 .chat-banner-edge{left:0;top:0;bottom:0;width:2px;border-radius:7px 0 0 7px;background:var(--hue)}

@@ -1,1 +1,1 @@
-[{"id":"t3","title":"Agent 1"},{"id":"t4","title":"Agent 2"},{"id":"vps/t7","title":"Agent 3"}]
+{"hidden_finished":0,"terminals":[{"address":"t3","agent":"claude","cwd":"/home/user/project","name":"agent-one","state":"live","turn":2},{"address":"t4","agent":"codex","cwd":"/home/user/project","state":"live","turn":0},{"address":"vps/t7","agent":"claude","cwd":"/home/user","state":"live","turn":1}]}

@@ -4,7 +4,7 @@ export { createBridgeServer, type BridgeServer, type GuardVerdict, type ServerOp
 export { diff, applyPatch, PatchError, type Json } from "./patch.js";
 export * from "./security/index.js";
 export { PluginsTopicDriver, PLUGINS_TOPIC, type PluginsTopicOptions } from "./plugins/topic.js";
-export { detectHc, detectHost, detectInbox, detectPanorama, detectUsage, parseVersion, DEFAULT_BINARIES, type Binaries, type DetectEnv, type HostView } from "./plugins/detect.js";
+export { detectHc, detectHost, detectInbox, detectPanorama, detectUsage, parseVersion, DEFAULT_BINARIES, HC_NOT_FOUND, type Binaries, type DetectEnv, type HostView } from "./plugins/detect.js";
 export { loadPinned, parseReceipt, hasImports, type LoadResult } from "./plugins/loader.js";
 export { run, type Runner, type RunResult } from "./plugins/exec.js";
 export * from "./plugins/constants.js";
@@ -16,7 +16,8 @@ export * from "./link/index.js";
 export { InboxTopicDriver, INBOX_TOPIC, type InboxTopicOptions } from "./inbox/topic.js";
 export { buildRow, buildTopic } from "./inbox/build.js";
 export { loadInboxModules, resolveLauncher, type InboxModules, type Launch } from "./inbox/plugin.js";
-export { ChatTopicDriver, CHAT_PREFIX, CHAT_INTERVAL_MS, CHAT_LINES, MAX_ACTIVE_CHATS, terminalIds, type ChatTopicOptions } from "./chat/topic.js";
+export { ChatTopicDriver, CHAT_PREFIX, CHAT_INTERVAL_MS, CHAT_LINES, MAX_ACTIVE_CHATS, terminalIds, failureReason, type ChatTopicOptions } from "./chat/topic.js";
+export { resolveBinary, resolvedBinaries, FALLBACK_DIRS } from "./plugins/binaries.js";
 export { parseAnsi, type ParsedAnsi, type ParseOptions } from "./chat/ansi.js";
 export * from "./daemon/index.js";
 export { startApp, DEFAULT_API_PORT, FUNNEL_CHECK_MS, FUNNEL_RETRY_MS, CLOSE_FUNNEL, BRIDGE_VERSION, KEYS_REFRESH_MS, routeActs, navigateActor, fromRun, checkFunnel, funnelFromStatus, targetPort, SERVE_PORT, FUNNEL_TIMEOUT_MS, type App, type AppOptions, type AppLogEvent, type Actor, type FunnelVerdict } from "./app/index.js";

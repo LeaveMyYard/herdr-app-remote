@@ -154,6 +154,68 @@ describe("LiveApp", () => {
     });
     expect(subs(s)).toContain("chat:term-2");
   });
+
+  const go = (hash: string) =>
+    act(async () => {
+      window.location.hash = hash;
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+  const LINES = { terminal: "term-2", lines: [[{ t: "agent-2 says: tests pass" }]] };
+
+  it.each([
+    ["the Chat tab's picker", "#/chat"],
+    ["the Agents tab", "#/agents"],
+  ])("opens a chat from %s and shows its lines", async (_name, from) => {
+    await mount(from);
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: HOST });
+    const link = screen.getAllByRole("link").find((a) => a.getAttribute("href") === "#/chat/agent-2");
+    expect(link).toBeDefined();
+    await go(link!.getAttribute("href")!);
+    expect(subs(s)).toContain("chat:term-2");
+    expect(screen.getByText("Waiting for the terminal…")).toBeInTheDocument();
+    await recv(s, { type: "snap", topic: "chat:term-2", epoch: "e1", seq: 1, data: LINES });
+    expect(screen.getByRole("log")).toHaveTextContent("agent-2 says: tests pass");
+  });
+
+  it.each([
+    ["terminal_not_found", "This terminal has closed"],
+    ["source_unavailable", "Can't read this terminal"],
+    ["hc_missing", "hc isn't found"],
+    ["bad_terminal", "This isn't a terminal herdr knows"],
+    ["too_many_chats", "Too many chats are open"],
+    ["a_new_reason", "Can't read this terminal"],
+  ])("a chat that goes stale (%s) before any text shows an error, not a spinner", async (reason, title) => {
+    await mount("#/chat/agent-2");
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: HOST });
+    await recv(s, { type: "stale", topic: "chat:term-2", reason });
+    expect(screen.getByRole("alert")).toHaveTextContent(title);
+    expect(screen.queryByText("Waiting for the terminal…")).toBeNull();
+    // It recovers by itself when text arrives.
+    await recv(s, { type: "snap", topic: "chat:term-2", epoch: "e1", seq: 1, data: LINES });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("log")).toHaveTextContent("agent-2 says: tests pass");
+  });
+
+  it("an agent with no terminal says so instead of waiting", async () => {
+    const host = JSON.parse(JSON.stringify(HOST)) as { agents: { id: string; terminal_id?: string }[] };
+    delete host.agents.find((a) => a.id === "agent-2")!.terminal_id;
+    await mount("#/chat/agent-2");
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: host });
+    expect(screen.getByRole("alert")).toHaveTextContent("No terminal to read");
+    expect(subs(s).some((t) => t.startsWith("chat:"))).toBe(false);
+  });
+
+  it("chat text this version can't read (a patch gone wrong) shows an error", async () => {
+    await mount("#/chat/agent-2");
+    const s = await greet();
+    await recv(s, { type: "snap", topic: "host", epoch: "e1", seq: 1, data: HOST });
+    await recv(s, { type: "snap", topic: "chat:term-2", epoch: "e1", seq: 1, data: LINES });
+    await recv(s, { type: "patch", topic: "chat:term-2", seq: 2, ops: [{ op: "replace", path: "/lines", value: 7 }] });
+    expect(screen.getByRole("alert")).toHaveTextContent("Can't show this terminal");
+  });
 });
 
 describe("LiveApp terminal input", () => {

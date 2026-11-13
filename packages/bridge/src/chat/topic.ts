@@ -2,19 +2,23 @@ import { bridgeApi } from "@herdr-remote/protocol";
 import type { Hub } from "../hub.js";
 import type { Json } from "../patch.js";
 import { DEFAULT_BINARIES, type Binaries } from "../plugins/detect.js";
-import type { Runner } from "../plugins/exec.js";
+import type { Runner, RunResult } from "../plugins/exec.js";
 import { parseAnsi } from "./ansi.js";
 
 export const CHAT_PREFIX = "chat:";
 /** The poll interval: `hc events` is unverified against a live core (PLAN section 8), so a chat is read once a second. */
 export const CHAT_INTERVAL_MS = 1_000;
-export const CHAT_READ_TIMEOUT_MS = 5_000;
+/** Per `hc` command. A hung core shows as `source_unavailable` after this long, not later. */
+export const CHAT_READ_TIMEOUT_MS = 4_000;
 /** How many trailing lines each `hc read` asks for, and the most the topic keeps. A `\r` in the output is dropped, not an overwrite: `hc read` returns rendered text. */
 export const CHAT_LINES = 200;
 /** Chats read at once. A further one goes stale (`too_many_chats`) until another closes. */
 export const MAX_ACTIVE_CHATS = 6;
-/** `hc ls` is checked on the first read and then every this many reads, to notice a terminal that closed. */
-const LS_EVERY = 10;
+/**
+ * `hc ls` is checked on the first tick and then every this many, to notice a terminal that closed: `hc read` of a
+ * finished terminal still answers (its last screen), so only `hc ls` tells. Every 3 s at the 1 s poll.
+ */
+const LS_EVERY = 3;
 const MAX_BACKOFF_MS = 5_000;
 
 export interface ChatTopicOptions {
@@ -26,7 +30,11 @@ export interface ChatTopicOptions {
   lines?: number;
 }
 
-/** Ids in `hc ls --json`, read tolerantly: the output shape is not verified, so anything else yields `null` (unknown). */
+/**
+ * Ids in `hc ls --json`. hc 0.1.20 prints `{"hidden_finished":0,"terminals":[{"address":"t1",...}]}` (recorded in the
+ * rig: test/fixtures/hc/ls-0.1.20.json); `address` is the id `hc read` takes, and the only one read from a record that
+ * has it. A bare list, and `id`/`terminal`/`name` of records without an address, are read too, tolerantly. Anything else yields `null` (unknown), and the read goes ahead and decides.
+ */
 export function terminalIds(stdout: string): Set<string> | null {
   let doc: unknown;
   try {
@@ -41,7 +49,9 @@ export function terminalIds(stdout: string): Set<string> | null {
     if (typeof e === "string") ids.add(e);
     else if (e && typeof e === "object") {
       const r = e as Record<string, unknown>;
-      for (const k of ["id", "terminal", "name"]) if (typeof r[k] === "string") ids.add(r[k] as string);
+      // The address when there is one: a terminal's user-chosen `name` (say `t3`) must not stand in for another's address.
+      if (typeof r.address === "string") ids.add(r.address);
+      else for (const k of ["id", "terminal", "name"]) if (typeof r[k] === "string") ids.add(r[k] as string);
     }
   }
   return ids;
@@ -52,11 +62,39 @@ function firstArray(o: Record<string, unknown>): unknown[] | undefined {
   return undefined;
 }
 
+/** hc's error kind from a failed command's JSON (`{"error":{"kind":"not_found",...}}` on stderr), or undefined. */
+export function hcErrorKind(r: RunResult): string | undefined {
+  for (const text of [r.stderr, r.stdout]) {
+    try {
+      const doc = JSON.parse(text) as { error?: { kind?: unknown } } | null;
+      const kind = doc?.error?.kind;
+      if (typeof kind === "string") return kind;
+    } catch {
+      /* not JSON */
+    }
+  }
+  return undefined;
+}
+
+/** The `stale` reason for an `hc` command that failed, so the phone can say which. */
+export function failureReason(r: RunResult): bridgeApi.StaleReason {
+  if (r.error === "ENOENT") return "hc_missing";
+  if (r.error) return "source_unavailable";
+  return hcErrorKind(r) === "not_found" ? "terminal_not_found" : "source_unavailable";
+}
+
 interface Poll {
   timer: NodeJS.Timeout | undefined;
-  reads: number;
+  /** Ticks so far, read or not: `hc ls` runs on every {@link LS_EVERY}th. */
+  ticks: number;
   failures: number;
   stopped: boolean;
+  /**
+   * hc said the terminal is gone (`hc ls` lacks it, or `hc read` answered `not_found`). Sticky until `hc ls` lists it
+   * again: `hc read` of a finished terminal still answers with its last screen, and publishing that would clear the
+   * `terminal_not_found` stale and make a dead terminal look live. While gone, only `hc ls` runs, every tick.
+   */
+  gone: boolean;
 }
 
 /**
@@ -99,7 +137,7 @@ export class ChatTopicDriver {
       return void this.o.hub.setStale(topic, "too_many_chats");
     }
     this.waiting.delete(topic);
-    const poll: Poll = { timer: undefined, reads: 0, failures: 0, stopped: false };
+    const poll: Poll = { timer: undefined, ticks: 0, failures: 0, stopped: false, gone: false };
     this.polls.set(topic, poll);
     void this.tick(topic, id, poll);
   }
@@ -117,22 +155,31 @@ export class ChatTopicDriver {
     if (poll && next !== undefined) this.open(next);
   }
 
+  /**
+   * One poll: `hc ls --json` now and then, then `hc read`. Every failure marks the topic stale with a reason the phone
+   * shows at once (it never waits on a value that is not coming): `hc_missing` when hc can't be found,
+   * `terminal_not_found` when hc says there is no such terminal, `source_unavailable` for the rest (a failing or
+   * timed-out command). A `hc ls` that fails skips the read, so a dead core answers within one command timeout.
+   */
   private async tick(topic: string, id: string, poll: Poll): Promise<void> {
     const bin = (this.o.binaries ?? DEFAULT_BINARIES).hc;
     const { hub } = this.o;
+    const timeoutMs = this.o.readTimeoutMs ?? CHAT_READ_TIMEOUT_MS;
+    const lsNow = poll.gone || poll.ticks % LS_EVERY === 0;
+    poll.ticks += 1;
     let ok = false;
     try {
-      if (poll.reads % LS_EVERY === 0) {
-        const ls = await this.o.run(bin, ["ls", "--json"], { timeoutMs: this.o.readTimeoutMs ?? CHAT_READ_TIMEOUT_MS });
+      if (lsNow) {
+        const ls = await this.o.run(bin, ["ls", "--json"], { timeoutMs });
         if (poll.stopped) return;
-        const ids = ls.code === 0 && !ls.error ? terminalIds(ls.stdout) : null;
-        if (ids && !ids.has(id)) {
-          hub.setStale(topic, "terminal_not_found");
-          poll.failures += 1;
-          return this.schedule(topic, id, poll);
-        }
+        if (ls.error || ls.code !== 0) return this.fail(topic, id, poll, failureReason(ls));
+        // Output it does not understand is not a failure: the read decides (but never revives a gone terminal).
+        const ids = terminalIds(ls.stdout);
+        if (ids && !ids.has(id)) poll.gone = true;
+        else if (ids) poll.gone = false;
+        if (poll.gone) return this.fail(topic, id, poll, "terminal_not_found");
       }
-      const r = await this.o.run(bin, ["read", id, "--lines", String(this.o.lines ?? CHAT_LINES)], { timeoutMs: this.o.readTimeoutMs ?? CHAT_READ_TIMEOUT_MS });
+      const r = await this.o.run(bin, ["read", id, "--lines", String(this.o.lines ?? CHAT_LINES)], { timeoutMs });
       if (poll.stopped) return;
       if (r.code === 0 && !r.error) {
         const { lines, truncated } = parseAnsi(r.stdout, { maxLines: this.o.lines ?? CHAT_LINES });
@@ -140,14 +187,21 @@ export class ChatTopicDriver {
         hub.publish(topic, value as unknown as Json);
         ok = true;
       } else {
-        hub.setStale(topic, "source_unavailable");
+        const reason = failureReason(r);
+        if (reason === "terminal_not_found") poll.gone = true;
+        hub.setStale(topic, reason);
       }
     } catch {
       if (poll.stopped) return;
       hub.setStale(topic, "source_unavailable");
     }
-    poll.reads += 1;
     poll.failures = ok ? 0 : poll.failures + 1;
+    this.schedule(topic, id, poll);
+  }
+
+  private fail(topic: string, id: string, poll: Poll, reason: bridgeApi.StaleReason): void {
+    this.o.hub.setStale(topic, reason);
+    poll.failures += 1;
     this.schedule(topic, id, poll);
   }
 

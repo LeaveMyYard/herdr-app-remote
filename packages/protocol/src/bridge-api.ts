@@ -870,7 +870,9 @@ export const Patch = z.object({
 });
 
 /** Known reasons; the field stays open so the bridge can add more without a version bump. */
-export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable", "terminal_not_found", "bad_terminal", "too_many_chats"] as const;
+export const STALE_REASONS = ["reconnecting", "layout_without_remote", "source_unavailable", "terminal_not_found", "bad_terminal", "too_many_chats", "hc_missing"] as const;
+/** `hc_missing`: a chat could not run `hc` (not on the bridge's PATH nor in `~/.local/bin`). */
+export type StaleReason = (typeof STALE_REASONS)[number];
 export const Stale = z.object({
   type: z.literal("stale"),
   topic: Topic,
