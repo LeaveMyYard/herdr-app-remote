@@ -41,7 +41,7 @@ Operator decisions (2026-11-13):
 - History is read with `@anthropic-ai/claude-agent-sdk` (`getSessionMessages`, `getSessionInfo`). The JSONL format is internal, so the bridge never parses it.
 - Every Claude config dir the operator uses is a hard requirement. They are listed only by herdr-agent-usage's profile list.
 
-What I checked, in a private test HOME with fake transcripts only (`scratchpad/sdkprobe`, SDK 0.3.312):
+What was checked, in a private test HOME with fake transcripts only (SDK 0.3.312):
 
 | check | result |
 |---|---|
@@ -59,8 +59,8 @@ What I checked, in a private test HOME with fake transcripts only (`scratchpad/s
   - There is no `~/.claude*` scan, no `$CLAUDE_CONFIG_DIR` source and no fallback.
   - If agent-usage isn't installed or its config can't be read, the Claude chat view is unavailable (`no_profiles`, §6) and the phone shows the text view with a notice.
 
-  Roots are deduplicated by the realpath of `<dir>/projects`. On this desk `~/.claude-1..3/projects` are symlinks to `~/.claude/projects`, so today they collapse to one reader. The design doesn't depend on that.
-- **Choosing the root for a session.** Take the realpath of the `projects` dir that holds `root.transcript` (its grandparent) and match it against the roots' projects realpaths. If nothing matches, fall back to `getSessionInfo(id, {dir: cwd})` in each reader, and use the first that returns it. If none does, the chat view is unavailable (`no_binding`, §6).
+  Roots are deduplicated by the realpath of `<dir>/projects`. If several profiles' `projects` dirs are symlinks to one dir, they collapse to one reader. The design doesn't depend on that.
+- **Choosing the root for a session.** Take the realpath of the `projects` dir that holds `root.transcript` (its grandparent) and match it against the roots' projects realpaths. If nothing matches, fall back to `getSessionInfo(id, {dir: cwd})` in each agent-usage reader (no other roots are tried), and use the first that returns it. If none does, the chat view is unavailable (`no_binding`, §6).
 - **One reader child process per distinct projects root**, spawned with `CLAUDE_CONFIG_DIR=<root>` and a clean env (no tokens). It is a small Node script that imports only the session functions and speaks line-delimited JSON over stdio.
   - It is started on first use and exits after 60 s idle.
   - At most 4 run at once.
@@ -277,14 +277,14 @@ What does leave: user prompt text, assistant text, the AskUserQuestion text and 
 
 - **Topics.**
   - `chatview:<t>` = `{terminal, harness, state: "ok"|"unavailable", reason?, items: ChatItem[], older: boolean, rev}`.
-  - `ChatItem` = `{id (uuid), role: "you"|"agent"|"tools"|"ask"|"divider", at|null, text?, tools?: {kind, count, running, failed, names[]}, ask?: {question, options[]}}`.
+  - `ChatItem` = `{id (uuid), role: "you"|"agent"|"tools"|"ask"|"divider"|"prompt"|"status", at|null, text?, tools?: {kind, count, running, failed, names[]}, ask?: {question, options[]}}`.
   - `reason` takes one of the §6 cases (`harness`, `no_panorama`, `no_profiles`, `no_binding`, `reader_failed`, `forbidden`).
   - `timeline:<t>` is defined in §4.
 - **HTTP.** `GET /api/v1/chatview/<t>?before=<id>&n=<≤50>` returns `{items, older}`.
 - **Prompt cards** are `ChatItem` role `prompt`: `{prompt_id, rev, kind: "permission"|"question"|"plan"|"other"|"unparsed", title, summary?, questions?: [{text, header, multi, options[{label, description?}], other: boolean}], plan_md?, options: [{label}] (from the screen), screen_lines?: string[] (kind `unparsed`, read-only, redacted), state: "open"|"answered"|"gone"}`.
 - **Acts.**
-  - `prompt.answer {terminal, prompt_id, rev, choice}`. Results: `ok`, `prompt_changed`, `prompt_gone`, `busy` (desk typing, or another answer running), `forbidden`, `unknown_effect`.
-  - `agent.stop {terminal}`. Results: `ok`, `not_working`, `busy`, `cooldown`, `forbidden`, `unknown_effect`.
+  - `prompt.answer {terminal, prompt_id, rev, choice}`. Results: `ok`, `prompt_changed`, `prompt_gone`, `busy` (desk typing, or another answer running), `forbidden`, `audit_unavailable`, `unknown_effect`.
+  - `agent.stop {terminal}`. Results: `ok`, `not_working`, `busy`, `cooldown`, `forbidden`, `audit_unavailable`, `unknown_effect`.
 - **Capabilities.** `transcript.read` and `prompt.answer`. In the mod link, the panel gets `device.cap {cap: "transcript.read"}` and `device.cap {cap: "prompt.answer", minutes?}`.
 - **Fixtures** under `fixtures/bridge-api/chatview/` and `timeline/`, fake data only.
 - The terminal topic `chat:<t>` is unchanged. The text view keeps using it. For Claude the bridge reads it internally, for prompt checks, and the phone does not subscribe to it.
@@ -295,7 +295,7 @@ What does leave: user prompt text, assistant text, the AskUserQuestion text and 
 |---|---|---|---|
 | CV0 | This spec and the PhoneChatView board (approved 2026-11-13); rows in COPY.md and PLAN §6 | – | D |
 | CV1 | Capability `transcript.read`: devices.json schema bump, panel switch, Activity | – | SC |
-| CV2 | Claude reader: config-root discovery, per-root SDK child, pinned SDK, rig test on fixtures | – | SC |
+| CV2 | Claude reader: agent-usage profile roots, per-root SDK child, pinned SDK, rig test on fixtures | – | SC |
 | CV3 | `chatview:<t>` topic: binding via the panorama join, tail by stat, diff by uuid, limits, redaction, GET pages | CV1, CV2 | SC |
 | CV4 | PWA chat view: bubbles, safe markdown, tool rows, jump to latest, older pages, text composer, fallback to the text view | CV3 | N |
 | CV5 | `timeline:<t>` plus inline inbox items (question, alert, failed) with existing acts; panorama strip | CV3, S11 | SC (answers) |
@@ -305,7 +305,7 @@ What does leave: user prompt text, assistant text, the AskUserQuestion text and 
 | CV7 | `prompt.answer`: capability, prompt parser and matcher (T+S+V), `prompt_id`, two-phase press, post-check, audit; PWA prompt cards and the "prompt changed" refusal. Ships with the two-phase check despite hc's wait window (R6), off by default | CV3, H0 | SC |
 | CV8 | `agent.stop` with cooldown; Stop in the composer | CV7 | SC |
 | H1 | (optional) log-only Claude plugin hook (`Notification`, `PermissionRequest` without a decision) as a fourth signal | CV7 | SC |
-| I1 | (herdr-inbox repo) app-feed: recently answered rows; optionally record `tool_use_id` | – | SC there |
+| I1 | (herdr-inbox repo) app-feed: recently answered rows; record the `ask_operator` `tool_use_id` (approved) | – | SC there |
 | C1 | Codex through `codex app-server`, `CODEX_HOME` per profile | CV3 | N |
 
 CV1 and CV2 can run in parallel, and so can CV4 and CV5 once CV3 lands.
@@ -330,7 +330,7 @@ CV1 and CV2 can run in parallel, and so can CV4 and CV5 once CV3 lands.
 
 Remote Control (`claude --rc`) shows a session in the Claude app, but it needs a claude.ai subscription, stores the transcript on Anthropic's servers, gives one session per process, and its multi-config-dir support is undocumented. Rejected by the operator (2026-11-13): it doesn't work with herdr, other harnesses or all of the operator's accounts. Ours stays on the tailnet.
 
-## 11. Proposed wording (for COPY.md)
+## 11. Wording (rows in COPY.md)
 
 | place | text |
 |---|---|

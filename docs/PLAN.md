@@ -90,6 +90,8 @@ Sources:
 | `terminal.input` | **off**; desktop-only toggle, can expire | `hc send` |
 | `terminal.keys` | **off**; desktop-only toggle, can expire | `hc keys`, only the entries of the desktop's key menu (S16b) |
 | `push` | off | push subscriptions |
+| `transcript.read` (chat view, CV1) | **off**; desktop-only toggle | the `chatview:<t>` and `timeline:<t>` topics and chat history pages |
+| `prompt.answer` (chat view, CV7) | **off**; desktop-only toggle, expires | `prompt.answer` and `agent.stop` |
 
 There is no generic `run`, no `exec`, and no arbitrary `herdr-app do`. Anything else is refused and logged.
 
@@ -413,18 +415,18 @@ Critical path: S1 → S4 → S5 → S11 → S13 → S14 → S16/S17. S2, S3, S6 
 **Chat view (CV1-CV8, H0, I1)** (design and spec approved 2026-11-13: [`docs/chatview.md`](chatview.md), board `design/PhoneChatView.dc.html`, copy rows in `design/COPY.md`)
 - Goal: for Claude Code agents the phone shows the conversation as chat, the only view (no terminal toggle, key bar or Keys menu). Native prompts are cards. Codex and unsupported harnesses keep the text view.
 - Config roots come only from herdr-agent-usage's profile list. Without it, Claude agents show the text view with a notice (`no_profiles`).
-- **CV1** Accepts: `transcript.read` is off by default with its own desktop switch; `devices.json` schema bump with no downgrade; topics refuse without it.
+- **CV1** Accepts: SECURITY.md updated (capability row); `transcript.read` is off by default with its own desktop switch; `devices.json` schema bump with no downgrade; topics refuse without it.
 - **CV2** Accepts: one reader child per distinct `projects` root, pinned SDK, no `~/.claude*` scan and no `CLAUDE_CONFIG_DIR` source; the rig test fails on a shape change.
 - **CV3** Accepts: the session is bound only through panorama's proved join; an aged or stale feed hides the chat; secrets are redacted; the snap stays under 512 KB.
-- **CV4** Accepts: bubbles, safe markdown (no raw HTML, no images), tool rows, jump to latest, older pages; Claude has no terminal toggle; every §6 fallback shows the text view with its notice.
+- **CV4** Accepts: (note: the board lacks states for the unparsed-prompt card and the `no_profiles` notice; draw them during CV4/CV7) bubbles, safe markdown (no raw HTML, no images), tool rows, jump to latest, older pages; Claude has no terminal toggle; every §6 fallback shows the text view with its notice.
 - **CV5** Accepts: inbox questions, alerts and failures appear inline with their existing acts; the panorama strip links to Swarm and Peek; an unknown kind renders from its fallback fields.
 - **CV6** Accepts: the pane's account chip comes from the usage topic.
 - **H0** Accepts: rig fixtures for the permission, AskUserQuestion (single, multi, Other) and plan blocks of the pinned Claude Code version; transcript-before-dialog ordering verified; multi-select toggle keys recorded.
-- **CV7** Accepts: `prompt.answer` is off by default with an expiry; cards need T, S and V to agree; every shown option, including "Yes, and don't ask again" and the auto-mode plan option, is pressable; AskUserQuestion answers only on its Answer button; arrows only; two-phase check and post-check; an unparseable prompt shows its screen lines read-only plus "Answer it on desk-1"; a mismatch never presses.
+- **CV7** Accepts: SECURITY.md updated (capability row and the R6 accepted risk); `prompt.answer` is off by default with an expiry; cards need T, S and V to agree; every shown option, including "Yes, and don't ask again" and the auto-mode plan option, is pressable; AskUserQuestion answers only on its Answer button; arrows only; two-phase check and post-check; an unparseable prompt shows its screen lines read-only plus "Answer it on desk-1"; a mismatch never presses.
 - **CV8** Accepts: Stop presses Esc once, only while working and with no card open, with a 3 s cooldown; covered by `prompt.answer`.
 - **I1** (herdr-inbox repo) Accepts: the app-feed publishes recently answered rows and records the `ask_operator` `tool_use_id`.
 - H1 (hook signal) and C1 (Codex) are later. H2 is a request main raises with the herdr owners; no slice depends on it.
-- **Residual risk (prompt.answer).** `hc keys` waits up to 15 s for the desk to go quiet before pressing, so the screen can change between the last read and `enter`. CV7 ships anyway with the two-phase check (arrows, re-read, `enter`, post-check), behind `prompt.answer`, which is off by default. The risk is recorded in `docs/chatview.md` (§3a.5 R6, §9) and shrinks only if H2 lands.
+- **Residual risk (prompt.answer).** `hc keys` waits up to 15 s for the desk to go quiet before pressing, so the screen can change between the last read and `enter`. CV7 ships anyway with the two-phase check (arrows, re-read, `enter`, post-check), behind `prompt.answer`, which is off by default. The risk is recorded in `docs/chatview.md` (§3a.5 R6, §9) and is closed only if H2 (`--if-screen`) lands.
 
 ## 7. Decisions (operator, 2026-11-11)
 
