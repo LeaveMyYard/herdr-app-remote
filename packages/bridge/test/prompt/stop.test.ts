@@ -79,6 +79,8 @@ describe("composerDraft: text between the composer's two rules", () => {
   });
   it("is null (refuse) without a composer box", () => {
     expect(composerDraft("")).toBeNull();
+    // Two rules with text between them that is not the composer (no ❯): not a composer box.
+    expect(composerDraft("────────────────────────────────────────\n Do you want to proceed?\n────────────────────────────────────────\n  ⏸ manual mode on · esc to interrupt\n")).toBeNull();
     expect(composerDraft("● Agent 1\n  ⏸ manual mode on · esc to interrupt\n")).toBeNull();
   });
 });
@@ -261,6 +263,15 @@ describe("agent.stop", () => {
     term.keysReply = () => OK; // Esc went, but the screen still says working
     expect(await act()).toEqual({ ok: false, code: "unknown_effect", unknown_effect: true });
     expect(term.pressed).toEqual([ESC]);
+  });
+
+  it("a draft the desk starts after the press is never counted as stopped (review L4): it also hides the hint", async () => {
+    const { term, act } = setup();
+    term.keysReply = () => {
+      term.screen = screen("stop-working-draft"); // still working, a draft in the box, no hint in the footer
+      return OK;
+    };
+    expect(await act()).toEqual({ ok: false, code: "unknown_effect", unknown_effect: true });
   });
 
   it("losing prompt.answer kills the device's own Stop in flight, not another device's", async () => {

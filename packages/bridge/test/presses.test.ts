@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { pressActors } from "../src/app/presses.js";
 import type { Runner, RunResult } from "../src/plugins/exec.js";
-import { screen } from "./prompt/helpers.js";
+import { ASK1, FakeTerm, screen, source } from "./prompt/helpers.js";
 
 const OK: RunResult = { code: 0, stdout: '{"ok":true}', stderr: "" };
 const D1 = "d-0000000000000001";
@@ -70,6 +70,25 @@ describe("app press actors (CV8 wiring)", () => {
     expect(settled).toBe(false);
     p.cut(D1, "prompt.answer");
     expect(await stop).toEqual({ ok: false, code: "cancelled", unknown_effect: true });
+  });
+
+  it("losing prompt.answer kills that device's answer in flight too (review L5)", async () => {
+    const term = new FakeTerm(screen("ask-single"));
+    let started = false;
+    const run: Runner = async (cmd, args, o) => {
+      if (args[0] === "keys") {
+        started = true;
+        // Phase A held until killed.
+        return new Promise<RunResult>((resolve) => o?.signal?.addEventListener("abort", () => resolve({ code: null, stdout: "", stderr: "", error: "aborted" })));
+      }
+      return term.runner(cmd, args, o);
+    };
+    const s = source(term, [ASK1]);
+    const p = pressActors({ run, binaries: { hc: "hc" } as never, menu: MENU, promptSource: () => s.src, stopSource: () => undefined });
+    const answer = p.prompts(client(D1), "prompt.answer", { terminal: "t3", prompt_id: s.card.promptId, rev: "rev-1", choice: { option: 2 } });
+    while (!started) await new Promise((r) => setTimeout(r, 0));
+    p.cut(D1, "prompt.answer");
+    expect(await answer).toMatchObject({ ok: false, code: "cancelled", unknown_effect: true });
   });
 
   it("a cut of everything (revoked) kills it too", async () => {

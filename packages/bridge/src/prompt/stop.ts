@@ -10,10 +10,11 @@
 //   3. V: a fresh `hc read` shows no prompt block, the composer holds no desk draft, and Claude Code's own footer says
 //      "esc to interrupt" (the H0 rig recording `stop-working-*`): Esc on a dialog cancels it
 //      (`stop-permission-after-esc`), so a prompt on screen refuses with nothing pressed; a draft hides the footer hint
-//      (`stop-working-draft`) and hc would hold the press for it, so it is `desk_draft`; S is checked again after the read;
+//      (`stop-working-draft`), so Claude Code no longer says Esc interrupts there: `desk_draft`; S is checked again after the read;
 //   4. `hc keys esc`, alone, timed: a press hc held over 1 s waited for the desk (S16's quiet rule), so the screen may
 //      have changed meanwhile: `unknown_effect` ("held N s while the desk was typing");
-//   5. post-check for 2 s: the footer no longer says "esc to interrupt": `ok`; else `unknown_effect`.
+//   5. post-check for 2 s: the footer no longer says "esc to interrupt" and the composer holds no draft: `ok`; else
+//      `unknown_effect`.
 //
 // Never `hc send`, never `--force` (force.test.ts pins it). Nothing is ever pressed again by itself.
 import { bridgeApi } from "@herdr-remote/protocol";
@@ -164,7 +165,9 @@ export function agentStopActor(o: AgentStopOptions): AgentStopActor {
       await sleep(SETTLE_MS * 2);
       if (signal.aborted) break;
       const after = await read(t, signal);
-      if (after !== null && !interruptible(after)) return { ok: true };
+      // Stopped: no hint, and no desk draft (a draft also hides the hint while the agent still works: rig
+      // `stop-working-draft`), so a draft that appeared meanwhile ends as an unknown effect, never as stopped.
+      if (after !== null && !interruptible(after) && composerDraft(after) === false) return { ok: true };
       if (now() >= end) break;
     }
     return { ok: false, code: "unknown_effect", unknown_effect: true };

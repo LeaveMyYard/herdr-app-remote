@@ -1014,8 +1014,8 @@ export type AgentStopArgs = z.infer<typeof AgentStopArgs>;
  * - `not_working`: the host does not say working, or the screen has no "esc to interrupt" ("Agent 1 already stopped.");
  * - `prompt_open`: a prompt card is open, the host says blocked, or the screen shows a prompt block: Esc would cancel
  *   it ("Answer the prompt above first");
- * - `desk_draft`: the composer on the desk holds unsent text (hc would hold the press for it, and the footer hides the
- *   hint);
+ * - `desk_draft`: the composer on the desk holds unsent text, and Claude Code's footer then drops "esc to interrupt",
+ *   so nothing on screen says Esc interrupts;
  * - `cooldown`: a Stop was pressed in this terminal less than {@link STOP_COOLDOWN_MS} ago;
  * - `busy`: an answer or another Stop runs for this terminal (or ran into a timeout and is still being killed);
  * - `not_open`: no chat view of this terminal is open and bound (the phone shows Stop only in one);

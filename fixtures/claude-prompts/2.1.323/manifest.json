@@ -90,6 +90,6 @@
         "rewind": false
       }
     ],
-    "deskDraft": "a desk draft hides \"esc to interrupt\" from the footer while herdr still says working; one Esc interrupts and keeps the draft. Stop refuses (desk_draft)"
+    "deskDraft": "a desk draft hides \"esc to interrupt\" from the footer while herdr still says working; one Esc interrupts and keeps the draft. With no hint on screen, Stop refuses (desk_draft), and its post-check never counts a screen with a draft as stopped"
   }
 }
