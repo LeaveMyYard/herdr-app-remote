@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { AppFrame } from "./components/AppFrame";
 import { Banner } from "./components/Banner";
 import { HomePrompt, HomePromptBell } from "./pair/HomePrompt";
 import { TabBar } from "./components/TabBar";
@@ -196,7 +197,7 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
   if (peeked && data && topic) {
     const space = peeked.root.space_id !== null ? data.host.spaces.find((s) => s.id === peeked.root.space_id)?.name : undefined;
     return (
-      <div className="hd ph">
+      <AppFrame>
         <Peek
           root={peeked.root}
           node={peeked.node}
@@ -206,7 +207,7 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
           closeHref={`#/swarm/${peeked.root.space_id !== null ? encodeURIComponent(peeked.root.space_id) : "all"}`}
           openRootHref={peeked.root.live ? `#/chat/${peeked.root.agent_id ?? ""}` : undefined}
         />
-      </div>
+      </AppFrame>
     );
   }
 
@@ -218,7 +219,7 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
     // Demo data only (the visual harness): never pre-picks an answer on a live question.
     const pick = live ? null : new URLSearchParams(window.location.search).get("pick");
     return (
-      <div className="hd ph qn">
+      <AppFrame className="qn">
         {row && row.kind === "group" ? (
           <Question
             key={row.key}
@@ -238,7 +239,7 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
             </a>
           </div>
         )}
-      </div>
+      </AppFrame>
     );
   }
 
@@ -261,7 +262,7 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
         />
     );
     // The board's computer is "desk-1"; live data gets its name from LiveApp's provider.
-    return <div className="hd ph">{typed ? <HostNameProvider name="desk-1">{chat}</HostNameProvider> : chat}</div>;
+    return <AppFrame>{typed ? <HostNameProvider name="desk-1">{chat}</HostNameProvider> : chat}</AppFrame>;
   }
 
   let screen: ReactNode;
@@ -332,12 +333,12 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
   return (
     // The prompt and its bell only while nothing else is wrong: a banner takes the same place, and the prompt's mint needs the socket.
     <HomePromptBell.Provider value={homePrompt && conn.status === "online" ? homePrompt.onOpen : null}>
-      <div className="hd ph">
+      <AppFrame>
         <Banner connection={conn} onRetry={onRetry} />
         {screen}
         {homePrompt?.open && conn.status === "online" ? <HomePrompt onClose={homePrompt.onClose} /> : null}
         <TabBar active={tab} badges={tabBadgesNow} onSelect={select} />
-      </div>
+      </AppFrame>
     </HomePromptBell.Provider>
   );
 }

@@ -62,6 +62,22 @@ function firstArray(o: Record<string, unknown>): unknown[] | undefined {
   return undefined;
 }
 
+/**
+ * hc 0.1.20 ends `hc read` of a working agent with its own notice on stdout, after the screen (`[hc] only its screen: it is
+ * working; read again once it stops for its history`). That is hc talking, not the terminal: drop trailing `[hc] ` lines.
+ * The agent being busy is already on the header (the host topic's status), so nothing replaces it.
+ */
+export function withoutHcNotice(stdout: string): string {
+  const lines = stdout.split("\n");
+  let end = lines.length;
+  for (;;) {
+    while (end > 0 && (lines[end - 1] ?? "").trim() === "") end -= 1;
+    if (end > 0 && /^\[hc\] /.test(lines[end - 1] ?? "")) end -= 1;
+    else break;
+  }
+  return end === lines.length || end === 0 && !stdout.startsWith("[hc] ") ? stdout : `${lines.slice(0, end).join("\n")}\n`;
+}
+
 /** hc's error kind from a failed command's JSON (`{"error":{"kind":"not_found",...}}` on stderr), or undefined. */
 export function hcErrorKind(r: RunResult): string | undefined {
   for (const text of [r.stderr, r.stdout]) {
@@ -182,7 +198,7 @@ export class ChatTopicDriver {
       const r = await this.o.run(bin, ["read", id, "--lines", String(this.o.lines ?? CHAT_LINES)], { timeoutMs });
       if (poll.stopped) return;
       if (r.code === 0 && !r.error) {
-        const { lines, truncated } = parseAnsi(r.stdout, { maxLines: this.o.lines ?? CHAT_LINES });
+        const { lines, truncated } = parseAnsi(withoutHcNotice(r.stdout), { maxLines: this.o.lines ?? CHAT_LINES });
         const value: bridgeApi.ChatTopic = { terminal: id, lines, ...(truncated ? { truncated: true } : {}) };
         hub.publish(topic, value as unknown as Json);
         ok = true;

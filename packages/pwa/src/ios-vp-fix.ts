@@ -46,9 +46,9 @@ function read(win: Window, doc: Document, readInset: (d: Document) => number): V
   };
 }
 
-/** After applying, something must still be hit at the tab bar's top edge; false means the bar is not laid out where it can be hit. */
+/** After applying, something must still be hit at the top edge of the frame's bottom bar (the tab bar, or on a full-screen route the frame's last child: chat footer, question footer); false means it is not laid out where it can be hit. */
 function tabbarReachable(win: Window, doc: Document): boolean {
-  const bar = doc.querySelector(".tabbar");
+  const bar = doc.querySelector(".tabbar") ?? doc.querySelector(".ph > :last-child");
   if (!bar || typeof doc.elementFromPoint !== "function") return true; // nothing to check against
   const r = bar.getBoundingClientRect();
   if (r.height === 0) return true;

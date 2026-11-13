@@ -3,7 +3,7 @@ import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bridgeApi } from "@herdr-remote/protocol";
-import { CHAT_INTERVAL_MS, CHAT_READ_TIMEOUT_MS, ChatTopicDriver, MAX_ACTIVE_CHATS, failureReason, terminalIds } from "../../src/chat/topic.js";
+import { CHAT_INTERVAL_MS, CHAT_READ_TIMEOUT_MS, ChatTopicDriver, MAX_ACTIVE_CHATS, failureReason, terminalIds, withoutHcNotice } from "../../src/chat/topic.js";
 import { run, type Runner, type RunResult } from "../../src/plugins/exec.js";
 import { join as joinHub, newHub } from "../helpers.js";
 import { bins, tmp } from "../plugins/helpers.js";
@@ -117,6 +117,26 @@ describe("ChatTopicDriver", () => {
       "  +84 -212 src/parse/mod.rs",
       "agent-one says: tests pass, 212 passed",
     ]);
+  });
+
+  it("does not show hc's own notice (last line of `hc read` of a working agent) as terminal text", async () => {
+    vi.useFakeTimers();
+    const { runner } = stub((c) => ok(c.args[0] === "ls" ? fx("ls-0.1.20.json") : fx("read-working-0.1.20.txt")));
+    const hub = setup(runner);
+    const c = await sub(hub, "chat:t1");
+    const data = bridgeApi.ChatTopic.parse(c.client.ofType("snap").find((m) => m.topic === "chat:t1")?.data);
+    const text = data.lines.map((l) => l.map((s) => s.t).join(""));
+    expect(text).toEqual(["* agent-one: I split the parser into three passes.", "  +84 -212 src/parse/mod.rs", "agent-one says: tests pass, 212 passed"]);
+  });
+
+  it("drops the notice as the operator saw it, and only at the end", () => {
+    const notice = "[hc] only its screen: it is working; read again once it stops";
+    expect(withoutHcNotice(`a\nb\n${notice}\n`)).toBe("a\nb\n");
+    expect(withoutHcNotice(`a\nb\n${notice}`)).toBe("a\nb\n");
+    expect(withoutHcNotice(`a\n\n${notice}\n\n`)).toBe("a\n");
+    expect(withoutHcNotice(`a\n${notice}\nb\n`)).toBe(`a\n${notice}\nb\n`);
+    expect(withoutHcNotice("a\nb\n")).toBe("a\nb\n");
+    expect(withoutHcNotice(`${notice}\n`)).toBe("\n");
   });
 
   it("polls once a second, patches only on change, and checks hc ls every third tick", async () => {

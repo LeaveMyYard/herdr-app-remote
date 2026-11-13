@@ -32,9 +32,9 @@
 @media (prefers-reduced-motion: reduce){.s-wait.tile{animation:none}}
 .rel{position:relative}
 .abs{position:absolute}
-/* The read-only footer keeps the board's 139px slot; the composer (S16) fills it and grows for a note or the
+/* The read-only footer is as tall as its text plus the home-indicator inset (a fixed slot left an empty band under it); the composer (S16) fills it and grows for a note or the
    first-send confirmation. Masked in the visual check: the board draws keys hc send can't press (see ChatComposer). */
-.chat-foot{height:calc(var(--sab) + 109px);padding:14px 16px 0;justify-content:flex-start}
+.chat-foot{padding:14px 16px calc(var(--sab) + 8px);justify-content:flex-start}
 .chat-foot-on{height:auto;min-height:calc(var(--sab) + 109px);padding:0}
 .chat-keys{gap:6px;padding:8px 12px;overflow:hidden}
 .hd .chat-key{min-width:44px;height:40px;padding:0 10px;border-radius:7px;border:1px solid var(--t-border);background:var(--t-raised);font-size:12.5px;color:var(--t-foreground)}
