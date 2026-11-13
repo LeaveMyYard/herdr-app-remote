@@ -255,6 +255,18 @@ export class ChatviewTopicDriver {
     return { ok: true, page: { items: fit.items, older: fit.older || from > 0, rev: w.rev } };
   }
 
+  /**
+   * The `tool_use_id`s of the herdr-inbox `ask_operator` calls in terminal `t`'s own transcript, as the open chat view
+   * holds it (CV5: the only places an inbox row may be anchored). Null when no chat view of `t` is open and good.
+   */
+  inboxAsks(terminal: string): ReadonlySet<string> | null {
+    const w = this.watches.get(`${bridgeApi.CHATVIEW_PREFIX}${terminal}`);
+    if (!w || w.last?.state !== "ok") return null;
+    const ids = new Set<string>();
+    for (const i of w.items) if (i.role === "ask" && i.ask.via === "inbox" && i.tool_use_id !== undefined) ids.add(i.tool_use_id);
+    return ids;
+  }
+
   private open(topic: string): void {
     if (this.watches.has(topic)) return;
     const terminal = bridgeApi.chatviewTerminal(topic);

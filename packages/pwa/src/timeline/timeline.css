@@ -1,0 +1,44 @@
+/* Timeline items and the strip (CV5), after design/PhoneChatView ("Typing off": the inline question; "History":
+   the alert row; every state: the strip under the header). Values are the board's. */
+.tl-strip{padding:0 16px 6px;gap:8px;border-bottom:1px solid var(--t-border)}
+.hd .tl-strip-link{min-width:0;height:36px;gap:4px;font-size:12px;color:var(--t-muted)}
+.tl-strip-label{margin-left:4px}
+.tl-strip-chev{color:var(--t-dim)}
+
+.tl-q{padding:12px 12px 12px 14px;gap:10px;border-radius:10px;background:#24221f;border:1px solid #4a3b26}
+.tl-q-edge{left:0;top:0;bottom:0;width:2px;border-radius:9px 0 0 9px;background:#ffb547}
+.tl-q-head{gap:8px}
+.tl-q-title{font-size:14px;font-weight:600;color:var(--t-foreground)}
+.tl-q-meta{font-size:11.5px;color:var(--t-dim)}
+.tl-q-text{font-size:14px;line-height:1.45;color:var(--t-foreground);overflow-wrap:anywhere}
+.tl-q-opts{gap:6px}
+.hd .tl-q-opt{min-height:48px;padding:7px 12px;gap:10px;border-radius:8px;text-align:left;border:1px solid var(--t-border);background:var(--t-raised);color:var(--t-foreground)}
+.tl-q-n{font-size:11.5px;color:var(--t-dim)}
+.tl-q-optbody{gap:1px}
+.tl-q-label{font-size:14px}
+.tl-q-desc{font-size:12px;color:var(--t-muted)}
+.tl-q-acts{gap:8px}
+.hd .tl-q-more{height:44px;justify-content:center;border-radius:7px;border:1px solid var(--t-input);background:var(--t-raised);font-size:14px;color:var(--t-foreground)}
+.hd .tl-q-dismiss{height:44px;padding:0 14px;border-radius:7px;color:var(--t-muted);font-size:14px;background:none;border:0}
+.tl-q-confirm{gap:10px}
+.hd .tl-q-confirmq{margin:0;font-size:14px;line-height:1.4;color:var(--t-blocked)}
+.hd .tl-q-keep,.hd .tl-q-dismissgo{height:44px;border-radius:7px;border:1px solid var(--t-input);background:var(--t-raised);color:var(--t-foreground);font-size:14px}
+.hd .tl-q-dismissgo{border-color:#f0705f80;color:var(--t-blocked)}
+
+.tl-note{gap:6px;padding:8px 8px 8px 12px;border-radius:8px;background:#241e21;border:1px solid #4d2f2e;font-size:13px}
+.tl-note[data-tone=warn]{background:#24221f;border-color:#4a3b26}
+.tl-note[data-tone=muted]{background:var(--t-background);border-color:var(--t-border)}
+.tl-note-row{min-height:30px;gap:10px}
+.tl-note-dot{width:7px;height:7px;border-radius:4px;background:var(--t-blocked)}
+.tl-note[data-tone=warn] .tl-note-dot{background:#ffb547}
+.tl-note[data-tone=muted] .tl-note-dot{background:var(--t-dim)}
+.tl-note-text{gap:1px;line-height:1.35;min-width:0}
+.tl-note-title{color:var(--t-blocked);overflow-wrap:anywhere}
+.tl-note[data-tone=warn] .tl-note-title{color:#ffb547}
+.tl-note[data-tone=muted] .tl-note-title{color:var(--t-foreground)}
+.tl-note-sub{color:var(--t-muted);overflow-wrap:anywhere}
+.hd .tl-note-btn{height:36px;padding:0 12px;border-radius:6px;border:1px solid var(--t-input);background:var(--t-raised);font-size:12.5px;color:var(--t-foreground)}
+
+.tl-plain{min-height:36px;gap:8px;padding:0 10px;border-radius:8px;border:1px solid var(--t-border);font-size:13px;color:var(--t-muted)}
+.tl-plain-title{color:var(--t-foreground)}
+.tl-said{margin:0;font-size:12.5px;line-height:1.4;color:var(--t-muted)}

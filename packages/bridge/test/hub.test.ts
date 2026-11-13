@@ -517,3 +517,28 @@ describe("topic gate (CV1)", () => {
     expect(client.closed).toEqual({ code: 1008, reason: "too many topics" });
   });
 });
+
+describe("watchValue (CV5)", () => {
+  it("hears a publish that changes the value, a stale mark and a discard, but not a no-op; never subscribes", async () => {
+    const hub = newHub();
+    let n = 0;
+    const off = hub.watchValue("inbox", () => (n += 1));
+    hub.publish("inbox", { a: 1 });
+    hub.publish("inbox", { a: 1 });
+    hub.publish("inbox", { a: 2 });
+    hub.setStale("inbox", "x");
+    hub.discard("inbox");
+    expect(n).toBe(4);
+    const c = await join(hub);
+    await c.send({ type: "sub", topics: ["inbox"] });
+    off();
+    hub.publish("inbox", { a: 3 });
+    expect(n).toBe(4);
+    // A listener that throws does not stop the publish.
+    hub.watchValue("inbox", () => {
+      throw new Error("boom");
+    });
+    hub.publish("inbox", { a: 4 });
+    expect(hub.get("inbox")).toEqual({ a: 4 });
+  });
+});

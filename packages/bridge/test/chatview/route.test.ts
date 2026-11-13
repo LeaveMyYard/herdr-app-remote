@@ -240,11 +240,11 @@ describe("opening a chat (Activity, §5.3)", () => {
     s.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3", "timeline:t3", "keys"] }));
     await s.next(2);
     expect(opens()).toHaveLength(1);
-    s.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3"] }));
+    s.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3", "timeline:t3"] }));
     await s.next(3);
     expect(opens()).toHaveLength(1);
-    // The timeline (CV5) is not a chat open.
-    expect(activity().some((t) => t.includes("timeline"))).toBe(false);
+    // The timeline (CV5) is its own open, once per subscription too.
+    expect(activity().filter((t) => t === "Phone 1 opened the timeline of t3")).toHaveLength(1);
     s.ws.close();
     const s2 = await socket(cookie);
     s2.ws.send(JSON.stringify({ type: "sub", topics: ["chatview:t3"] }));
@@ -276,6 +276,26 @@ describe("opening a chat (Activity, §5.3)", () => {
     await s.next(3);
     expect(s.msgs[2]).toMatchObject({ type: "snap", topic: "chatview:t3" });
     expect(opens()).toHaveLength(1);
+    s.ws.close();
+  });
+
+  it("refuses a timeline open the same way while Activity can't record it", async () => {
+    const { id, cookie } = await paired();
+    sec.setCap(id, "transcript.read", true);
+    hub.publish("timeline:t3", { n: 1 });
+    const f = join(dir, "data", "activity.jsonl");
+    await rm(f, { force: true });
+    await mkdir(f);
+    const s = await socket(cookie);
+    s.ws.send(JSON.stringify({ type: "sub", topics: ["timeline:t3", "keys"] }));
+    await s.next(2);
+    expect(s.msgs[1]).toEqual({ type: "stale", topic: "timeline:t3", reason: "audit_unavailable" });
+    expect(s.msgs.some((m) => m.type === "snap" && m.topic === "timeline:t3")).toBe(false);
+    await rm(f, { recursive: true });
+    s.ws.send(JSON.stringify({ type: "sub", topics: ["timeline:t3"] }));
+    await s.next(3);
+    expect(s.msgs[2]).toMatchObject({ type: "snap", topic: "timeline:t3" });
+    expect(activity().filter((t) => t === "Phone 1 opened the timeline of t3")).toHaveLength(1);
     s.ws.close();
   });
 });

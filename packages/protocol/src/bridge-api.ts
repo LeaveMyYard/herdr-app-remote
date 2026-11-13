@@ -653,6 +653,9 @@ export type ChatAsk = z.infer<typeof ChatAsk>;
 
 const itemBase = { id: ChatItemId, at: z.string().datetime().nullable() };
 
+/** A Claude `tool_use` id as herdr-inbox keeps it (app-feed-v1 minor 1): 1 to 128 of `[A-Za-z0-9_-]`. */
+export const TOOL_USE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 /** A prompt's option list from the screen (§3a.3). Defined for CV7; CV3 never produces `prompt` items. */
 export const ChatPromptQuestion = z
   .object({
@@ -679,8 +682,12 @@ export const ChatItem = z.discriminatedUnion("role", [
     .strict(),
   z.object({ ...itemBase, role: z.literal("agent"), text: z.string(), cut: z.literal(true).optional() }).strict(),
   z.object({ ...itemBase, role: z.literal("tools"), tools: ChatTools }).strict(),
-  /** `cut`: the message's questions and options were cut to fit its 32 KB. */
-  z.object({ ...itemBase, role: z.literal("ask"), ask: ChatAsk, cut: z.literal(true).optional() }).strict(),
+  /**
+   * `cut`: the message's questions and options were cut to fit its 32 KB. `tool_use_id` (CV5): only on a `via:
+   * "inbox"` item, the `ask_operator` call's id in this agent's own transcript, so a `timeline:<t>` item anchored on
+   * it takes its place. An opaque id; never on any other item.
+   */
+  z.object({ ...itemBase, role: z.literal("ask"), ask: ChatAsk, cut: z.literal(true).optional(), tool_use_id: z.string().regex(TOOL_USE_ID).optional() }).strict(),
   /** `compact`: "Earlier messages were summarised". `day`: a day divider ("Today 21:02"), formatted by the phone from `at`. */
   z.object({ ...itemBase, role: z.literal("divider"), divider: z.enum(["compact", "day"]) }).strict(),
   /** A native prompt card (§3a, §7). Defined here for CV7; CV3 never produces one. */
@@ -702,7 +709,10 @@ export const ChatItem = z.discriminatedUnion("role", [
     .strict(),
   /** A status row such as "Stopped by you · 21:14" (CV8). Defined here; CV3 never produces one. */
   z.object({ ...itemBase, role: z.literal("status"), status: z.enum(["stopped"]) }).strict(),
-]);
+]).superRefine((i, ctx) => {
+  // A `tool_use_id` names an `ask_operator` call: never on a Claude ask, which no timeline item may replace.
+  if (i.role === "ask" && i.tool_use_id !== undefined && i.ask.via !== "inbox") ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tool_use_id"], message: "tool_use_id is only on a via inbox ask" });
+});
 export type ChatItem = z.infer<typeof ChatItem>;
 
 /**
@@ -751,6 +761,110 @@ export const ChatviewPage = z
   })
   .strict();
 export type ChatviewPage = z.infer<typeof ChatviewPage>;
+
+// ---- timeline topic (CV5): `timeline:<t>` (docs/chatview.md §4, §7) ----
+//
+// Plugin items for one terminal's chat view: the bridge filters rows it already holds from plugin topics by the
+// terminal address and passes on the plugin-built fields. Every item has a generic fallback (`title`, `line`,
+// `href`), so a kind the phone doesn't know is still drawn as a plain row. Acts are the plugin's own (inbox acts).
+
+/** Prefix of the timeline topic. */
+export const TIMELINE_PREFIX = "timeline:";
+
+/** The terminal id of a `timeline:<t>` topic, or null for any other topic or an id that fails {@link TERMINAL_ID}. */
+export function timelineTerminal(topic: string): string | null {
+  if (!topic.startsWith(TIMELINE_PREFIX)) return null;
+  const id = topic.slice(TIMELINE_PREFIX.length);
+  return TERMINAL_ID.test(id) ? id : null;
+}
+
+/** Items and strip entries one topic carries at most. */
+export const TIMELINE_ITEMS_MAX = 200;
+export const TIMELINE_STRIP_MAX = 8;
+
+/** A link the phone may follow: one of its own hash routes, never a URL to elsewhere. */
+export const TimelineHref = z.string().max(400).regex(/^#\/[A-Za-z0-9%._~/-]*$/);
+
+/** Strip data of `panorama.swarm`: the joined root's subagents counted per status, as Swarm draws them. */
+export const SwarmStripData = z
+  .object({
+    /** The panorama root key (opaque), and its space for the Swarm link. */
+    root_key: z.string().min(1),
+    space_id: z.string().min(1).nullable(),
+    /** Subagents per status (every finished one as `done`): running first, then finished, then those that need you. */
+    counts: z.array(z.object({ code: AgentCode, n: z.number().int().positive() }).strict()).max(AGENT_CODES.length),
+    /** Every subagent the root lists, plus the finished ones it hides. */
+    total: z.number().int().nonnegative(),
+    /** The subagent that needs you (waiting, blocked or failed), for a long-press Peek; null when none does. */
+    needs: z.string().min(1).nullable(),
+  })
+  .strict();
+export type SwarmStripData = z.infer<typeof SwarmStripData>;
+
+/** What a known kind's `data` must be. Any other kind's `data` is not checked here (the phone draws the fallback). */
+const TIMELINE_DATA: Record<string, z.ZodTypeAny> = {
+  "inbox.question": InboxGroupRow,
+  "inbox.alert": InboxAlertRow,
+  "inbox.failed": InboxFailedRow,
+};
+const STRIP_DATA: Record<string, z.ZodTypeAny> = { "panorama.swarm": SwarmStripData };
+
+const checkData =
+  (table: Record<string, z.ZodTypeAny>) =>
+  (v: { kind: string; data?: unknown }, ctx: z.RefinementCtx): void => {
+    const schema = Object.prototype.hasOwnProperty.call(table, v.kind) ? table[v.kind] : undefined;
+    if (!schema) return;
+    const r = schema.safeParse(v.data);
+    if (!r.success) for (const i of r.error.issues) ctx.addIssue({ ...i, path: ["data", ...i.path] } as z.IssueData);
+  };
+
+const PluginId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+const KindId = z.string().regex(/^[a-z0-9][a-z0-9_.-]{0,63}$/);
+
+export const TimelineItem = z
+  .object({
+    key: z.string().min(1).max(200),
+    plugin: PluginId,
+    kind: KindId,
+    /** Where it goes among messages when it has no anchor; null puts it at the end. */
+    at: z.string().datetime({ offset: true }).nullable(),
+    /**
+     * The `tool_use` it replaces: set only when the bridge found that id on an `ask_operator` call in this terminal's
+     * own transcript (an `ask` item with the same `tool_use_id`). Null: placed by `at`.
+     */
+    anchor: z.object({ tool_use_id: z.string().regex(TOOL_USE_ID) }).strict().nullable(),
+    title: z.string().max(400),
+    line: z.string().max(400),
+    href: TimelineHref.nullable(),
+    data: z.unknown(),
+  })
+  .strict()
+  .superRefine(checkData(TIMELINE_DATA));
+export type TimelineItem = z.infer<typeof TimelineItem>;
+
+export const StripItem = z
+  .object({
+    key: z.string().min(1).max(200),
+    plugin: PluginId,
+    kind: KindId,
+    label: z.string().max(200),
+    tone: z.enum(["ok", "warn", "bad", "muted"]),
+    href: TimelineHref.nullable(),
+    data: z.unknown(),
+  })
+  .strict()
+  .superRefine(checkData(STRIP_DATA));
+export type StripItem = z.infer<typeof StripItem>;
+
+export const TimelineTopic = z
+  .object({
+    terminal: z.string().regex(TERMINAL_ID),
+    /** Oldest first by `at` (null last). */
+    items: z.array(TimelineItem).max(TIMELINE_ITEMS_MAX),
+    strip: z.array(StripItem).max(TIMELINE_STRIP_MAX),
+  })
+  .strict();
+export type TimelineTopic = z.infer<typeof TimelineTopic>;
 
 /**
  * `terminal.send` (S16, capability `terminal.input`): `hc send` pastes `text` into the terminal and presses Enter.
