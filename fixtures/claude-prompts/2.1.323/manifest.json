@@ -1,0 +1,51 @@
+{
+  "claudeCode": "2.1.323",
+  "recorded": "by rig/scenarios/claude-prompts.sh: the real claude binary in a rig hc terminal, private HOME, a scripted fake Anthropic API on the rig loopback, no network, no credentials; all content fake",
+  "terminal": {
+    "cols": 200,
+    "rows": 120
+  },
+  "files": {
+    "permission": "Bash permission dialog (default mode). Options: Yes / Yes, and don’t ask again for: cargo test * / Yes, and switch to auto mode / No. Footer: Esc to cancel · Tab to amend",
+    "ask-single": "AskUserQuestion, one question, single select. 3 options + \"Type something.\" (Other) + \"Chat about this\" below a rule",
+    "ask-other": "ask-single with the cursor on the Other row (\"4. Type something.\"): typing there is the Other input",
+    "ask-multi": "AskUserQuestion multiSelect: rows \"[ ]\", an unnumbered \"Submit\" row after the Other row, tab bar with Submit tab",
+    "ask-multi-after-space": "after one space on row 1: \"[✔] Lint\"; the tab icon changed from ☐ to ☒",
+    "ask-multi-after-down-enter": "after down then enter on row 2: both rows toggled; Enter toggles too",
+    "ask-multi-on-submit": "cursor on the unnumbered Submit row",
+    "ask-multi-review": "Enter on Submit opens a review step: \"Submit answers\" / \"Cancel\"; a second Enter answers",
+    "plan": "ExitPlanMode in plan mode: plan text, then \"Yes, and use auto mode\" / \"Yes, manually approve edits\" / \"Tell Claude what to change\""
+  },
+  "keys": {
+    "multiSelectToggle": "space or enter toggles the row under the cursor; down moves; Submit is the row after Other; Enter on it opens a review step with 1. Submit answers / 2. Cancel",
+    "other": "hc send is refused while the terminal is blocked on a dialog (kind \"blocked\"); hc send --force on the Other row pastes the text and answers",
+    "cursor": "the cursor ❯ must be searched only inside the block below the last full-width rule (the echoed user message also starts with ❯ at column 0); its column differs per dialog: 0 (ask), 1 (permission), 3 (plan)",
+    "multiSelectPlusOther": "NOT RECORDED: what typing on the \"[ ] Type something\" row of a multiSelect question does (checks the row? Enter toggles or submits?). CV7 must refuse {other} on a multiSelect question until this is recorded"
+  },
+  "r5": [
+    {
+      "name": "permission",
+      "tool": "Bash",
+      "tool_use_before_dialog": true,
+      "lead_ms": 426
+    },
+    {
+      "name": "ask-single",
+      "tool": "AskUserQuestion",
+      "tool_use_before_dialog": true,
+      "lead_ms": 434
+    },
+    {
+      "name": "ask-multi",
+      "tool": "AskUserQuestion",
+      "tool_use_before_dialog": true,
+      "lead_ms": 414
+    },
+    {
+      "name": "plan",
+      "tool": "ExitPlanMode",
+      "tool_use_before_dialog": true,
+      "lead_ms": 413
+    }
+  ]
+}

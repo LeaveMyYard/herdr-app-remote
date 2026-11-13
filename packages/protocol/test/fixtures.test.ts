@@ -33,8 +33,8 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   "install/receipt": install.InstallReceipt,
 };
 
-/** Fake app-home files for the installer tests, and the Claude reader's rig fixtures: not protocol messages, so no schema. */
-const NOT_PROTOCOL = [join(ROOT, "app-home"), join(ROOT, "claude")];
+/** Fake app-home files for the installer tests, the Claude reader's rig fixtures and recorded Claude Code screens (H0): not protocol messages, so no schema. */
+const NOT_PROTOCOL = [join(ROOT, "app-home"), join(ROOT, "claude"), join(ROOT, "claude-prompts")];
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
