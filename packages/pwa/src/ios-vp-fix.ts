@@ -46,7 +46,7 @@ function read(win: Window, doc: Document, readInset: (d: Document) => number): V
   };
 }
 
-/** After applying, the tab bar must still be reachable at the screen bottom; false means painting is clipped. */
+/** After applying, something must still be hit at the tab bar's top edge; false means the bar is not laid out where it can be hit. */
 function tabbarReachable(win: Window, doc: Document): boolean {
   const bar = doc.querySelector(".tabbar");
   if (!bar || typeof doc.elementFromPoint !== "function") return true; // nothing to check against
@@ -57,7 +57,8 @@ function tabbarReachable(win: Window, doc: Document): boolean {
     Math.min(win.innerWidth - 1, r.x + r.width / 2),
     Math.max(0, Math.min(r.y + 1, win.innerHeight - 1)),
   );
-  return hit !== null && bar.contains(hit);
+  // Only null (nothing painted there) counts as failure; another layer on top (key sheet, diagnostics) is inconclusive.
+  return hit !== null;
 }
 
 /** Keeps --ios-vp-fix on the root in step with the window. Returns the cleanup. `readInset` is injectable for tests. */

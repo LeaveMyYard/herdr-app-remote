@@ -62,18 +62,25 @@ describe("installIosVpFix", () => {
     document.body.innerHTML = '<div class="tabbar"></div>';
     const bar = document.querySelector(".tabbar")!;
     bar.getBoundingClientRect = () => ({ x: 0, y: 850, width: 430, height: 83 }) as DOMRect;
-    document.elementFromPoint = () => null;
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(null);
     cleanup = installIosVpFix(fakeWin(true), document, () => 59);
     expect(fix()).toBe("0px");
     expect(document.documentElement.dataset.iosVpFix).toBe("dropped: tab bar not hit");
     listeners.get("resize")!();
     expect(fix()).toBe("0px");
   });
+  it("keeps the fix when another layer covers the tab bar", () => {
+    document.body.innerHTML = '<div class="tabbar"></div><div class="keys-scrim"></div>';
+    document.querySelector(".tabbar")!.getBoundingClientRect = () => ({ x: 0, y: 850, width: 430, height: 83 }) as DOMRect;
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(document.querySelector(".keys-scrim"));
+    cleanup = installIosVpFix(fakeWin(true), document, () => 59);
+    expect(fix()).toBe("59px");
+  });
   it("keeps the fix when the tab bar is hit, and cleanup removes it", () => {
     document.body.innerHTML = '<div class="tabbar"></div>';
     const bar = document.querySelector(".tabbar")!;
     bar.getBoundingClientRect = () => ({ x: 0, y: 850, width: 430, height: 83 }) as DOMRect;
-    document.elementFromPoint = () => bar;
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(bar);
     cleanup = installIosVpFix(fakeWin(true), document, () => 59);
     expect(fix()).toBe("59px");
     cleanup();
