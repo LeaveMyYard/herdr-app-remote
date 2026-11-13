@@ -66,7 +66,7 @@
 .qn-optlabel{font-size:15px}
 .qn-optdesc{font-size:13px;color:var(--t-muted)}
 .qn-label{font-size:12.5px;color:var(--t-muted);margin-top:4px}
-.hd .qn-input{height:44px;padding:0 12px;border-radius:8px;border:1px solid var(--t-input);background:transparent;color:var(--t-foreground);font:inherit;font-size:15px}
+.hd .qn-input{height:44px;padding:0 12px;border-radius:8px;border:1px solid var(--t-input);background:transparent;color:var(--t-foreground);font:inherit;font-size:16px}
 .hd .qn-input::placeholder{color:var(--t-muted)}
 .hd .qn-area{height:auto;min-height:88px;padding:10px 12px;resize:vertical}
 .hd .qn-said{margin:0;padding:8px 12px;border-radius:8px;font-size:12.5px;line-height:1.45;background:var(--t-background);border:1px solid var(--t-border);color:var(--t-working)}

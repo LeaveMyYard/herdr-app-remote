@@ -43,7 +43,9 @@ describe("safe areas", () => {
     expect(css).toMatch(/--sat:var\(--inset-top,env\(safe-area-inset-top,0px\)\)/);
     expect(css).toMatch(/--sab:var\(--inset-bottom,env\(safe-area-inset-bottom,0px\)\)/);
     expect(css).not.toMatch(/max\(env\(/);
-    expect(css).not.toMatch(/--sa[tb]:\d+px/);
+    // Only the keyboard rule (src/keyboard-inset.ts) sets the bottom inset to 0: the keyboard covers the home indicator.
+    expect(css.replace("html[data-kb]{--sab:0px}", "")).not.toMatch(/--sa[tb]:\d+px/);
+    expect(css).toContain("html[data-kb]{--sab:0px}");
     expect(css).toMatch(/\.app-header\{[^}]*var\(--sat\)/);
     expect(css).toMatch(/\.status-spacer\{[^}]*var\(--sat\)/);
     expect(css).toMatch(/\.tabbar\{[^}]*var\(--sab\)/);

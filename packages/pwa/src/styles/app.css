@@ -9,6 +9,8 @@
   --sat:var(--inset-top,env(safe-area-inset-top,0px));
   --sab:var(--inset-bottom,env(safe-area-inset-bottom,0px));
 }
+/* Keyboard up (src/keyboard-inset.ts): the frame is the visible part of the window and the keyboard covers the home indicator. */
+html[data-kb]{--sab:0px}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);overscroll-behavior:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 #root{height:100%}
 .hd{font-family:Inter,system-ui,sans-serif;font-optical-sizing:none /* the boards use the text cut at every size */;color:var(--t-foreground);-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01" 0;-webkit-tap-highlight-color:transparent}
@@ -31,7 +33,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);oversc
 /* iOS 26 standalone only (src/ios-vp-fix.ts sets --ios-vp-fix, otherwise 0): the layout viewport is short by exactly
    the top inset. Measured on iOS 26.6.1: screen 430x932, innerHeight/visualViewport 873, inset-top 59, inset-bottom 34,
    .ph y 0 h 873 (bottom 59 pt of the screen outside it). Extending .ph downward puts the tab bar at the screen bottom. */
-.ph{position:fixed;inset:0 0 calc(-1 * var(--ios-vp-fix, 0px)) 0;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
+.ph{position:fixed;inset:var(--kb-top, 0px) 0 var(--kb-bottom, calc(-1 * var(--ios-vp-fix, 0px))) 0;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
 .screen{min-height:0;overflow:hidden auto}
 .app-header{padding:var(--sat) 8px 0 16px;gap:8px;height:calc(var(--sat) + 44px)}
 .app-logo{width:24px;height:24px;border-radius:6px}
