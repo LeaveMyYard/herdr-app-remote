@@ -62,10 +62,15 @@ describe("interruptible: Claude Code's own footer, and no prompt block", () => {
   it("needs the hint as a footer segment on the last line, not anywhere on screen", () => {
     expect(interruptible("")).toBe(false);
     // In the conversation, not the footer.
-    const quoted = screen("stop-idle").replace("❯ H0", "❯ esc to interrupt H0");
+    const quoted = screen("stop-stream-after-esc").replace("❯ H0", "❯ esc to interrupt H0");
+    expect(quoted).toContain("❯ esc to interrupt H0");
     expect(interruptible(quoted)).toBe(false);
     const inText = screen("stop-idle").replace("? for shortcuts", "press esc to interrupt it");
     expect(interruptible(inText)).toBe(false);
+    // A line that is exactly the hint, above an idle footer (final pass L3): only the last line counts.
+    const bodyLine = screen("stop-stream-after-esc").replace("❯ H0", "esc to interrupt\n❯ H0");
+    expect(bodyLine).toMatch(/^esc to interrupt$/m);
+    expect(interruptible(bodyLine)).toBe(false);
     // A working footer under a prompt block: the prompt wins.
     expect(interruptible(screen("permission").replace(/Esc to cancel · Tab to amend\s*$/, "Esc to cancel · esc to interrupt\n"))).toBe(false);
   });

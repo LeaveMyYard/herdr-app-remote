@@ -1,5 +1,5 @@
 // CV8: Stop in the chat view's composer, and the "Stopped by you" row. Fake data only.
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { bridgeApi } from "@herdr-remote/protocol";
@@ -59,6 +59,34 @@ describe("Stop in the composer (CV8)", () => {
     expect(press).not.toHaveBeenCalled();
   });
 
+  it("a double tap on Send while working sends once and never stops: Stop comes back 1 s after the box empties (final pass M1)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { forgetConfirmations } = await import("../src/screens/ChatComposer");
+      forgetConfirmations();
+      const { i, press, send } = input();
+      view(topic(WORKING), i);
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await user.type(screen.getByRole("textbox"), "and the docs too");
+      const slot = () => document.querySelector<HTMLButtonElement>("form .chat-send")!;
+      await user.click(slot());
+      await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Send" }));
+      expect(send).toHaveBeenCalledTimes(1);
+      // The box is empty now; the second tap lands on the same spot, which is still Send (a no-op on an empty box).
+      expect(stopButton()).toBeNull();
+      expect(slot()).toHaveAccessibleName("Send");
+      await user.click(slot());
+      expect(press).not.toHaveBeenCalled();
+      expect(send).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(stopButton()).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("no Stop when idle, without prompt.answer, or with no stop at all", () => {
     for (const [t, o] of [
       [topic(IDLE), {}],
@@ -98,7 +126,7 @@ describe("Stop in the composer (CV8)", () => {
     for (const [r, words] of [
       [{ ok: false, code: "not_working" }, "Agent 1 already stopped."],
       [{ ok: false, code: "prompt_open" }, "Answer the prompt above first"],
-      [{ ok: false, code: "busy" }, "Another answer or Stop is running for Agent 1. Try again in a moment."],
+      [{ ok: false, code: "busy" }, "Something else is being sent to Agent 1. Try again in a moment."],
       [{ ok: false, code: "desk_draft" }, "desk-1 has unsent text in Agent 1's box. Nothing was pressed."],
       [{ ok: false, code: "cooldown" }, "Agent 1 was just stopped. Try again in a few seconds."],
       [{ ok: false, code: "unknown_effect", unknown_effect: true }, "Agent 1 may have been stopped. Look before you stop it again."],

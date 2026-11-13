@@ -60,6 +60,8 @@ export interface AgentStopOptions {
   cooldownMs?: number;
   /** After a timed-out or killed press, the lock is kept this long. Default {@link TIMEOUT_HOLD_MS}. */
   holdMs?: number;
+  /** Typing or a key-menu press runs into this terminal now (final pass L4): Stop waits (`busy`), nothing is read. */
+  busy?: (terminal: string) => boolean;
 }
 
 /**
@@ -178,6 +180,8 @@ export function agentStopActor(o: AgentStopOptions): AgentStopActor {
     const parsed = bridgeApi.AgentStopArgs.safeParse(args);
     if (!parsed.success) return { ok: false, code: "bad_args" };
     const t = parsed.data.terminal;
+    // An `hc send` or `hc keys` in flight there (hc may hold it for the desk) would land in an order hc decides.
+    if (o.busy?.(t)) return { ok: false, code: "busy" };
     if (!o.locks.take(t)) return { ok: false, code: "busy" };
     const device = client.principal?.deviceId ?? "";
     const ac = new AbortController();

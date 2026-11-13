@@ -98,4 +98,26 @@ describe("app press actors (CV8 wiring)", () => {
     p.cut(D1);
     expect(await stop).toMatchObject({ ok: false, code: "cancelled" });
   });
+
+  it("while a send (or a key press) is in flight in a terminal, Stop into it is busy and reads nothing (final pass L4)", async () => {
+    const calls: string[][] = [];
+    let release!: () => void;
+    const run: Runner = async (_cmd, args) => {
+      calls.push(args);
+      if (args[0] === "send") return new Promise<RunResult>((r) => (release = () => r(OK)));
+      if (args[0] === "read") return { code: 0, stdout: screen("stop-working-stream"), stderr: "" };
+      return OK;
+    };
+    const p = pressActors({ run, binaries: { hc: "hc" } as never, menu: MENU, promptSource: () => undefined, stopSource: () => ({ state: () => ({ working: true, blocked: false }), hasCard: () => false }) });
+    const send = p.terminal(client(D2), "terminal.send", { terminal: "t3", text: "and the docs" });
+    while (!calls.some((a) => a[0] === "send")) await new Promise((r) => setTimeout(r, 0));
+    const n = calls.length;
+    expect(await p.stopper(client(D1), "agent.stop", { terminal: "t3" })).toEqual({ ok: false, code: "busy" });
+    expect(calls.length).toBe(n);
+    // Another terminal is free (it reads, then refuses on the screen it got, which is fine here).
+    expect((await p.stopper(client(D1), "agent.stop", { terminal: "t4" }))!.code).not.toBe("busy");
+    release();
+    expect(await send).toMatchObject({ ok: true });
+    expect((await p.stopper(client(D1), "agent.stop", { terminal: "t3" }))!.code).not.toBe("busy");
+  });
 });

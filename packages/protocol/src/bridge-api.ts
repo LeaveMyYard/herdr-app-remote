@@ -1017,7 +1017,8 @@ export type AgentStopArgs = z.infer<typeof AgentStopArgs>;
  * - `desk_draft`: the composer on the desk holds unsent text, and Claude Code's footer then drops "esc to interrupt",
  *   so nothing on screen says Esc interrupts;
  * - `cooldown`: a Stop was pressed in this terminal less than {@link STOP_COOLDOWN_MS} ago;
- * - `busy`: an answer or another Stop runs for this terminal (or ran into a timeout and is still being killed);
+ * - `busy`: an answer, another Stop, or a phone's `terminal.send`/`terminal.keys` runs into this terminal (or ran into a
+ *   timeout and is still being killed);
  * - `not_open`: no chat view of this terminal is open and bound (the phone shows Stop only in one);
  * - `screen_unreadable`: `hc read` failed, so nothing could be checked;
  * - `forbidden`, `audit_unavailable`, `rate_limited`, `bad_args`: as for every act.

@@ -86,6 +86,9 @@ export function clockOf(ms: number): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/** After a send empties the box, Stop is not offered for this long (CV8): a double tap on Send never stops the agent. */
+export const STOP_AFTER_SEND_MS = 1_000;
+
 /** Under this much time left, the typing line turns amber and counts down. */
 export const SOON_MS = 10 * 60_000;
 
@@ -172,7 +175,11 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
     setSending(false);
     if (r.ok) {
       // Only the text that went is cleared: an Enter alone leaves a draft where it is.
-      if (value !== "") setText((t) => (t === value ? "" : t));
+      if (value !== "") {
+        setText((t) => (t === value ? "" : t));
+        // CV8: the emptied box would turn Send into Stop in the same spot; a double tap must not stop the agent.
+        setSentHold(true);
+      }
       return;
     }
     setNote(sendWords(r, host));
@@ -217,7 +224,14 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
   // brings Send back, so a message can still be queued. (The first-send question always holds text, so an empty box
   // already means none is open.)
   const [stopping, setStopping] = useState(false);
-  const stoppable = variant === "chat" && input.stop?.enabled === true && working && !locked && text === "";
+  /** Just after a send emptied the box: Send stays (a no-op on an empty box) for {@link STOP_AFTER_SEND_MS}. */
+  const [sentHold, setSentHold] = useState(false);
+  useEffect(() => {
+    if (!sentHold) return;
+    const t = setTimeout(() => setSentHold(false), STOP_AFTER_SEND_MS);
+    return () => clearTimeout(t);
+  }, [sentHold]);
+  const stoppable = variant === "chat" && input.stop?.enabled === true && working && !locked && text === "" && !sentHold;
   const onStop = async () => {
     const stop = input.stop;
     if (!stop || stopping) return;
