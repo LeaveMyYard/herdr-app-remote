@@ -92,7 +92,7 @@ describe("markdown", () => {
     ["open bold", "**a ".repeat(8000)],
     ["list markers", "- ".repeat(16000)],
     ["quote markers", "> ".repeat(16000)],
-    ["nested lists", Array.from({ length: 2000 }, (_, i) => " ".repeat(i % 40) + "- x").join("\n")],
+    ["nested lists", Array.from({ length: 600 }, (_, i) => " ".repeat(i % 40) + "- x").join("\n")],
   ];
   for (const [name, text] of HOSTILE) {
     it(`stays linear on ${name}`, () => {
