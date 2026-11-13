@@ -3,3 +3,21 @@ packages:
   - mod
   - rig
   - installer
+
+# The Claude Agent SDK (packages/bridge, chat view reader) needs none of its peers or its native
+# binary to read session history: sdk.mjs imports only node built-ins, and the reader never runs query().
+ignoredOptionalDependencies:
+  - "@anthropic-ai/claude-agent-sdk-darwin-arm64"
+  - "@anthropic-ai/claude-agent-sdk-darwin-x64"
+  - "@anthropic-ai/claude-agent-sdk-linux-arm64"
+  - "@anthropic-ai/claude-agent-sdk-linux-arm64-musl"
+  - "@anthropic-ai/claude-agent-sdk-linux-x64"
+  - "@anthropic-ai/claude-agent-sdk-linux-x64-musl"
+  - "@anthropic-ai/claude-agent-sdk-win32-arm64"
+  - "@anthropic-ai/claude-agent-sdk-win32-x64"
+packageExtensions:
+  "@anthropic-ai/claude-agent-sdk":
+    peerDependenciesMeta:
+      "@anthropic-ai/sdk": { optional: true }
+      "@modelcontextprotocol/sdk": { optional: true }
+      zod: { optional: true }

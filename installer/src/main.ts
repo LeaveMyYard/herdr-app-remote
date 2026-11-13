@@ -81,7 +81,7 @@ function filesUnder(dir: string): string[] {
   return out.sort();
 }
 
-/** The mod folder and the bridge bundle, read from the source checkout. */
+/** The mod folder, the bridge bundle and the Claude reader child, read from the source checkout. */
 export function loadPayload(source: string): Payload {
   const payload: Payload = new Map();
   const modDir = join(source, "mod", P.MOD_NAME);
@@ -94,6 +94,11 @@ export function loadPayload(source: string): Payload {
     throw new Error("The bridge bundle is not built: run pnpm install && pnpm build first. Nothing changed");
   }
   payload.set(P.BUNDLE_PATH, { data: bundle, mode: 0o644 });
+  try {
+    payload.set(P.READER_PATH, { data: readFileSync(join(source, "packages", "bridge", "dist", "claude-reader.mjs")), mode: 0o644 });
+  } catch {
+    throw new Error("The Claude reader is not built: run pnpm install && pnpm build first. Nothing changed");
+  }
   const pwa = join(source, "packages", "pwa", "dist");
   let pwaFiles: string[];
   try {

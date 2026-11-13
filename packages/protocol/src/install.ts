@@ -9,6 +9,8 @@ export const MOD_DIR = "mods/herdr-app-remote";
 export const RECEIPT_PATH = `${DATA_DIR}/install.json`;
 /** The esbuild bundle of the bridge. Run with the recorded `node`; it needs no exec bit. */
 export const BUNDLE_PATH = `${DATA_DIR}/bin/bridge.mjs`;
+/** The chat view's Claude reader child (docs/chatview.md §2.2), next to the bundle; the bridge runs it with its own node. */
+export const READER_PATH = `${DATA_DIR}/bin/claude-reader.mjs`;
 /** The built PWA, served by the bridge's API listener. */
 export const PWA_DIR = `${DATA_DIR}/pwa`;
 /** Held by `flock -n` for the bridge's whole life: one bridge per app home. */

@@ -1,0 +1,20 @@
+# A fake herdr-agent-usage config (the format of its README "Multiple Claude accounts"), for the Claude
+# reader's rig test. The test copies it to <private HOME>/.config/agent-usage/config.toml. Fake data only.
+
+[notify]
+delivery = "external"
+
+[[claude.profiles]]
+id = "agent-1"
+label = "Agent 1"
+config_dir = "~/claude-agent-1"
+
+[[claude.profiles]]
+id = "agent-2"
+label = "Agent 2"
+config_dir = "~/claude-agent-2"
+
+# Ignored, as agent-usage ignores it: a relative config_dir.
+[[claude.profiles]]
+id = "agent-3"
+config_dir = "relative/claude-agent-3"

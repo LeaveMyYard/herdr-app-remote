@@ -124,6 +124,7 @@ describe("install", () => {
     expect(t["mods/herdr-app-remote/remote.svg"]).toBe(`${sha(readFileSync(join(REPO, "mod/herdr-app-remote/remote.svg")))} 644`);
     expect(t[`${P.PWA_DIR}/index.html`]).toBe(`${sha(readFileSync(join(REPO, "packages/pwa/dist/index.html")))} 644`);
     expect(t[P.BUNDLE_PATH]).toBe(`${sha(readFileSync(join(REPO, "packages/bridge/dist/bridge.mjs")))} 644`);
+    expect(t[P.READER_PATH]).toBe(`${sha(readFileSync(join(REPO, "packages/bridge/dist/claude-reader.mjs")))} 644`);
     expect(t[P.DATA_DIR]).toBe("dir 700");
     expect(t[P.RECEIPT_PATH]).toMatch(/ 600$/);
     const record = P.InstallReceipt.parse(json(w, P.RECEIPT_PATH));

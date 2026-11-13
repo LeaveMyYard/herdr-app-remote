@@ -27,3 +27,4 @@ export { PushService, summarize, PUSH_TTL_S, type PushGate, type PushOptions } f
 export { terminalSendActor, readSend, sendArgs, TERMINAL_SEND, SEND_TIMEOUT_MS, TIMEOUT_HOLD_MS, type TerminalSendActor, type TerminalSendOptions } from "./terminal/send.js";
 export { terminalKeysActor, TERMINAL_KEYS, type TerminalKeysActor } from "./terminal/keys.js";
 export { KeysMenu, menuTopic, DEFAULT_KEYS } from "./terminal/keys-config.js";
+export * as claude from "./claude/index.js";
