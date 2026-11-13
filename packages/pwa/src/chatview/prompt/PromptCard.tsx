@@ -1,8 +1,9 @@
-// Native prompt cards (CV7, docs/chatview.md §3a, board design/PhoneChatView: states perm, ask1, askm, plan, changed).
+// Native prompt cards (CV7, docs/chatview.md §3a, board design/PhoneChatView: states perm, ask1, askm, plan, changed;
+// CV9: a question card with several questions, one block each, then Submit).
 //
 // The card shows what the bridge published (`ChatItem` role `prompt`): option labels are the screen's, in its order,
 // and every one is pressable. A press sends `prompt.answer {terminal, prompt_id, rev, choice}` once; the phone never
-// retries and never names keys. A question answers only on its Answer button. After a refusal that means the prompt
+// retries and never names keys. A question answers only on its Answer (or, with several, Submit) button. After a refusal that means the prompt
 // moved on (changed, gone) or an unknown effect, the card dims and offers no second press; the chat keeps that dimmed
 // card and its refusal below it (PromptTail) even once the bridge stops publishing it.
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -11,6 +12,7 @@ import * as W from "./words";
 import "../../styles/prompt-card.css";
 
 export type PromptItem = Extract<bridgeApi.ChatItem, { role: "prompt" }>;
+type PromptQuestion = NonNullable<PromptItem["questions"]>[number];
 
 export interface PromptActResult {
   ok: boolean;
@@ -306,76 +308,133 @@ function Check({ on }: { on: boolean }) {
 
 function Question(p: CardProps) {
   const qs = p.item.questions ?? [];
-  const [at, setAt] = useState(0);
-  const [picks, setPicks] = useState<number[][]>(() => qs.map(() => []));
+  if (qs.length > 1) return <Several {...p} />;
+  return <One {...p} />;
+}
+
+/** A question's options and its Other field (when the card offers it): the block both card layouts share. */
+function QuestionBody({ q, picks, other, off, onPick, onOther }: { q: PromptQuestion; picks: number[]; other: string; off: boolean; onPick: (i: number) => void; onOther: (text: string) => void }) {
+  return (
+    <div className="col pc-options" role={q.multi ? "group" : "radiogroup"} aria-label={q.header || q.text}>
+      {q.options.map((o, i) => {
+        const on = picks.includes(i);
+        return <Choice key={i} label={o.label} sub={o.description} selected={on} mark={q.multi ? <Check on={on} /> : <Radio on={on} />} disabled={off} onClick={() => onPick(i)} />;
+      })}
+      {/* Other on a multi-select is never offered (the bridge refuses it: H0 manifest, multiSelectPlusOther). */}
+      {q.other && !q.multi ? (
+        <input
+          className="pc-other"
+          type="text"
+          placeholder={W.OTHER_PLACEHOLDER}
+          value={other}
+          maxLength={2000}
+          disabled={off}
+          aria-label={W.OTHER_PLACEHOLDER}
+          onChange={(e) => onOther(e.target.value.replace(/[\r\n\t]/g, " "))}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Other text the bridge would take: not blank, and not read by the composer as a command (!, /, #). */
+const otherOk = (s: string) => s.trim() !== "" && !bridgeApi.PROMPT_OTHER_COMMAND.test(s);
+
+/** The picks after a tap on option `i`: a multi-select toggles it, a single-select picks it alone. */
+const tapped = (q: PromptQuestion, ps: number[], i: number) => (q.multi ? (ps.includes(i) ? ps.filter((x) => x !== i) : [...ps, i].sort((a, b) => a - b)) : [i]);
+
+/** One question (CV7): answers on its Answer button. */
+function One(p: CardProps) {
+  const q = p.item.questions![0]!;
+  const [picks, setPicks] = useState<number[]>([]);
   const [other, setOther] = useState("");
-  const q = qs[at];
-  if (!q) return <Unparsed {...p} />;
-  const mine = picks[at] ?? [];
-  const last = at === qs.length - 1;
   const off = p.pending || p.dim;
-  const toggle = (i: number) =>
-    setPicks((all) => all.map((ps, j) => (j !== at ? ps : q.multi ? (ps.includes(i) ? ps.filter((x) => x !== i) : [...ps, i].sort((a, b) => a - b)) : [i])));
-  const pickOne = (i: number) => {
-    setOther("");
-    toggle(i);
-  };
-  // The act carries one question's choice: a card with several (never published by the bridge yet, H0 did not
-  // record them) steps through them here but can't send.
-  // Other text the composer would read as a command (!, /, #) is refused by the bridge: it can't be sent from here.
-  const otherOk = other.trim() !== "" && !bridgeApi.PROMPT_OTHER_COMMAND.test(other);
-  const canSend = qs.length === 1 && (q.multi ? mine.length > 0 : mine.length === 1 || (q.other && otherOk));
+  const canSend = q.multi ? picks.length > 0 : picks.length === 1 || (q.other && otherOk(other));
   const submit = () => {
-    if (!last) return setAt(at + 1);
     if (!canSend) return;
-    if (q.multi) p.onAnswer({ picks: mine });
-    else if (mine.length === 1) p.onAnswer({ option: mine[0]! });
+    if (q.multi) p.onAnswer({ picks });
+    else if (picks.length === 1) p.onAnswer({ option: picks[0]! });
     else p.onAnswer({ other: other.trim() });
   };
   return (
     <Shell tone="accent" dim={p.dim} label={`Question from ${p.agent}`} chip={W.KIND.question} title={q.text}>
-      {qs.length > 1 ? (
-        <div className="row pc-steps">
-          {qs.map((x, i) => (
-            <span key={i} className="pc-step" data-on={i === at ? "" : undefined}>
-              {`${i + 1} · ${x.header}`}
+      <QuestionBody
+        q={q}
+        picks={picks}
+        other={other}
+        off={off}
+        onPick={(i) => {
+          setOther("");
+          setPicks((ps) => tapped(q, ps, i));
+        }}
+        onOther={(t) => {
+          setOther(t);
+          if (t !== "") setPicks([]);
+        }}
+      />
+      <div className="row pc-foot">
+        <button type="button" className="row f1 pc-answer" disabled={off || !canSend} onClick={submit}>
+          {W.ANSWER}
+        </button>
+      </div>
+    </Shell>
+  );
+}
+
+/**
+ * Several questions (CV9): one block per question, then Submit, which sends every answer at once (`{answers}`); the
+ * bridge walks Claude Code's tabs. A deviation from the board's askm stepper (named in the PR): the first block is the
+ * board's, with only its own step chip.
+ */
+function Several(p: CardProps) {
+  const qs = p.item.questions!;
+  const [picks, setPicks] = useState<number[][]>(() => qs.map(() => []));
+  const [others, setOthers] = useState<string[]>(() => qs.map(() => ""));
+  const off = p.pending || p.dim;
+  const answer = (i: number): bridgeApi.PromptQuestionAnswer | null => {
+    const q = qs[i]!;
+    const ps = picks[i] ?? [];
+    if (q.multi) return ps.length > 0 ? { picks: ps } : null;
+    if (ps.length === 1) return { option: ps[0]! };
+    const o = others[i] ?? "";
+    return q.other && otherOk(o) ? { other: o.trim() } : null;
+  };
+  const answers = qs.map((_, i) => answer(i));
+  const done = answers.filter((a) => a !== null).length;
+  const ready = done === qs.length;
+  const set = <T,>(all: T[], i: number, v: T) => all.map((x, j) => (j === i ? v : x));
+  return (
+    <Shell tone="accent" dim={p.dim} label={`Question from ${p.agent}`} chip={W.KIND.question} title={qs[0]!.text}>
+      {qs.map((q, i) => (
+        <div key={i} className="col pc-q" data-next={i > 0 ? "" : undefined}>
+          {i > 0 ? <div className="pc-title">{q.text}</div> : null}
+          <div className="row pc-steps">
+            <span className="pc-step" data-on="">
+              {`${i + 1} · ${q.header}`}
             </span>
-          ))}
-          <span className="f1" />
-          <span className="pc-step-n">{W.step(at + 1, qs.length)}</span>
-        </div>
-      ) : null}
-      <div className="col pc-options" role={q.multi ? "group" : "radiogroup"} aria-label={q.header || q.text}>
-        {q.options.map((o, i) => {
-          const on = mine.includes(i);
-          return <Choice key={i} label={o.label} sub={o.description} selected={on} mark={q.multi ? <Check on={on} /> : <Radio on={on} />} disabled={off} onClick={() => (q.multi ? toggle(i) : pickOne(i))} />;
-        })}
-        {q.other ? (
-          <input
-            className="pc-other"
-            type="text"
-            placeholder={W.OTHER_PLACEHOLDER}
-            value={other}
-            maxLength={2000}
-            disabled={off}
-            aria-label={W.OTHER_PLACEHOLDER}
-            onChange={(e) => {
-              setOther(e.target.value.replace(/[\r\n\t]/g, " "));
-              if (e.target.value !== "" && !q.multi) setPicks((all) => all.map((ps, j) => (j === at ? [] : ps)));
+            <span className="f1" />
+            <span className="pc-step-n">{W.step(i + 1, qs.length)}</span>
+          </div>
+          <QuestionBody
+            q={q}
+            picks={picks[i] ?? []}
+            other={others[i] ?? ""}
+            off={off}
+            onPick={(j) => {
+              setOthers((all) => set(all, i, ""));
+              setPicks((all) => set(all, i, tapped(q, all[i] ?? [], j)));
+            }}
+            onOther={(t) => {
+              setOthers((all) => set(all, i, t));
+              if (t !== "") setPicks((all) => set(all, i, []));
             }}
           />
-        ) : null}
-      </div>
+        </div>
+      ))}
       <div className="row pc-foot">
-        <button type="button" className="row f1 pc-answer" disabled={off || (last ? !canSend : false)} onClick={submit}>
-          {last ? W.ANSWER : W.nextPicked(mine.length)}
+        <button type="button" className="row f1 pc-answer" disabled={off || !ready} onClick={() => ready && p.onAnswer({ answers: answers as bridgeApi.PromptQuestionAnswer[] })}>
+          {ready ? W.SUBMIT : W.answeredOf(done, qs.length)}
         </button>
-        {/* Skip moves to the next question and sends nothing; hidden on the last or only one (operator Q521, 2026-11-13). */}
-        {last ? null : (
-          <button type="button" className="row nf pc-skip" disabled={off} onClick={() => setAt(at + 1)}>
-            {W.SKIP}
-          </button>
-        )}
       </div>
     </Shell>
   );

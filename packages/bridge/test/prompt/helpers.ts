@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { PendingTool } from "../../src/prompt/match.js";
 
 /** The H0 recordings of the pinned Claude Code (fixtures/claude-prompts/<version>/). */
-export const PINNED = "2.1.323";
+export const PINNED = "2.1.325";
 const DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../../fixtures/claude-prompts", PINNED);
 
 export type Screen =
@@ -30,7 +30,28 @@ export type Screen =
   | "stop-second-esc-300ms"
   | "stop-second-esc-3500ms"
   | "stop-working-draft"
-  | "stop-draft-after-esc";
+  | "stop-draft-after-esc"
+  // CV9 (several questions), recorded by rig/scenarios/claude-multiq.sh.
+  | "askq-q1"
+  | "askq-q2"
+  | "askq-review-unanswered"
+  | "askq-q1-typed"
+  | "askq-after-esc"
+  | "askq-q1-on-option2"
+  | "askq-q2-after-enter"
+  | "askq-q2-ticked"
+  | "askq-q2-on-next"
+  | "askq-q3-after-next"
+  | "askq-q3-on-other"
+  | "askq-review"
+  | "askq-q3-revisit"
+  | "askq-after-submit"
+  | "askq-q2-after-other"
+  | "askq-q2-other-typed"
+  | "askr-q1"
+  | "askr-q2-on-submit"
+  | "askr-review"
+  | "askr-after-esc";
 export const screen = (name: Screen): string => readFileSync(join(DIR, `${name}.txt`), "utf8");
 
 /** The tool calls the rig's fake API made for each recording (rig/fake-anthropic.mjs), as pending calls. */

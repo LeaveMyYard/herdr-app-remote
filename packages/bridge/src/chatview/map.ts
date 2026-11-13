@@ -309,7 +309,7 @@ interface Run {
 }
 
 /**
- * The user turns Claude Code 2.1.323 writes when Esc interrupts it (rig, fixtures/claude-prompts/2.1.323/manifest.json
+ * The user turns Claude Code 2.1.323 (and 2.1.325) writes when Esc interrupts it (rig, fixtures/claude-prompts/2.1.325/manifest.json
  * `stop`): while it streams a reply, and while a tool runs or a permission dialog is cancelled. Exactly these texts.
  */
 export const INTERRUPTED: ReadonlySet<string> = new Set(["[Request interrupted by user]", "[Request interrupted by user for tool use]"]);

@@ -12,9 +12,10 @@ export const SHOW_PLAN = "Show the whole plan ›";
 export const planChange = (agent: string): string => `Tell ${agent} what to change`;
 export const OTHER_PLACEHOLDER = "Other: type your own answer…";
 export const ANSWER = "Answer";
-export const SKIP = "Skip";
-export const nextPicked = (n: number): string => `Next: ${n} picked`;
 export const step = (i: number, n: number): string => `${i} of ${n}`;
+// CV9 (operator-delegated copy, COPY.md "Card: questions"): the button under a card with several questions.
+export const SUBMIT = "Submit";
+export const answeredOf = (done: number, n: number): string => `${done} of ${n} answered`;
 export const asks = (agent: string): string => `${agent} asks`;
 export const answerOnDesk = (desk: string): string => `Answer it on ${desk}.`;
 export const LOCKED = "Answer the prompt above first";

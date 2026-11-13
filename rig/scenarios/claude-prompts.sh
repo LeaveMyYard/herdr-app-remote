@@ -1,5 +1,5 @@
 # Claude prompts (H0): see claude-prompts-harness.mjs. PINNED_CLAUDE_VERSION moves together with fixtures/claude-prompts/.
-PINNED_CLAUDE_VERSION=2.1.323
+PINNED_CLAUDE_VERSION=2.1.325
 scenario_main() {
   start_stack || return 1
   node "$RIG/bin/fake-anthropic.mjs" 47200 "$RIG/api.log" & FAKE=$!

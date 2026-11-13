@@ -12,6 +12,12 @@
 //      `hc send --force` the bridge has;
 //   6. post-check for 2 s: the prompt left the screen, or the call got its result: `ok`; else `unknown_effect`.
 //
+// A card with several questions (CV9, `{answers}`) walks Claude Code's tabs one press at a time, each checked on a
+// fresh screen against the H0 CV9 recordings before the next: back to question 1 with `left` (phase A), then per
+// question its option (arrows, then Enter alone), its ticks (arrows and space, then Enter alone on "Next"/"Submit")
+// or its Other text (the confirmed forced send, other.ts); each must show the next tab with this one answered. Then
+// the review must list exactly the answers given, and Enter alone on "Submit answers" answers the call.
+//
 // Nothing is ever pressed again by itself. Digits are never pressed. Residual risk R6 (§3a.5): `hc keys` and
 // `hc send` wait for the desk to be quiet (up to 15 s), so the screen can change between the phase B read and Enter.
 import { bridgeApi } from "@herdr-remote/protocol";
@@ -20,7 +26,7 @@ import type { Actor } from "../app/act.js";
 import { DEFAULT_BINARIES, type Binaries } from "../plugins/detect.js";
 import type { Runner, RunResult } from "../plugins/exec.js";
 import { readHc } from "../terminal/hc-act.js";
-import { isReview, matchPrompt, REVIEW_TITLE, type Match, type PendingTool } from "./match.js";
+import { isReview, isSeveralReviewOf, matchPrompt, REVIEW_TITLE, type Match, type PendingTool, type Several } from "./match.js";
 import { TerminalLocks } from "./lock.js";
 import { confirmOtherField, otherSendArgs } from "./other.js";
 import { parseScreen, PROMPT_READ_LINES } from "./screen.js";
@@ -40,8 +46,11 @@ export const HELD_MS = 1_000;
 /** How long to wait for a redraw after a press before reading again. */
 export const SETTLE_MS = 150;
 
-/** The only keys this module presses: arrows and space in phase A, enter in phase B. */
-const PHASE_A_KEYS: ReadonlySet<string> = new Set(["up", "down", "space"]);
+/**
+ * The only keys this module presses: arrows and space in phase A, enter in phase B. `left` (CV9) only moves to the
+ * previous tab of a card with several questions, from a tab whose cursor is on row 1 or from the review (recorded).
+ */
+const PHASE_A_KEYS: ReadonlySet<string> = new Set(["up", "down", "space", "left"]);
 
 /** The card published for a terminal now, as matched (prompt/match.ts). */
 export interface PublishedPrompt {
@@ -108,6 +117,13 @@ function shownLabel(m: Match, row: number): string {
   const l = m.prompt?.rows[row]?.label ?? "";
   const cut = m.kind === "question" ? l : l.split(":")[0]!;
   return cut.split(" · ")[0]!.trim();
+}
+
+/** Activity words for one answer of a card with several questions: no labels (Activity keeps 80 characters). */
+function answerWords(x: bridgeApi.PromptQuestionAnswer, n: number): string {
+  if ("option" in x) return `option ${x.option + 1} of ${n}`;
+  if ("picks" in x) return `options ${[...x.picks].sort((a, b) => a - b).map((i) => i + 1).join(", ")} of ${n}`;
+  return `own answer (${[...x.other].length} chars)`;
 }
 
 /** The arrow keys from row `from` to row `to`. */
@@ -247,6 +263,174 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     return { ok: false, code: r.error === "timeout" ? "busy" : res.unknown_effect ? "prompt_changed" : (res.code ?? "prompt_changed"), audit_label: label };
   }
 
+  /** The same card on a fresh screen, showing tab `tab` (the review: `questions.length`). */
+  const onTab = (v: { m: Match } | null, id: string, tab: number): v is { text: string; m: Match & { several: Several } } =>
+    v !== null && v.m.promptId === id && v.m.several !== null && v.m.prompt !== null && v.m.several.tab === tab;
+
+  /**
+   * After a press that moves on from question `k` (Enter on an option, on Next/Submit, or the Other send): the screen
+   * must show tab `k + 1` with question `k` marked answered. Read until it does, or the post-check window ends.
+   * Still on tab `k`: nothing moved on, nothing was answered (`prompt_moved`). Anything else: unknown.
+   */
+  async function nextTab(t: string, card: Match, k: number, pending: readonly PendingTool[], label: string, refuse: () => ActResult, signal: AbortSignal): Promise<{ text: string; m: Match & { several: Several } } | ActResult> {
+    const end = now() + (o.postCheckMs ?? POST_CHECK_MS);
+    let last: { text: string; m: Match } | null = null;
+    for (;;) {
+      await sleep(SETTLE_MS);
+      const v = await look(t, pending, signal);
+      if (v !== null) last = v;
+      if (onTab(v, card.promptId, k + 1) && v.m.several.marks[k] === true) return v;
+      if (now() >= end) break;
+    }
+    if (onTab(last, card.promptId, k)) return refuse();
+    return { ok: false, code: "unknown_effect", unknown_effect: true, audit_label: label };
+  }
+
+  /** A phase B press of a step that is not the last (it moves to the next tab): hc's refusal, or a hold, ends the answer. */
+  function stepFailed(p: { r: RunResult; held: boolean; ms: number }, refused: Readonly<Record<string, string>>, label: string): ActResult | null {
+    const res = readHc(p.r, refused, "unknown_effect");
+    if (!res.ok) return res.unknown_effect ? { ok: false, code: res.code ?? "unknown_effect", unknown_effect: true, audit_label: label } : { ok: false, code: res.code ?? "prompt_changed", audit_label: label };
+    // Held by the desk: the press may have landed elsewhere (the review's Submit answers among them); stop here.
+    if (p.held) return { ok: false, code: "unknown_effect", unknown_effect: true, audit_label: heldLabel(label, p.ms) };
+    return null;
+  }
+
+  /** Phase A presses, then a fresh read that must be `ok`. */
+  async function moveA(t: string, ks: readonly string[], pending: readonly PendingTool[], label: string, signal: AbortSignal): Promise<{ text: string; m: Match } | null | ActResult> {
+    if (ks.length > 0) {
+      const fail = phaseAFailed(await keys(t, ks, "A", signal), label);
+      if (fail) return fail;
+      await sleep(SETTLE_MS);
+    }
+    return look(t, pending, signal);
+  }
+  const isResult = (x: unknown): x is ActResult => x !== null && typeof x === "object" && "ok" in x;
+
+  /**
+   * The Other send of one question of several, timed by its effect. hc pastes and presses Enter at once and then waits
+   * about 5 s for a turn that an answer to one question never starts (rig CV9, manifest `multiQuestion.sendWait`), so
+   * hc's own time says nothing about the desk. The screen is read while hc runs: the send counts as held (R6) when the
+   * next tab, with this question answered, showed later than {@link HELD_MS} after it started, or never while hc ran.
+   */
+  async function sendWatched(t: string, argv: string[], card: Match, k: number, pending: readonly PendingTool[], signal: AbortSignal): Promise<{ r: RunResult; held: boolean; ms: number }> {
+    const t0 = now();
+    let done = false;
+    const send = o.run(bin(), argv, { timeoutMs: o.pressTimeoutMs ?? PRESS_TIMEOUT_MS, signal }).finally(() => {
+      done = true;
+    });
+    let seen: number | null = null;
+    while (!done && seen === null && now() - t0 <= (o.pressTimeoutMs ?? PRESS_TIMEOUT_MS)) {
+      await sleep(SETTLE_MS);
+      if (done) break;
+      const v = await look(t, pending, signal).catch((e: unknown) => {
+        if (e instanceof Aborted) return null;
+        throw e;
+      });
+      if (onTab(v, card.promptId, k + 1) && v.m.several.marks[k] === true) seen = Math.max(0, now() - t0);
+    }
+    const r = await send;
+    const ms = seen ?? Math.max(0, now() - t0);
+    return { r, held: ms > (o.heldMs ?? HELD_MS), ms };
+  }
+
+  /** CV9: answers a card with several questions, one checked step at a time (see the head of this file). */
+  async function answerSeveral(
+    t: string,
+    card: Match,
+    v0: { text: string; m: Match },
+    answers: readonly bridgeApi.PromptQuestionAnswer[],
+    pending: readonly PendingTool[],
+    label: string,
+    refuse: () => ActResult,
+    signal: AbortSignal,
+  ): Promise<ActResult> {
+    const id = card.promptId;
+    const qs = card.several!.questions;
+    let v = v0;
+    // Back to question 1, one tab at a time. On a question tab the cursor first goes to row 1 (left was recorded from
+    // there; on an Other row it would move inside the text field instead).
+    while (true) {
+      if (!onTab(v, id, v.m.several?.tab ?? -1)) return refuse();
+      const tab = v.m.several!.tab;
+      if (tab === 0) break;
+      if (tab < qs.length && v.m.prompt!.cursor !== 0) {
+        const w = await moveA(t, arrows(v.m.prompt!.cursor, 0), pending, label, signal);
+        if (isResult(w)) return w;
+        if (!onTab(w, id, tab) || w.m.prompt!.cursor !== 0) return refuse();
+        v = w;
+      }
+      const w = await moveA(t, ["left"], pending, label, signal);
+      if (isResult(w)) return w;
+      if (!onTab(w, id, tab - 1)) return refuse();
+      v = w;
+    }
+    const shown: string[] = [];
+    for (let k = 0; k < qs.length; k++) {
+      const q = qs[k]!;
+      const x = answers[k]!;
+      if (!onTab(v, id, k)) return refuse();
+      const p = v.m.prompt!;
+      let pressed: { r: RunResult; held: boolean; ms: number };
+      let refusedBy: Readonly<Record<string, string>> = KEYS_REFUSED;
+      if ("option" in x) {
+        // Arrows to the option, check, then Enter alone: picks it and shows the next tab.
+        const w = await moveA(t, arrows(p.cursor, x.option), pending, label, signal);
+        if (isResult(w)) return w;
+        if (!onTab(w, id, k) || w.m.prompt!.cursor !== x.option) return refuse();
+        shown.push(q.options[x.option]!);
+        pressed = await timed(() => keys(t, ["enter"], "B", signal));
+      } else if ("picks" in x) {
+        const want = new Set(x.picks);
+        let cur = p.cursor;
+        let rows = p.rows;
+        // One row at a time: move, tick, and check the cursor and the box.
+        for (let i = 0; i < q.options.length; i++) {
+          if ((rows[i]!.check === true) === want.has(i)) continue;
+          const w = await moveA(t, [...arrows(cur, i), "space"], pending, label, signal);
+          if (isResult(w)) return w;
+          if (!onTab(w, id, k) || w.m.prompt!.cursor !== i || w.m.prompt!.rows[i]!.check !== want.has(i)) return refuse();
+          cur = i;
+          rows = w.m.prompt!.rows;
+        }
+        // Then to "Next" ("Submit" on the last question): every box as wanted, the Other box empty.
+        const next = q.options.length + 1;
+        const w = await moveA(t, arrows(cur, next), pending, label, signal);
+        if (isResult(w)) return w;
+        if (!onTab(w, id, k) || w.m.prompt!.cursor !== next) return refuse();
+        const r = w.m.prompt!.rows;
+        if (!q.options.every((_, i) => r[i]!.check === want.has(i)) || r[q.options.length]!.check !== false) return refuse();
+        shown.push(q.options.filter((_, i) => want.has(i)).join(", "));
+        pressed = await timed(() => keys(t, ["enter"], "B", signal));
+      } else {
+        // Other: to this question's Other row, a fresh read that confirms it (other.ts), then the one forced send.
+        const ks = arrows(p.cursor, q.options.length);
+        if (ks.length > 0) {
+          const fail = phaseAFailed(await keys(t, ks, "A", signal), label);
+          if (fail) return fail;
+          await sleep(SETTLE_MS);
+        }
+        const fresh = await read(t, signal);
+        const conf = fresh === null ? null : confirmOtherField(t, fresh, { promptId: id, toolUseId: card.toolUseId!, pending, question: k }, now());
+        if (conf === null) return refuse();
+        check(signal);
+        const argv = otherSendArgs(conf, t, id, x.other, now(), k);
+        shown.push(x.other);
+        refusedBy = SEND_REFUSED;
+        pressed = await sendWatched(t, argv, card, k, pending, signal);
+      }
+      const fail = stepFailed(pressed, refusedBy, label);
+      if (fail) return fail;
+      const w = await nextTab(t, card, k, pending, label, refuse, signal);
+      if (isResult(w)) return w;
+      v = w;
+    }
+    // The review: exactly these answers, every question answered, the cursor on "Submit answers".
+    if (!onTab(v, id, qs.length) || v.m.prompt!.cursor !== 0 || !isSeveralReviewOf(v.m.prompt!, v.m.several, shown)) return refuse();
+    pendingFor.set(v.m, [...pending]);
+    // Phase B: Enter alone on "Submit answers".
+    return settle(t, v.m, await timed(() => keys(t, ["enter"], "B", signal)), KEYS_REFUSED, label, signal);
+  }
+
   async function answer(a: bridgeApi.PromptAnswerArgs, signal: AbortSignal): Promise<ActResult> {
     const t = a.terminal;
     /** The prompt is not what the card showed: "Nothing was pressed." until a key went, then "Nothing was answered." */
@@ -268,6 +452,16 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
       if (!card.multi || card.submitRow === null || c.picks.some((i) => i >= card.buttons.length)) return { ok: false, code: "bad_choice" };
       const sorted = [...c.picks].sort((x, y) => x - y);
       label = auditLabel(card, `options ${sorted.map((i) => i + 1).join(", ")} of ${card.buttons.length} (${sorted.map((i) => shownLabel(card, card.buttons[i]!)).join(", ")})`);
+    } else if ("answers" in c) {
+      const sv = card.several;
+      if (sv === null || card.toolUseId === null || c.answers.length !== sv.questions.length) return { ok: false, code: "bad_choice" };
+      for (let i = 0; i < c.answers.length; i++) {
+        const q = sv.questions[i]!;
+        const x = c.answers[i]!;
+        const fits = "option" in x ? !q.multi && x.option < q.options.length : "picks" in x ? q.multi && x.picks.every((j) => j < q.options.length) : !q.multi;
+        if (!fits) return { ok: false, code: "bad_choice" };
+      }
+      label = auditLabel(card, `${c.answers.length} questions: ${c.answers.map((x, i) => answerWords(x, sv.questions[i]!.options.length)).join("; ")}`);
     } else {
       if (card.otherRow === null || card.toolUseId === null) return { ok: false, code: "bad_choice" };
       label = auditLabel(card, `own answer (${[...c.other].length} chars)`);
@@ -287,6 +481,8 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     const p = v0.m.prompt;
     const m = v0.m;
     pendingFor.set(m, pending);
+
+    if ("answers" in c) return answerSeveral(t, card, { text: v0.text, m }, c.answers, pending, label, refuse, signal);
 
     if ("option" in c) {
       const row = m.buttons[c.option]!;

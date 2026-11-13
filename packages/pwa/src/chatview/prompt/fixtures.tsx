@@ -1,4 +1,5 @@
-// The prompt cards as the PhoneChatView board draws them (states perm, ask1, askm, plan, changed), for the visual
+// The prompt cards as the PhoneChatView board draws them (states perm, ask1, askm, plan, changed; CV9: several, no
+// board), for the visual
 // harness only (`?fixture=prompt-cards&state=<state>`). Fake data only. Each card sits where the board puts it, so
 // the card's own region of the board render can be compared; the rest of the chat screen is CV4's.
 import type { bridgeApi } from "@herdr-remote/protocol";
@@ -49,7 +50,8 @@ export const PROMPT_FIXTURES: Record<string, { top: number; item: PromptItem; re
           text: "Question Text 346: pick all that apply.",
           header: "Area",
           multi: true,
-          other: true,
+          // The bridge never offers Other on a multi-select (CV9 kept that); the board draws the field here.
+          other: false,
           options: [
             { label: "Option A", description: "First test choice" },
             { label: "Option B", description: "Second test choice" },
@@ -59,6 +61,52 @@ export const PROMPT_FIXTURES: Record<string, { top: number; item: PromptItem; re
         { text: "Question Text 347: pick the order.", header: "Order", multi: false, other: true, options: [{ label: "Option A", description: null }] },
       ],
       options: [{ label: "Option A" }, { label: "Option B" }, { label: "Option C" }],
+    },
+  },
+  // CV9: three questions (single, multi-select, single), as the rig's H0-ASKQ call. No board: a new layout.
+  several: {
+    top: 120,
+    item: {
+      ...base,
+      role: "prompt",
+      prompt_id: ID(6),
+      kind: "question",
+      title: "Question Title 123: which approach should Agent 1 take?",
+      questions: [
+        {
+          text: "Question Title 123: which approach should Agent 1 take?",
+          header: "Approach",
+          multi: false,
+          other: true,
+          options: [
+            { label: "Option A", description: "Rewrite the parser in Project Alpha" },
+            { label: "Option B", description: "Patch the existing parser" },
+            { label: "Option C", description: "Leave it as it is" },
+          ],
+        },
+        {
+          text: "Question Title 456: which checks should Agent 1 run?",
+          header: "Checks",
+          multi: true,
+          other: false,
+          options: [
+            { label: "Lint", description: "Run the linter" },
+            { label: "Typecheck", description: "Run the type checker" },
+            { label: "Unit tests", description: "Run cargo test" },
+          ],
+        },
+        {
+          text: "Question Title 789: where should Agent 1 deploy?",
+          header: "Target",
+          multi: false,
+          other: true,
+          options: [
+            { label: "Staging", description: "The Project Alpha staging box" },
+            { label: "Nowhere", description: "Do not deploy yet" },
+          ],
+        },
+      ],
+      options: [],
     },
   },
   plan: {

@@ -29,7 +29,7 @@ import { parseScreen, PROMPT_READ_LINES, screenLines } from "./screen.js";
 
 export const AGENT_STOP = bridgeApi.AGENT_STOP;
 export const STOP_COOLDOWN_MS = bridgeApi.STOP_COOLDOWN_MS;
-/** The one key Stop presses (H0 rig: Esc interrupts Claude Code 2.1.323 while it streams or runs a tool). */
+/** The one key Stop presses (H0 rig: Esc interrupts Claude Code 2.1.323 and 2.1.325 while it streams or runs a tool). */
 const STOP_KEYS: readonly string[] = Object.freeze(["esc"]);
 /** Claude Code's footer segment while Esc interrupts it (rig, `stop-working-stream`, `stop-working-tool`). */
 export const INTERRUPT_HINT = "esc to interrupt";

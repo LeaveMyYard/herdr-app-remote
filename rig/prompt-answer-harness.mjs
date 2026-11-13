@@ -182,6 +182,61 @@ const forcedSince = (i) => calls.slice(i).filter((a) => a.includes('--force'));
   check('plan: the plan was approved (tool_result)', tr !== null, tr?.slice(0, 200));
   check('plan: no --force', forcedSince(i).length === 0);
 }
+// ---- CV9: AskUserQuestion with several questions (the tabbed UI): an option, ticks, an Other text, the review ----
+const keysSince = (i) => calls.slice(i).filter((a) => a[0] === 'keys').map((a) => a.slice(4));
+const onlyAllowedKeys = (ks) => ks.every((k) => k.every((x) => ['up', 'down', 'left', 'space'].includes(x)) || (k.length === 1 && k[0] === 'enter'));
+{
+  const p = await prompt('askq', ['--permission-mode', 'default'], 'H0-ASKQ please', /Question Title 123/);
+  check('askq: a question card with three questions, Other on the single-select ones', p.m.kind === 'question' && p.m.several?.questions.length === 3 && JSON.stringify(p.m.card.questions.map((q) => q.other)) === '[true,false,true]', p.m.card);
+  await stale('askq', p, { answers: [{ option: 1 }, { picks: [0, 2] }, { option: 0 }] });
+  const i0 = calls.length;
+  const r0 = await p.answer({ answers: [{ option: 1 }, { other: 'Lint please' }, { option: 0 }] });
+  check('askq: Other on the multi-select question is refused (bad_choice), nothing run', r0.code === 'bad_choice' && calls.length === i0, r0);
+  const i = calls.length;
+  const r = await p.answer({ answers: [{ option: 1 }, { picks: [0, 2] }, { other: 'Project Alpha answer 3' }] });
+  check('askq: answered (ok)', r.ok === true, r);
+  const tr = await resultOf(p.toolUseId);
+  check('askq: the tool_result has every answer', tr !== null && tr.includes('="Option B"') && tr.includes('="Lint, Unit tests"') && tr.includes('="Project Alpha answer 3"'), tr?.slice(0, 400));
+  const ks = keysSince(i);
+  check('askq: arrows, space and left in phase A; Enter alone; no digits', onlyAllowedKeys(ks), ks);
+  const forced = forcedSince(i);
+  check('askq: exactly one --force, the Other text of question 3', forced.length === 1 && forced[0].join(' ') === `send --json --force -- ${p.t} Project Alpha answer 3`, forced);
+  note({ askqKeys: ks });
+}
+{
+  const p = await prompt('askq-review-start', ['--permission-mode', 'default'], 'H0-ASKQ please', /Question Title 123/);
+  // The desk is on the Submit tab when the phone answers.
+  hc('keys', p.t, 'right', 'right', 'right');
+  await sleep(600);
+  const i = calls.length;
+  const r = await p.answer({ answers: [{ other: 'Project Alpha answer 1' }, { picks: [1] }, { option: 1 }] });
+  check('askq-review-start: answered (ok) from the Submit tab, back to question 1 with left', r.ok === true && JSON.stringify(keysSince(i).slice(0, 3)) === '[["left"],["left"],["left"]]', { r, keys: keysSince(i) });
+  const tr = await resultOf(p.toolUseId);
+  check('askq-review-start: the tool_result has every answer', tr !== null && tr.includes('="Project Alpha answer 1"') && tr.includes('="Typecheck"') && tr.includes('="Nowhere"'), tr?.slice(0, 400));
+  check('askq-review-start: one --force, for question 1', forcedSince(i).length === 1);
+}
+{
+  const p = await prompt('askq-desk-partial', ['--permission-mode', 'default'], 'H0-ASKQ please', /Question Title 123/);
+  // The desk picked Option B and ticked Lint, and is on question 2.
+  hc('keys', p.t, 'down'); await sleep(300);
+  hc('keys', p.t, 'enter'); await sleep(500);
+  hc('keys', p.t, 'space'); await sleep(500);
+  const m = P.matchPrompt(pending(), read(p.t));
+  check('askq-desk-partial: still the same card', m.promptId === p.m.promptId && m.several?.tab === 1, m.several);
+  const r = await p.answer({ answers: [{ option: 0 }, { picks: [2] }, { option: 0 }] });
+  check('askq-desk-partial: answered (ok)', r.ok === true, r);
+  const tr = await resultOf(p.toolUseId);
+  check('askq-desk-partial: the phone\'s answers replace the desk\'s', tr !== null && tr.includes('="Option A"') && tr.includes('="Unit tests"') && tr.includes('="Staging"') && !tr.includes('Lint'), tr?.slice(0, 400));
+}
+{
+  const p = await prompt('askr', ['--permission-mode', 'default'], 'H0-ASKR please', /Question Title 321/);
+  const i = calls.length;
+  const r = await p.answer({ answers: [{ option: 1 }, { picks: [0, 1] }] });
+  check('askr: answered (ok), the multi-select last (its Submit row)', r.ok === true, r);
+  const tr = await resultOf(p.toolUseId);
+  check('askr: the tool_result has both answers', tr !== null && tr.includes('="next"') && tr.includes('="README, CHANGELOG"'), tr?.slice(0, 400));
+  check('askr: no --force', forcedSince(i).length === 0);
+}
 // ---- the desk moved the cursor after the card was shown: the arrows start from where the cursor is now ----
 {
   const p = await prompt('moved', ['--permission-mode', 'default'], 'H0-ASK1 please', /Question Title 123/);

@@ -1,0 +1,23 @@
+
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   ~/project
+
+
+❯ H0-ASKR last please
+
+● Agent 1 will ask now.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Branch  ☐ Docs  ✔ Submit  →
+
+Question Title 321: which branch should Agent 1 use?
+
+❯ 1. main
+     The Project Alpha main branch
+  2. next
+     The Project Alpha next branch
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

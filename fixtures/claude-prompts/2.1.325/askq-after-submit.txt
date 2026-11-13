@@ -1,0 +1,120 @@
+
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   ~/project
+
+
+❯ H0-ASKQ answer please
+
+● Agent 1 will ask now.
+
+● User answered Claude's questions:
+  ⎿  · Question Title 123: which approach should Agent 1 take? → Option B
+     · Question Title 456: which checks should Agent 1 run? → Lint, Unit tests
+     · Question Title 789: where should Agent 1 deploy? → Project Alpha answer 3
+
+● Agent 1: done.
+
+✻ Worked for 0s · done 12:58 AM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                                                                    ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts
