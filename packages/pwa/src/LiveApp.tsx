@@ -3,7 +3,7 @@ import { bridgeApi, HostState } from "@herdr-remote/protocol";
 import { App, type AppData, type HomePromptState, type LiveSources } from "./App";
 import type { BridgeClient, ClientSnapshot } from "./bridge/client";
 import { fetchHostName, HostNameProvider } from "./bridge/host-name";
-import { fetchOlder } from "./bridge/chatview";
+import { fetchOlder, type OlderResult } from "./bridge/chatview";
 import { chatMode, isClaude, useWaited, VIEW_WAIT_MS, type ViewMode } from "./chatview/mode";
 import { fetchTerminalInput, type TerminalInputView } from "./bridge/me";
 import { useBridge, useTopics } from "./bridge/react";
@@ -185,14 +185,25 @@ export function LiveApp({
   const viewTopic = useMemo(() => parsed(bridgeApi.ChatviewTopic, viewTopicView?.data), [viewTopicView?.data]);
   const viewStale = viewTopicView?.stale ?? (viewTopicView?.data !== undefined && viewTopic === undefined ? "bad_data" : null);
   // An older page refused with 403: the capability went away; the text view takes over until the agent is reopened.
-  const [deniedFor, setDeniedFor] = useState<string | null>(null);
-  const denied = terminal !== undefined && deniedFor === terminal;
+  // It lasts until the topic brings a newer value (the capability may be back) or the agent is closed.
+  const [deniedFor, setDeniedFor] = useState<{ terminal: string; seq: number } | null>(null);
+  const viewSeq = viewTopicView?.seq ?? -1;
+  const denied = terminal !== undefined && deniedFor?.terminal === terminal && deniedFor.seq === viewSeq;
+  useEffect(() => {
+    if (terminal === undefined) setDeniedFor(null);
+  }, [terminal]);
+  const [shown, setShown] = useState<"chat" | "text" | null>(null);
+  const onForbidden = useCallback(() => {
+    if (terminal !== undefined) setDeniedFor({ terminal, seq: viewSeq });
+  }, [terminal, viewSeq]);
+  const loadOlder = useCallback((before: string, rev: string) => (terminal !== undefined ? fetchOlder(terminal, before, rev) : Promise.resolve<OlderResult>({ ok: false, code: "failed" })), [terminal]);
   const waited = useWaited(terminal ?? "", VIEW_WAIT_MS, viewName !== null && viewTopic === undefined && viewStale === null);
   const mode: ViewMode | undefined =
     terminal === undefined || !chatAgent
       ? undefined
       : chatMode({ claude, harnessId: chatAgent.program ?? chatAgent.harness, topic: denied ? undefined : viewTopic, stale: denied ? "forbidden" : viewStale, waitedOut: waited });
-  const textView = chatName !== null && mode?.kind === "text";
+  // The text view's topics follow what is on screen too: a draft or an open Keys sheet holds it after the chat source is up.
+  const textView = chatName !== null && (mode?.kind === "text" || shown === "text");
   useTopics(client, chatName ? [chatName] : [], textView);
   // The desktop's key menu (S16b), read only while the text view is open (the Keys sheet is there).
   useTopics(client, ["keys"], textView);
@@ -245,7 +256,7 @@ export function LiveApp({
             stale: chatView?.stale ?? (chatView?.data !== undefined && chatTopic === undefined ? "bad_data" : null),
             terminal,
             input,
-            ...(mode ? { mode, view: { topic: viewTopic, loadOlder: (before: string, rev: string) => fetchOlder(terminal, before, rev), onForbidden: () => setDeniedFor(terminal) } } : {}),
+            ...(mode ? { mode, onShown: setShown, view: { topic: viewTopic, loadOlder, onForbidden } } : {}),
           }
         : chatAgent
           ? { topic: undefined, stale: "no_terminal" }

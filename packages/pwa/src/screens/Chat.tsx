@@ -130,7 +130,7 @@ function loadFit(): boolean {
   }
 }
 
-export function Status({ status }: { status: AgentStatus }) {
+function Status({ status }: { status: AgentStatus }) {
   switch (status) {
     case "needs-you":
       return <span className="needs-pill">Needs you</span>;
@@ -156,7 +156,8 @@ export function ChatHead({ agent, backHref, right, roomy }: { agent: ChatAgent; 
         <img className="hn" src={HARNESS_ICON[agent.harness]} alt="" width={14} height={14} />
         <span className="nf tr chat-name">{agent.name}</span>
         <span className="f1 tr chat-folder">{agent.folder}</span>
-        <Status status={agent.status} />
+        {/* The chat view boards draw no mark for an idle agent (a new session). */}
+        {roomy && agent.status === "idle" ? null : <Status status={agent.status} />}
       </div>
       {right}
     </header>
@@ -165,7 +166,7 @@ export function ChatHead({ agent, backHref, right, roomy }: { agent: ChatAgent; 
 
 /** Why the chat view isn't here, with a close for the session (§6). */
 const closedNotices = new Set<string>();
-export function ViewNotice({ id, kind }: { id: string; kind: NoticeKind }) {
+function ViewNotice({ id, kind }: { id: string; kind: NoticeKind }) {
   const host = useHostName();
   const key = `${id}:${kind}`;
   const [closed, setClosed] = useState(() => closedNotices.has(key));

@@ -3,7 +3,7 @@
 // mailto, and every scan is linear or bounded, so a 32 KB reply of nothing but brackets or stars can't stall the
 // phone. Supported: paragraphs, #-headings, bullet and numbered lists (nested by indent), fenced code, > quotes,
 // rules, simple tables, `code`, **bold**, *italic*, ~~strike~~ and [links](url).
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
 /** How far ahead a closing mark is looked for, so one stray opener costs a bounded scan. */
 const SPAN = 2000;
@@ -73,6 +73,8 @@ export function inline(s: string, depth = 0, k = "i"): ReactNode[] {
           push(
             <a key={`${k}${key++}`} href={href} target="_blank" rel="noopener noreferrer nofollow">
               {inline(s.slice(i + 1, close), depth + 1, `${k}${key}.`)}
+              {/* §5.3: a link is shown with its full URL, so a label can't hide where it goes. */}
+              {s.slice(i + 1, close).trim() === href ? null : <span className="md-url">{` ${href}`}</span>}
             </a>,
           );
           i = end + 1;
@@ -87,14 +89,76 @@ export function inline(s: string, depth = 0, k = "i"): ReactNode[] {
   return out;
 }
 
-const FENCE = /^ {0,3}(```+|~~~+)\s*([A-Za-z0-9_+.-]*)\s*$/;
-const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/;
-const RULE = /^ {0,3}([-*_])([ \t]*\1){2,}[ \t]*$/;
+// Block markers are recognised by hand or by patterns with no overlapping quantifiers: transcript text is hostile,
+// and a run of spaces must cost one pass, not one per split (a lazy `.*?` between `[ \t]*` runs is cubic).
+const isSpace = (c: string | undefined) => c === " " || c === "\t";
+/** Leading spaces (at most 3) skipped: the index of the first other character, or -1 with 4 or more. */
+function indentEnd(l: string): number {
+  let i = 0;
+  while (i < l.length && l[i] === " ") i++;
+  return i > 3 ? -1 : i;
+}
+function trimEnd(l: string, to = l.length): number {
+  let e = to;
+  while (e > 0 && isSpace(l[e - 1])) e--;
+  return e;
+}
+
+/** An opening fence: the mark, its length and a plain info word, else null. */
+function fenceOpen(l: string): { mark: string; len: number } | null {
+  const i = indentEnd(l);
+  if (i < 0) return null;
+  const mark = l[i];
+  if (mark !== "`" && mark !== "~") return null;
+  let j = i;
+  while (l[j] === mark) j++;
+  if (j - i < 3) return null;
+  const info = l.slice(j, trimEnd(l)).trim();
+  return /^[A-Za-z0-9_+.-]*$/.test(info) ? { mark, len: j - i } : null;
+}
+function fenceClose(l: string, mark: string, len: number): boolean {
+  const i = indentEnd(l);
+  if (i < 0) return false;
+  let j = i;
+  while (l[j] === mark) j++;
+  return j - i >= len && trimEnd(l) <= j;
+}
+function heading(l: string): { level: number; text: string } | null {
+  const i = indentEnd(l);
+  if (i < 0 || l[i] !== "#") return null;
+  let j = i;
+  while (l[j] === "#") j++;
+  const level = j - i;
+  if (level > 6 || !isSpace(l[j])) return null;
+  let end = trimEnd(l);
+  // A closing run of #s counts only when a space comes before it.
+  let k = end;
+  while (k > j && l[k - 1] === "#") k--;
+  if (k < end && k > j && isSpace(l[k - 1])) end = trimEnd(l, k);
+  return { level, text: l.slice(j, end).trim() };
+}
+function isRule(l: string): boolean {
+  const i = indentEnd(l);
+  const c = i < 0 ? undefined : l[i];
+  if (c !== "-" && c !== "*" && c !== "_") return false;
+  let n = 0;
+  for (let j = i; j < l.length; j++) {
+    if (l[j] === c) n++;
+    else if (!isSpace(l[j])) return false;
+  }
+  return n >= 3;
+}
 const ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])[ \t]+(.*)$/;
 const QUOTE = /^ {0,3}>[ \t]?(.*)$/;
-const TABLE_SEP = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+const CELL = /^:?-+:?$/;
+function isTableSep(l: string): boolean {
+  if (!l.includes("-")) return false;
+  const t = l.trim();
+  const parts = t.replace(/^\|/, "").replace(/\|$/, "").split("|");
+  return parts.every((c) => CELL.test(c.trim()));
+}
 
-const startsBlock = (l: string) => FENCE.test(l) || HEADING.test(l) || RULE.test(l) || ITEM.test(l) || QUOTE.test(l);
+const startsBlock = (l: string) => fenceOpen(l) !== null || heading(l) !== null || isRule(l) || ITEM.test(l) || QUOTE.test(l);
 
 const cells = (l: string): string[] => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
 
@@ -114,13 +178,11 @@ function blocks(lines: string[], depth: number, k: string): ReactNode[] {
       continue;
     }
     const kk = `${k}${key++}`;
-    const fence = FENCE.exec(line);
+    const fence = fenceOpen(line);
     if (fence) {
-      const mark = (fence[1] as string)[0] as string;
-      const len = (fence[1] as string).length;
       const body: string[] = [];
       i++;
-      while (i < lines.length && !new RegExp(`^ {0,3}\\${mark}{${len},}\\s*$`).test(lines[i] as string)) body.push(lines[i++] as string);
+      while (i < lines.length && !fenceClose(lines[i] as string, fence.mark, fence.len)) body.push(lines[i++] as string);
       i++;
       out.push(
         <pre key={kk} className="md-pre">
@@ -129,17 +191,17 @@ function blocks(lines: string[], depth: number, k: string): ReactNode[] {
       );
       continue;
     }
-    const h = HEADING.exec(line);
+    const h = heading(line);
     if (h) {
       out.push(
-        <p key={kk} className="md-h" role="heading" aria-level={Math.min(6, (h[1] as string).length + 2)}>
-          {inline(h[2] as string, 0, kk)}
+        <p key={kk} className="md-h" role="heading" aria-level={Math.min(6, h.level + 2)}>
+          {inline(h.text, 0, kk)}
         </p>,
       );
       i++;
       continue;
     }
-    if (RULE.test(line)) {
+    if (isRule(line)) {
       out.push(<hr key={kk} className="md-hr" />);
       i++;
       continue;
@@ -204,7 +266,7 @@ function blocks(lines: string[], depth: number, k: string): ReactNode[] {
       out.push(render(root, kk));
       continue;
     }
-    if (line.includes("|") && TABLE_SEP.test(lines[i + 1] ?? "") && (lines[i + 1] ?? "").includes("-")) {
+    if (line.includes("|") && isTableSep(lines[i + 1] ?? "")) {
       const head = cells(line);
       i += 2;
       const rows: string[][] = [];
@@ -247,6 +309,6 @@ function blocks(lines: string[], depth: number, k: string): ReactNode[] {
 }
 
 /** The reply as elements. */
-export function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return <div className="md">{blocks(text.replace(/\r\n?/g, "\n").split("\n"), 0, "m")}</div>;
-}
+});

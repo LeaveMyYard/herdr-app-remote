@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeClient } from "../src/bridge/client";
 import { LiveApp } from "../src/LiveApp";
@@ -20,7 +21,7 @@ const flush = () => act(async () => {
 const recv = (s: FakeSocket, m: unknown) => act(async () => s.recv(m));
 const subs = (s: FakeSocket) => s.ofType("sub").flatMap((m) => m.topics as string[]);
 
-async function open(agent: string) {
+async function open(agent: string, pruneMs = 10_000) {
   window.location.hash = "#/agents";
   client = new BridgeClient({
     url: "wss://desk-1.example-tailnet.ts.net/api/v1/ws",
@@ -30,6 +31,7 @@ async function open(agent: string) {
       return s;
     },
     checkMe: async () => 200,
+    pruneMs,
   });
   client.start();
   render(<LiveApp client={client} hostName="desk-1" readHostName={async () => null} readTerminalInput={async () => ({ enabled: true, until: null, keys: { enabled: false, until: null } })} />);
@@ -117,5 +119,39 @@ describe("LiveApp chat view", () => {
     });
     expect(subs(s)).toContain("chat:term-1");
     expect(screen.getByText("Can't read this agent's history right now")).toBeInTheDocument();
+  });
+
+  it("keeps the terminal text and key menu subscribed while a draft holds the text view", async () => {
+    const s = await open("agent-1", 40);
+    await recv(s, { type: "snap", topic: "chatview:term-1", epoch: "e1", seq: 1, data: { terminal: "term-1", harness: "claude", state: "unavailable", reason: "reader_failed", items: [], older: false, rev: "", status: { state: "idle", since: null } } });
+    await userEvent.type(screen.getByRole("textbox", { name: "Message to the agent" }), "half a thought");
+    const before = { chat: subs(s).filter((t) => t === "chat:term-1").length, keys: subs(s).filter((t) => t === "keys").length };
+    // The chat source comes up while the draft is open: the text view stays, and its topics stay wanted.
+    await recv(s, { type: "snap", topic: "chatview:term-1", epoch: "e1", seq: 2, data: { ...TYPICAL, terminal: "term-1" } });
+    expect(screen.getByRole("textbox", { name: "Message to the agent" })).toHaveValue("half a thought");
+    expect(screen.getByRole("log", { name: "Terminal output" })).toBeInTheDocument();
+    // Past the client's prune delay, a topic nobody wants would have been dropped and the socket replaced.
+    await recv(s, { type: "snap", topic: "chat:term-1", epoch: "e1", seq: 1, data: { terminal: "term-1", lines: [[{ t: "still here" }]] } });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    expect(sockets).toHaveLength(1);
+    expect(client.getSnapshot().topics["chat:term-1"]?.data).toBeDefined();
+    expect(before.keys).toBe(1);
+    // Clearing the draft moves the screen to the chat view.
+    await userEvent.clear(screen.getByRole("textbox", { name: "Message to the agent" }));
+    expect(screen.getByRole("log", { name: "Conversation" })).toBeInTheDocument();
+  });
+
+  it("clears a 403 on an older page when the topic brings a newer value", async () => {
+    const s = await open("agent-1");
+    const older = { ...TYPICAL, terminal: "term-1", older: true };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 403 })));
+    await recv(s, { type: "snap", topic: "chatview:term-1", epoch: "e1", seq: 1, data: older });
+    await flush();
+    expect(screen.getByText("Chat history is off for this phone")).toBeInTheDocument();
+    await recv(s, { type: "snap", topic: "chatview:term-1", epoch: "e1", seq: 2, data: { ...older, older: false } });
+    expect(screen.getByRole("log", { name: "Conversation" })).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 });

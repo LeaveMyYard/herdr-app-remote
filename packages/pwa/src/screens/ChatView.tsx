@@ -41,13 +41,21 @@ const JUMP_PX = 160;
 /** Older items are asked for when the top is this close. */
 const TOP_PX = 160;
 
-function statusLine(status: bridgeApi.ChatviewStatus, now: number): ReactNode {
-  if (status.state === "working") {
+/** The working line owns its one-second clock, so the list is not re-rendered by it. */
+function StatusLine({ status, now }: { status: bridgeApi.ChatviewStatus; now: () => number }) {
+  const working = status.state === "working";
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!working) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [working]);
+  if (working) {
     const since = status.since ? Date.parse(status.since) : NaN;
     return (
       <div role="status" className="row cv-status">
         <Spinner size={13} />
-        <span>{Number.isFinite(since) ? `${W.WORKING} · ${W.elapsed(now - since)}` : W.WORKING}</span>
+        <span>{Number.isFinite(since) ? `${W.WORKING} · ${W.elapsed(now() - since)}` : W.WORKING}</span>
       </div>
     );
   }
@@ -81,14 +89,7 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
   }
   const items = cur.items;
 
-  // A clock for the status line and the day labels, ticking each second only while working.
   const working = topic.status.state === "working";
-  const [, tick] = useState(0);
-  useEffect(() => {
-    if (!working) return;
-    const t = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, [working]);
   const t0 = now();
 
   // Older pages.
@@ -102,6 +103,8 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
     };
   }, []);
   const inflight = useRef(false);
+  /** `before|rev` of a page the bridge answered with another history: not asked for again. */
+  const spent = useRef<string | null>(null);
   const heldRef = useRef(cur);
   heldRef.current = cur;
   const view = useRef<HTMLDivElement>(null);
@@ -110,22 +113,26 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
     const h = heldRef.current;
     const first = h.items[0];
     if (!loadOlder || !h.older || !first || inflight.current) return;
+    const key = `${first.id}|${h.rev}`;
+    if (spent.current === key) return;
     inflight.current = true;
     setLoading(true);
     setFailed(false);
-    const el = view.current;
-    if (el) anchor.current = { height: el.scrollHeight, top: el.scrollTop };
     void loadOlder(first.id, h.rev).then((r) => {
       inflight.current = false;
       if (!alive.current) return;
       setLoading(false);
-      if (r.ok) setHeld((c) => prepend(c, r.page, first.id));
-      else {
-        anchor.current = null;
-        // Another history: the topic is bringing it. Capability off: the text view takes over. Else offer a retry.
-        if (r.code === "forbidden") onForbidden?.();
-        else if (r.code === "failed") setFailed(true);
-      }
+      if (r.ok) {
+        // Where the reader is, taken as the page goes in (not when it was asked for): items that arrived meanwhile
+        // have moved it. iOS Safari has no scroll anchoring of its own.
+        const el = view.current;
+        if (el && heldRef.current.rev === r.page.rev && heldRef.current.items[0]?.id === first.id) anchor.current = { height: el.scrollHeight, top: el.scrollTop };
+        setHeld((c) => prepend(c, r.page, first.id));
+      } else if (r.code === "forbidden") onForbidden?.();
+      // Another history, or a cursor the bridge doesn't hold: the topic brings the current window. Not asked again
+      // for this same item and rev.
+      else if (r.code === "rev_changed") spent.current = key;
+      else setFailed(true);
     });
   }, [loadOlder, onForbidden]);
 
@@ -233,13 +240,13 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
                 );
               })}
               {tail}
-              {statusLine(topic.status, t0)}
+              <StatusLine status={topic.status} now={now} />
             </div>
           )}
           {empty ? (
             <>
               {tail}
-              {statusLine(topic.status, t0)}
+              <StatusLine status={topic.status} now={now} />
             </>
           ) : null}
         </div>

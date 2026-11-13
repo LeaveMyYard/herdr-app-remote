@@ -19,6 +19,8 @@ describe("fetchOlder", () => {
     vi.stubGlobal("fetch", reply(409));
     expect(await fetchOlder("t1", "a", "r")).toEqual({ ok: false, code: "rev_changed" });
     vi.stubGlobal("fetch", reply(404));
+    expect(await fetchOlder("t1", "a", "r")).toEqual({ ok: false, code: "rev_changed" });
+    vi.stubGlobal("fetch", reply(500));
     expect(await fetchOlder("t1", "a", "r")).toEqual({ ok: false, code: "failed" });
     vi.stubGlobal("fetch", reply(200, { nope: 1 }));
     expect(await fetchOlder("t1", "a", "r")).toEqual({ ok: false, code: "failed" });

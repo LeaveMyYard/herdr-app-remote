@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import type { OlderResult } from "../bridge/chatview";
 import { BusyProvider } from "../chatview/busy";
@@ -16,6 +16,8 @@ export interface ChatRouteProps {
     onForbidden?: (() => void) | undefined;
   } | undefined;
   /** Extension points of the chat view (CV5, CV7). */
+  /** What is on screen now (null while pending), so the text topics stay subscribed while a held text view shows. */
+  onShown?: ((view: "chat" | "text" | null) => void) | undefined;
   slots?: Pick<ChatViewProps, "strip" | "tail" | "renderItem" | "locked"> | undefined;
 }
 
@@ -24,7 +26,7 @@ export interface ChatRouteProps {
  * view, but waits while the person is in the middle of something in the text view (a draft, the Keys sheet), so
  * nothing they are doing is lost. There is no manual switch.
  */
-export function ChatRoute({ mode, text, view, slots }: ChatRouteProps) {
+export function ChatRoute({ mode, text, view, slots, onShown }: ChatRouteProps) {
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const report = useCallback((id: string, b: boolean) => {
     setBusy((s) => {
@@ -39,6 +41,10 @@ export function ChatRoute({ mode, text, view, slots }: ChatRouteProps) {
   const want = mode.kind === "chat" && view?.topic ? "chat" : mode.kind === "text" ? "text" : null;
   const shown = want === "chat" && last.current === "text" && busy.size > 0 ? "text" : want;
   last.current = shown;
+  useEffect(() => {
+    onShown?.(shown);
+    return () => onShown?.(null);
+  }, [shown, onShown]);
 
   if (shown === "chat" && view?.topic) {
     return (

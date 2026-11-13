@@ -15,7 +15,9 @@ export async function fetchOlder(terminal: string, before: string, rev: string):
       headers: { "X-Remote-Api": "1" },
     });
     if (r.status === 403) return { ok: false, code: "forbidden" };
-    if (r.status === 409) return { ok: false, code: "rev_changed" };
+    // Another history (409 rev_changed), no open chat view (409 not_open) or a cursor the bridge no longer holds (404
+    // unknown_cursor): none succeeds by asking again; the topic brings the current window, so wait for it.
+    if (r.status === 409 || r.status === 404) return { ok: false, code: "rev_changed" };
     if (r.status !== 200) return { ok: false, code: "failed" };
     const page = bridgeApi.ChatviewPage.safeParse(await r.json());
     return page.success ? { ok: true, page: page.data } : { ok: false, code: "failed" };

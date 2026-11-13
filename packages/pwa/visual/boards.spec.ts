@@ -28,7 +28,7 @@ const BOARDS: readonly { ref: string; url: string; nav?: boolean; skip?: Rect[];
   // not drawn yet, so those parts are skipped. The other board states (history, off) have items from CV5/CV7 or a
   // different scroll position and are checked by eye (screenshots in the PR); Codex's notice card is compared.
   { ref: "PhoneChatView-chat", url: "/?fixture=chatview&view=chat#/chat/a-1", nav: false, skip: [SWITCHER, STOP_BUTTON] },
-  { ref: "PhoneChatView-new", url: "/?fixture=chatview&view=new#/chat/a-1", nav: false, skip: [SWITCHER, { x: 0, y: 66, width: 390, height: 40 }] },
+  { ref: "PhoneChatView-new", url: "/?fixture=chatview&view=new#/chat/a-1", nav: false, skip: [SWITCHER] },
   { ref: "PhoneChatView-codex", url: "/?fixture=chatview&view=codex#/chat/a-1", nav: false, skip: [SWITCHER], clip: { x: 0, y: 158, width: 390, height: 72 } },
   // PhoneInbox: the fourth row is the placeholder of an answer the phone saw delivered (demo data seeds it).
   { ref: "PhoneInbox", url: "/?fixture=inbox#/inbox" },

@@ -94,6 +94,8 @@ export interface LiveSources {
         mode?: ViewMode;
         /** The `chatview:<t>` topic and its older pages. */
         view?: ChatRouteProps["view"];
+        /** Reports which view is on screen (see `ChatRoute`). */
+        onShown?: ChatRouteProps["onShown"];
       }
     | undefined;
   /** Sends an inbox `act` (draft, answer, dismiss, retry, stop showing, ack); resolves with the bridge's `res`. */
@@ -280,9 +282,9 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
     const route = cvDemo
       ? { mode: cvDemo.mode, view: { topic: cvDemo.topic, loadOlder: cvDemo.loadOlder } }
       : live?.chat?.mode
-        ? { mode: live.chat.mode, view: live.chat.view }
+        ? { mode: live.chat.mode, view: live.chat.view, onShown: live.chat.onShown }
         : null;
-    const chat = route ? <ChatRoute mode={route.mode} view={route.view} text={textProps} slots={cvDemo ? { strip: <div className="nf cv-strip-demo" data-vis-mask="" style={cvDemo.mode.kind === "text" ? { height: 42 } : undefined} /> } : undefined} /> : <Chat {...textProps} />;
+    const chat = route ? <ChatRoute mode={route.mode} view={route.view} onShown={"onShown" in route ? route.onShown : undefined} text={textProps} slots={cvDemo ? { strip: <div className="nf cv-strip-demo" data-vis-mask="" style={cvDemo.mode.kind === "text" ? { height: 42 } : undefined} /> } : undefined} /> : <Chat {...textProps} />;
     // The board's computer is "desk-1"; live data gets its name from LiveApp's provider.
     return <AppFrame>{typed ? <HostNameProvider name="desk-1">{chat}</HostNameProvider> : chat}</AppFrame>;
   }

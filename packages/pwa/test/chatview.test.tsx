@@ -51,6 +51,7 @@ describe("markdown", () => {
     const { container } = render(<Markdown text="[ok](https://example.com) [bad](javascript:alert(1))" />);
     const a = container.querySelectorAll("a");
     expect(a).toHaveLength(1);
+    expect(a[0]).toHaveTextContent("https://example.com");
     expect(a[0]).toHaveAttribute("rel", expect.stringContaining("noopener"));
     expect(container.textContent).toContain("[bad](javascript:alert(1))");
   });
@@ -69,12 +70,44 @@ describe("markdown", () => {
     expect(container.querySelectorAll("td")).toHaveLength(2);
   });
 
-  it("stays linear on hostile input", () => {
-    const t0 = performance.now();
-    for (const s of ["[".repeat(32768), "*".repeat(32768), "`".repeat(32768), "[a](".repeat(8000), "**a ".repeat(8000), "- ".repeat(16000), "> ".repeat(16000), "| a ".repeat(8000) + "\n" + "|-".repeat(8000)]) {
-      render(<Markdown text={s} />).unmount();
-    }
-    expect(performance.now() - t0).toBeLessThan(8000);
+  it("shows a link's full URL beside its label", () => {
+    const { container } = render(<Markdown text="[Open the docs](https://evil.example/login) and [https://ok.example](https://ok.example)" />);
+    const [a1, a2] = [...container.querySelectorAll("a")];
+    expect(a1).toHaveTextContent("Open the docs https://evil.example/login");
+    expect(a2?.textContent).toBe("https://ok.example");
+  });
+
+  // Each case is one hostile line of at most 32 KB; a cubic or quadratic pattern takes seconds, a linear scan well under this.
+  const HOSTILE: [string, string][] = [
+    ["heading with a space run", "## Results" + " ".repeat(16000) + "done"],
+    ["heading with a hash and space run", "# a" + " #".repeat(8000) + " ".repeat(8000) + "x"],
+    ["fence with a space run", "```" + " ".repeat(32000) + "!"],
+    ["table separator candidate", "a | b\n" + "|" + " ".repeat(32000) + "x"],
+    ["table separator of dashes and spaces", "a | b\n" + "- ".repeat(16000)],
+    ["rule of spaced marks", "- - - " + " ".repeat(32000) + "x"],
+    ["brackets", "[".repeat(32768)],
+    ["stars", "*".repeat(32768)],
+    ["backticks", "`".repeat(32768)],
+    ["open links", "[a](".repeat(8000)],
+    ["open bold", "**a ".repeat(8000)],
+    ["list markers", "- ".repeat(16000)],
+    ["quote markers", "> ".repeat(16000)],
+    ["nested lists", Array.from({ length: 2000 }, (_, i) => " ".repeat(i % 40) + "- x").join("\n")],
+  ];
+  for (const [name, text] of HOSTILE) {
+    it(`stays linear on ${name}`, () => {
+      const t0 = performance.now();
+      render(<Markdown text={text} />).unmount();
+      expect(performance.now() - t0).toBeLessThan(250);
+    });
+  }
+  it("renders a heading and a fence the same as before the hand-written scan", () => {
+    const { container } = render(<Markdown text={"## Title ##\n\n```ts extra!\nx\n```\n\n~~~\ny\n~~~"} />);
+    expect(container.querySelector("[role=heading]")?.textContent).toBe("Title");
+    expect(container.querySelectorAll("pre")).toHaveLength(1);
+    expect(container.textContent).toContain("```ts extra!");
+  });
+  it("inline parses a bold run", () => {
     expect(inline("**a**")).toHaveLength(1);
   });
 });
@@ -181,6 +214,11 @@ describe("ChatView", () => {
     expect(screen.getByText("Asked you a question")).toBeInTheDocument();
   });
 
+  it("draws no divider for a day without a time", () => {
+    view(topic([{ id: "d", role: "divider", at: null, divider: "day" }, ai("1", "hi")]));
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+
   it("says when there are no messages yet", () => {
     view(topic([]));
     expect(screen.getByText("No messages yet")).toBeInTheDocument();
@@ -243,6 +281,16 @@ describe("ChatView", () => {
       await act(async () => undefined);
       await userEvent.click(await screen.findByRole("button", { name: "Show earlier messages" }));
       expect(loadOlder).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not ask again for the same page after another history answered", async () => {
+      const loadOlder = vi.fn().mockResolvedValue({ ok: false, code: "rev_changed" });
+      const { rerender } = view(topic([you("b", "second")], { older: true }), { loadOlder });
+      await act(async () => undefined);
+      rerender(<HostNameProvider name="desk-1"><ChatView agent={agent} topic={topic([you("b", "second")], { older: true })} now={() => NOW} loadOlder={loadOlder} /></HostNameProvider>);
+      await act(async () => undefined);
+      expect(loadOlder).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("button", { name: "Show earlier messages" })).toBeNull();
     });
 
     it("drops to the text view's notice path on 403 by calling onForbidden", async () => {

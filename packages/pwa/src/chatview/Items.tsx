@@ -87,6 +87,8 @@ function AskCard({ item }: { item: Extract<Item, { role: "ask" }> }) {
 export function renderDefaultItem(item: Item, prev: Item | undefined, ctx: ItemCtx): ReactNode {
   switch (item.role) {
     case "divider":
+      // A day divider with no time has nothing to say (§3).
+      if (item.divider === "day" && !item.at) return null;
       return (
         <div className="row cv-divider" role="separator">
           <span className="f1 cv-rule" />
