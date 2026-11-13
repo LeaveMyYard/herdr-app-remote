@@ -163,15 +163,17 @@ function accountStrip(inp: TimelineInput): Strip[] {
   const mine = report.providers.filter((p) => p.inUse !== false && (p.paneActivity?.panes ?? []).some((x) => x.paneId === inp.terminal));
   const accounts = new Set(mine.map((p) => p.sameAccountAs || p.providerId));
   if (accounts.size !== 1) return [];
+  // The Usage row this chip links to is the canonical entry's (a duplicate is shown there as "also <label>"), so the
+  // label and key are the canonical entry's. agent-usage lists a pane under one entry only, often the duplicate.
   const id = [...accounts][0]!;
-  const p = mine.find((x) => x.providerId === id) ?? mine[0]!;
-  const account = oneLine(p.profileLabel || p.accountLabel || p.label);
-  if (account === "") return [];
-  const w = p.windows[0];
+  const p = report.providers.find((x) => x.providerId === id) ?? mine[0]!;
+  // Cut to fit the schema (`account` and `label` at most 200 with " · 100% used"; `window` at most 40).
+  const account = oneLine(p.profileLabel || p.accountLabel || p.label, 160);
+  const w = p.windows.find((x) => x.slot === "primary") ?? p.windows[0];
   const used = w === undefined ? null : Math.min(100, Math.max(0, Math.round(report.limitPercent === "used" ? w.displayPercent : 100 - w.displayPercent)));
   // The band follows what is left: plenty is ok, getting low warns, low is bad. No window (nothing read yet) is muted.
   const tone = w === undefined ? "muted" : w.band === "low" ? "bad" : w.band === "mid" ? "warn" : w.band === "high" ? "ok" : "muted";
-  const data: bridgeApi.UsageStripData = { provider_id: p.providerId, account, used_percent: used, window: w?.tag ?? null };
+  const data: bridgeApi.UsageStripData = { provider_id: p.providerId, account, used_percent: used, window: w === undefined ? null : oneLine(w.tag, 40) };
   return [
     {
       key: `usage.account:${p.providerId}`.slice(0, 200),

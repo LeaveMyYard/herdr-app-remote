@@ -142,6 +142,32 @@ describe("usage topic polling", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it("one release of a hold taken twice does not end the other, however often it is called", async () => {
+    vi.useFakeTimers();
+    const { runner } = stub(() => okRun());
+    setup(runner);
+    const first = driver!.hold();
+    const second = driver!.hold();
+    first();
+    first();
+    first();
+    expect(driver?.isPolling).toBe(true);
+    second();
+    expect(driver?.isPolling).toBe(false);
+  });
+
+  it("a stopped driver forgets its subscribers: a hold released later does not leave it polling", async () => {
+    vi.useFakeTimers();
+    const { runner } = stub(() => okRun());
+    const { hub } = setup(runner);
+    const a = await join(hub);
+    await a.send({ type: "sub", topics: ["usage"] });
+    const release = driver!.hold();
+    driver!.stop();
+    release();
+    expect(driver?.isPolling).toBe(false);
+  });
+
   it("hold() keeps collecting without a subscriber until released, and a subscriber alone does not release it", async () => {
     vi.useFakeTimers();
     const { calls, runner } = stub(() => okRun());
