@@ -63,6 +63,18 @@ describe("capabilities", () => {
     expect(hasCap({ ...c, "terminal.keys": false, "terminal.keys.until": null }, "terminal.keys", 0)).toBe(false);
   });
 
+  it("prompt.answer (CV7) is off by default, expires on its own clock, and is the one cap prompt.answer needs", () => {
+    expect(defaultCaps()["prompt.answer"]).toBe(false);
+    expect(hasCap(defaultCaps(), "prompt.answer", 0)).toBe(false);
+    const c = { ...defaultCaps(), "prompt.answer": true, "prompt.answer.until": 1000, "terminal.keys": true, "terminal.keys.until": null };
+    expect(hasCap(c, "prompt.answer", 999)).toBe(true);
+    expect(hasCap(c, "prompt.answer", 1000)).toBe(false);
+    expect(hasCap({ ...c, "prompt.answer.until": null }, "prompt.answer", 1e15)).toBe(true);
+    expect(ACTION_CAPS.get("prompt.answer")).toBe("prompt.answer");
+    // Neither typing nor the key menu implies it.
+    expect([...ACTION_CAPS.entries()].filter(([, cap]) => cap === "prompt.answer").map(([k]) => k)).toEqual(["prompt.answer"]);
+  });
+
   it("terminal.input expires", () => {
     const c = { ...defaultCaps(), "terminal.input": true, "terminal.input.until": 1000 };
     expect(hasCap(c, "terminal.input", 999)).toBe(true);
@@ -93,6 +105,13 @@ describe("audit redaction", () => {
     expect(describeAct("terminal.keys", { terminal: "t3", key: "ctrl-c", rev: "0123456789abcdef" }, "ctrl-c (1 key)")).toBe("pressed ctrl-c (1 key) in t3");
     expect(describeAct("terminal.keys", { terminal: "t3", key: "secretword", rev: "x" })).toBe("pressed a key in t3");
     expect(describeAct("terminal.keys", { terminal: SECRET, key: SECRET })).toBe("pressed a key in a terminal");
+  });
+
+  it("a prompt answer logs only the bridge's words, never the choice, Other text or the command", () => {
+    expect(describeAct("prompt.answer", { terminal: "t3", choice: { option: 0 } }, "a permission prompt\noption 1 of 3 (Yes)")).toBe("answered a permission prompt in t3: option 1 of 3 (Yes)");
+    expect(describeAct("prompt.answer", { terminal: "t3", choice: { other: SECRET } }, "a question\nown answer (23 chars)")).toBe("answered a question in t3: own answer (23 chars)");
+    expect(describeAct("prompt.answer", { terminal: "t3", choice: { other: SECRET } })).toBe("answered a prompt in t3");
+    expect(describeAct("prompt.answer", { terminal: SECRET, prompt_id: SECRET })).toBe("answered a prompt in a terminal");
   });
 
   it("inbox answers log the bridge-resolved option label, never client text", () => {

@@ -142,7 +142,7 @@ function http(method: string, path: string, headers: Headers, body?: string) {
   });
 }
 
-async function paired(caps: { navigate?: boolean; terminal?: boolean; keys?: boolean } = {}): Promise<string> {
+async function paired(caps: { navigate?: boolean; terminal?: boolean; keys?: boolean; prompts?: boolean } = {}): Promise<string> {
   const { code } = app!.security.issueCode();
   const r = await http("POST", "/api/v1/pair", OK_POST, JSON.stringify({ code, name: "Phone 1" }));
   expect(r.status).toBe(202);
@@ -151,6 +151,7 @@ async function paired(caps: { navigate?: boolean; terminal?: boolean; keys?: boo
   if (caps.navigate) app!.security.setCap(id, "navigate", true);
   if (caps.terminal) app!.security.setCap(id, "terminal.input", true);
   if (caps.keys) app!.security.setCap(id, "terminal.keys", true);
+  if (caps.prompts) app!.security.setCap(id, "prompt.answer", true);
   const sc = r.headers["set-cookie"];
   return (Array.isArray(sc) ? sc[0]! : sc!).split(";")[0]!;
 }
@@ -592,6 +593,48 @@ describe("startApp: topics over the link", () => {
     expect(text).toContain("Phone 2 pressed shift-tab (1 key) in t3");
     expect(text).toContain("Phone 2 pressed a key in t3: failed");
     expect(JSON.stringify(app!.security.activity())).not.toContain("Shift-Tab");
+  });
+
+  it("prompt.answer (CV7) needs its own capability; with it, a card the bridge never published presses nothing", async () => {
+    await start();
+    const args = { terminal: "t3", prompt_id: "a".repeat(64), rev: "r1", choice: { option: 0 } };
+    // Typing and the key menu don't imply it.
+    const off = await phone(await paired({ terminal: true, keys: true }));
+    send(off, { type: "hello", api: 1 });
+    send(off, { type: "act", id: "p0", kind: "prompt.answer", args });
+    expect(await off.until(resOf("p0"))).toMatchObject({ ok: false, code: "forbidden" });
+    const on = await phone(await paired({ prompts: true }));
+    send(on, { type: "hello", api: 1 });
+    send(on, { type: "act", id: "p1", kind: "prompt.answer", args });
+    expect(await on.until(resOf("p1"))).toMatchObject({ ok: false, code: "prompt_changed" });
+    // prompt.answer alone can't type.
+    send(on, { type: "act", id: "p2", kind: "terminal.send", args: { terminal: "t3", text: "hello" } });
+    expect(await on.until(resOf("p2"))).toMatchObject({ ok: false, code: "forbidden" });
+    expect(calls.some((c) => c.args[0] === "keys" || c.args[0] === "send")).toBe(false);
+    const text = app!.security.activity().map((e) => e.text);
+    expect(text).toContain("Phone 1 answered a prompt in t3: refused");
+    expect(text).toContain("Phone 2 answered a prompt in t3: failed");
+    expect(text).toContain("Phone 2: prompt.answer on");
+  });
+
+  it("turning prompt.answer off leaves a held send alone; losing terminal.input does not end prompt.answer", async () => {
+    await start();
+    holdSends = true;
+    const cookie = await paired({ terminal: true, prompts: true });
+    const ps = await phone(cookie);
+    send(ps, { type: "hello", api: 1 });
+    send(ps, { type: "act", id: "hs", kind: "terminal.send", args: { terminal: "t3", text: "held" } });
+    const end = Date.now() + 2000;
+    while (!calls.some((c) => c.args[0] === "send") && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
+    const id = app!.security.devices()[0]!.id;
+    app!.security.setCap(id, "prompt.answer", false);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(ps.msgs.some(resOf("hs"))).toBe(false);
+    app!.security.setCap(id, "prompt.answer", true, Date.now() + 60_000);
+    app!.security.setCap(id, "terminal.input", false);
+    expect(await ps.until(resOf("hs"))).toMatchObject({ ok: false, code: "cancelled" });
+    expect(app!.security.devices()[0]!.caps["prompt.answer"]).toBe(true);
+    expect(app!.security.devices()[0]!.prompt_answer_until).not.toBeNull();
   });
 
   it("an edited keys.json is published; a damaged one is set aside, said in Activity and the log, and never used", async () => {

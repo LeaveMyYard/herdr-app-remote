@@ -280,7 +280,7 @@ export function App({ connection, onRetry, homePrompt, tabBadges, data, live, ac
       ...(typed ? { now: typed.now, demoSheet: { open: typed.sheet, pressed: typed.pressed } } : {}),
     } as const;
     const route = cvDemo
-      ? { mode: cvDemo.mode, view: { topic: cvDemo.topic, loadOlder: cvDemo.loadOlder }, onShown: undefined }
+      ? { mode: cvDemo.mode, view: { topic: cvDemo.topic, loadOlder: cvDemo.loadOlder, promptAct: cvDemo.promptAct }, onShown: undefined }
       : live?.chat?.mode
         ? { mode: live.chat.mode, view: live.chat.view, onShown: live.chat.onShown }
         : null;

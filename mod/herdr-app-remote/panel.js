@@ -30,12 +30,20 @@ const CAPS = Object.freeze([
   ['terminal.input', 'Terminal input', 'Type text into terminals, then Enter'],
   // S16b: the same switch as terminal input (asks how long, shows "until"). Wording: operator, 2026-11-11.
   ['terminal.keys', 'Special keys', 'Lets this phone press Esc, Ctrl-C and the arrow keys in a terminal.'],
+  // CV7: native prompt answers and Stop; asks how long, like the two above. Wording: design/COPY.md.
+  ['prompt.answer', 'Answer prompts', "Lets this phone approve commands, answer Claude's questions and stop an agent."],
   ['push', 'Notifications', 'Receive push notifications'],
 ]);
 
 const ID = /^d-[0-9a-f]{16}$/;
 /** Switches that ask how long before turning on. */
-const EXPIRING = new Set(['terminal.input', 'terminal.keys']);
+const EXPIRING = new Set(['terminal.input', 'terminal.keys', 'prompt.answer']);
+/** Each expiring switch's `until` field in the panel view, and the suffix of its expiry row's element id. */
+const UNTIL = Object.freeze({
+  'terminal.input': ['terminal_input_until', ''],
+  'terminal.keys': ['terminal_keys_until', '-keys'],
+  'prompt.answer': ['prompt_answer_until', '-prompts'],
+});
 const STATUS = new Set(['serving', 'paused', 'setup', 'blocked']);
 const CHECK = new Set(['ok', 'warn', 'bad', 'off']);
 const PLUGIN = new Set(['ready', 'missing', 'too_old', 'broken', 'stale', 'not_running']);
@@ -103,7 +111,8 @@ export function sanitize(raw) {
     for (const [k] of CAPS) caps[k] = d.caps?.[k] === true;
     devices.push({
       id: d.id, name: str(d.name, 32), login: str(d.login, 120), state: d.state, caps,
-      terminal_input_until: num(d.terminal_input_until), terminal_keys_until: num(d.terminal_keys_until), created_at: num(d.created_at) ?? 0,
+      terminal_input_until: num(d.terminal_input_until), terminal_keys_until: num(d.terminal_keys_until),
+      prompt_answer_until: num(d.prompt_answer_until), created_at: num(d.created_at) ?? 0,
       last_seen: num(d.last_seen), live: num(d.live) ?? 0,
     });
   }
@@ -423,10 +432,11 @@ function capRow(m, c, d, on, [cap, label, about]) {
   const enabled = d.caps[cap];
   const expiring = EXPIRING.has(cap);
   const asking = expiring && m.expiryFor === d.id && (m.expiryCap ?? 'terminal.input') === cap;
-  const at = cap === 'terminal.keys' ? d.terminal_keys_until : d.terminal_input_until;
+  const [untilField, suffix] = UNTIL[cap] ?? ['terminal_input_until', ''];
+  const at = d[untilField];
   const until = expiring && enabled && at ? `until ${clock(at)}` : null;
-  // Element ids: terminal input keeps the ones it had (`expiry-<id>…`); special keys add `-keys`.
-  const eid = cap === 'terminal.keys' ? `expiry-${d.id}-keys` : `expiry-${d.id}`;
+  // Element ids: terminal input keeps the ones it had (`expiry-<id>…`); special keys add `-keys`, prompts `-prompts`.
+  const eid = `expiry-${d.id}${suffix}`;
   const toggle = div().id(`cap-${d.id}-${cap}`).w(30).h(16).rounded(8).flex_none().flex().items_center()
     .px(2).bg(enabled ? c.ok : c.raised).justify_end()
     .when(!enabled, (e) => e.justify_start())

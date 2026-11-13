@@ -155,3 +155,17 @@ describe("LiveApp chat view", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("LiveApp prompt cards (CV7)", () => {
+  it("draws a prompt card from chatview:<t> and sends prompt.answer through the socket", async () => {
+    const PERM = JSON.parse(readFileSync(resolve(FIX, "bridge-api/chatview/prompt-permission.json"), "utf8")) as { items: { role: string; prompt_id?: string; rev?: string }[] };
+    const s = await open("agent-1");
+    await recv(s, { type: "snap", topic: "chatview:term-1", epoch: "e1", seq: 1, data: { ...PERM, terminal: "term-1" } });
+    expect(screen.getByRole("region", { name: "Permission request" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^No/ }));
+    await flush();
+    const acts = s.ofType("act");
+    const card = PERM.items.find((i) => i.role === "prompt")!;
+    expect(acts).toContainEqual(expect.objectContaining({ kind: "prompt.answer", args: { terminal: "term-1", prompt_id: card.prompt_id, rev: card.rev, choice: { option: 3 } } }));
+  });
+});

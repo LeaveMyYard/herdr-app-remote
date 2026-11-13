@@ -1,5 +1,6 @@
 // `terminal.send` (S16): the only way a phone types into a terminal. It runs `hc send`, which pastes the text and
-// presses Enter, and nothing else: no `exec`, no `run`, no `hc keys`, never `--force`.
+// presses Enter, and nothing else: no `exec`, no `run`, no `hc keys`, never `--force` (the one forced send is a
+// prompt card's Other answer, prompt/other.ts, behind a confirmed screen).
 //
 // Capability (`terminal.input`, with its expiry), the rate limits and the audit line are `Security.act`'s; this
 // actor only checks the arguments, keeps one send in flight per device, and reads hc's answer.
@@ -20,6 +21,8 @@ export interface TerminalSendOptions {
   run: Runner;
   binaries?: Binaries;
   timeoutMs?: number;
+  /** A prompt answer runs in this terminal (CV7): nothing is typed into it meanwhile (`busy`). */
+  busy?: (terminal: string) => boolean;
 }
 
 /**
@@ -73,6 +76,7 @@ export function terminalSendActor(o: TerminalSendOptions): TerminalSendActor {
     // Security.act only lets an approved device through, so there is always a principal; the fallback is for tests.
     const key = client.principal?.deviceId ?? "";
     const { terminal, text } = parsed.data;
+    if (o.busy?.(terminal)) return { ok: false, code: "busy" };
     const bin = (o.binaries ?? DEFAULT_BINARIES).hc;
     const r = await inFlight.run(key, (signal) => o.run(bin, sendArgs(terminal, text), { timeoutMs: o.timeoutMs ?? SEND_TIMEOUT_MS, signal }));
     return r === undefined ? { ok: false, code: "busy" } : readSend(r);

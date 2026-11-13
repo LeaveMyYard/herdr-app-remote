@@ -211,3 +211,13 @@ printf '%s\\n' '{"started":null,"status":null,"turn":0}'`,
     expect(existsSync("pwned")).toBe(false);
   });
 });
+
+describe("terminalSendActor while a prompt answer runs (CV7)", () => {
+  it("is busy and types nothing into that terminal; other terminals are not held", async () => {
+    const { calls, runner } = stub(() => res(0, fx("send-ok.json")));
+    const actor = terminalSendActor({ run: runner, busy: (t) => t === "t3" });
+    expect(await actor(client(), "terminal.send", { terminal: "t3", text: "hello" })).toEqual({ ok: false, code: "busy" });
+    expect(calls).toHaveLength(0);
+    expect((await actor(client(), "terminal.send", { terminal: "t4", text: "hello" }))!.ok).toBe(true);
+  });
+});

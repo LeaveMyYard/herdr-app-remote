@@ -173,6 +173,31 @@ describe('panel copy', () => {
     expect(await FakeBridge.next(conn, (x) => x.type === 'panel_act')).toMatchObject({ args: { id: P2, cap: 'terminal.keys', on: false } });
   });
 
+  it('answer prompts (CV7): off by default, an expiry first, then minutes; off at once; until shown', async () => {
+    await push(view());
+    click('tab-devices');
+    click(`settings-${P2}`);
+    expect(text(m)).toContain('Answer prompts');
+    expect(text(m)).toContain("Lets this phone approve commands, answer Claude's questions and stop an agent.");
+    expect(text(m)).not.toContain('answer prompts');
+    click(`cap-${P2}-prompt.answer`);
+    expect(conn.lines.filter((l) => l.msg.type === 'panel_act')).toEqual([]);
+    expect(find(m.tree, `expiry-${P2}-prompts`)).not.toBeNull();
+    expect(find(m.tree, `expiry-${P2}-keys`)).toBeNull();
+    click(`expiry-${P2}-prompts-60`);
+    const a = await FakeBridge.next(conn, (x) => x.type === 'panel_act');
+    expect(a).toMatchObject({ kind: 'device.cap', args: { id: P2, cap: 'prompt.answer', on: true, minutes: 60 } });
+    expect(modLink.checkPanelAct(a.kind, a.args).ok).toBe(true);
+    const v = view();
+    v.devices[1].caps['prompt.answer'] = true;
+    v.devices[1].prompt_answer_until = Date.now() + 3600_000;
+    await push(v);
+    expect(text(m)).toContain('answer prompts');
+    expect(text(m)).toContain('until');
+    click(`cap-${P2}-prompt.answer`);
+    expect((await FakeBridge.next(conn, (x) => x.type === 'panel_act')).args).toEqual({ id: P2, cap: 'prompt.answer', on: false });
+  });
+
   it('chat history (CV1) is its own switch, off by default, and flips at once with no expiry', async () => {
     await push(view());
     click('tab-devices');

@@ -249,7 +249,7 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
         <KeysButton key={terminal} agentName={agentName} host={host} keys={input.keys} demoSheet={demoSheet} />
       </div>
       ) : null}
-      <form className={`row nf chat-form${variant === "chat" ? " chat-form-chat" : ""}`} onSubmit={onSubmit}>
+      <form className={`row nf chat-form${variant === "chat" ? " chat-form-chat" : ""}`} data-locked={locked ? "" : undefined} onSubmit={onSubmit}>
         <label htmlFor="chat-msg" className="chat-sr">
           Message to the agent
         </label>

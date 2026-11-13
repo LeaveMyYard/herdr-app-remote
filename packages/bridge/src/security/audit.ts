@@ -84,6 +84,13 @@ export function describeAct(kind: string, args: Record<string, unknown>, label?:
       // The entry is named only once the bridge found it in its own key menu (`label`: "<id>, <n> keys"); the id
       // the client sent is never logged, so a refused press reads "pressed a key".
       return `pressed ${label !== undefined && cleanLabel(label) ? cleanLabel(label) : "a key"} in ${target("terminal", "a terminal")}`;
+    case "prompt.answer": {
+      // CV7: the bridge's own words only (`<what>\n<detail>`, built by prompt/answer.ts from the screen as it resolved
+      // it): "a permission prompt" and "option 1 of 3 (Yes)". The phone's choice, Other text and the command never are.
+      const [what, detail] = (label ?? "").split("\n", 2).map((p) => cleanLabel(p, 80));
+      const at = target("terminal", "a terminal");
+      return `answered ${what || "a prompt"} in ${at}${detail ? `: ${detail}` : ""}`;
+    }
     case "inbox.answer": {
       const what = labelOrLength(label, args);
       return `answered ${inboxTarget(args, "a question")}${what}`;

@@ -4,6 +4,8 @@ import type { ChatAgent, ChatQuestion } from "./screens/Chat";
 import type { ChatInput } from "./screens/ChatComposer";
 import type { OlderResult } from "./bridge/chatview";
 import type { ViewMode } from "./chatview/mode";
+import { PROMPT_FIXTURES } from "./chatview/prompt/fixtures";
+import { seedPromptTail, type PromptAct } from "./chatview/prompt/PromptCard";
 
 const rule: bridgeApi.ChatLine = [{ t: "─".repeat(32), fg: "#383a3d" }];
 
@@ -125,6 +127,8 @@ export interface ChatviewDemo {
   text?: bridgeApi.ChatTopic;
   agent?: ChatAgent;
   loadOlder?: (before: string, rev: string) => Promise<OlderResult>;
+  /** CV7: what a prompt card's press answers in the demo. */
+  promptAct?: PromptAct;
 }
 
 export function chatviewDemo(state: string | null): ChatviewDemo | null {
@@ -151,6 +155,22 @@ export function chatviewDemo(state: string | null): ChatviewDemo | null {
       return { mode: { kind: "chat" }, topic: { ...base, items: [], status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent: { name: "Agent 5", folder: "~/code/alpha", harness: "claude", status: "idle" } };
     case "off":
       return { mode: { kind: "chat" }, topic: { ...base, items: todayItems.slice(2, 5), status: working }, input: input(false), now: () => clock, agent };
+    // CV7: a native prompt card inside the chat view (board state perm; `changed` after a refused press).
+    case "perm":
+    case "changed": {
+      const card = PROMPT_FIXTURES[state]!;
+      const item = { ...card.item, id: "prompt-demo", at: iso(today(21, 14, 0)) };
+      const items: Item[] = [
+        agentText("p-1", "The tokenizer pass is done. Running the parser tests next.", today(21, 13, 30)),
+        tools("p-2", "edit", 2, ["Edit · tokens.rs", "Edit · tree.rs"], today(21, 13, 40)),
+      ];
+      const promptAct: PromptAct = () => Promise.resolve(card.result ?? { ok: true });
+      if (state === "perm") return { mode: { kind: "chat" }, topic: { ...base, items: [...items, item], status: { state: "blocked", since: null } }, input: input(true), now: () => clock, agent: { ...agent, status: "needs-you" }, promptAct };
+      // Answered "Yes" and refused: the prompt moved on (the agent works again), the card stays dimmed with its refusal.
+      seedPromptTail("t2", item, "prompt_changed");
+      // The board draws no working line under the refusal (only the header's spinner), so the topic's status is idle.
+      return { mode: { kind: "chat" }, topic: { ...base, items, status: { state: "idle", since: null } }, input: input(true), now: () => clock, agent, promptAct };
+    }
     case "codex":
       return { mode: { kind: "text", notice: "codex" }, text: chatTopic, input: { ...input(true), keys: { enabled: true, menu: demoKeysMenu, press: ok } }, now: () => clock, agent: { name: "Agent 3", folder: "~/code/alpha", harness: "codex", status: "working" } };
     default:
