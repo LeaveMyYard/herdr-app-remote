@@ -9,6 +9,7 @@ import { join, newHub } from "../helpers.js";
 import { hostState, mkFeed, root } from "../panorama/helpers.js";
 import { SID, agent, oneDay, tool, user } from "../chatview/helpers.js";
 import { ASK1, BASH, IDLE, screen } from "./helpers.js";
+import { ASKQ } from "./several.js";
 
 const TRANSCRIPT = `/work/claude-1/projects/-work-project-alpha/${SID}.jsonl`;
 const TOPIC = "chatview:t1";
@@ -193,5 +194,27 @@ describe("Stop's view of the chat view (CV8)", () => {
     await poll();
     expect(value().state).toBe("unavailable");
     expect(drv.stopSource.state("t1")).toBeNull();
+  });
+});
+
+describe("CV9: a card with several questions", () => {
+  const askqTurn = [user(1, "Plan the release"), agent(2, [tool(ASKQ.id, "AskUserQuestion", ASKQ.input)])];
+
+  it("is published from any tab, and stays the same card (id and rev) while the tabs change", async () => {
+    const { env, card, poll, value } = await setup("waiting", askqTurn, screen("askq-q1"));
+    const first = card()!;
+    expect(bridgeApi.ChatviewTopic.safeParse(value()).success).toBe(true);
+    expect(first.kind).toBe("question");
+    expect(first.questions?.length).toBe(3);
+    for (const name of ["askq-q2-ticked", "askq-q3-on-other", "askq-review"] as const) {
+      env.screen = screen(name);
+      await poll();
+      expect(card()?.prompt_id, name).toBe(first.prompt_id);
+      expect(card()?.rev, name).toBe(first.rev);
+    }
+    // A tab the card can't show (the desk typed an Other answer) is read-only.
+    env.screen = screen("askq-q3-revisit");
+    await poll();
+    expect(card()?.kind).toBe("unparsed");
   });
 });

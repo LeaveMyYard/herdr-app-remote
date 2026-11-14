@@ -933,32 +933,43 @@ export const PROMPT_OTHER_UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 /** The composer's mode characters at the start of an Other answer (after spaces): refused (see {@link PromptChoice}). */
 export const PROMPT_OTHER_COMMAND = /^\s*[!/#]/;
 
+const OptionChoice = z.object({ option: z.number().int().min(0).max(19) }).strict();
+const PicksChoice = z
+  .object({ picks: z.array(z.number().int().min(0).max(19)).min(1).max(20) })
+  .strict()
+  .refine((c) => new Set(c.picks).size === c.picks.length, { message: "picks are distinct" });
+const OtherChoice = z
+  .object({
+    other: z
+      .string()
+      .refine((s) => s.trim().length > 0, { message: "an Other answer is not empty" })
+      .refine((s) => [...s].length <= PROMPT_OTHER_MAX_CHARS, { message: `at most ${PROMPT_OTHER_MAX_CHARS} characters` })
+      .refine((s) => !PROMPT_OTHER_UNSAFE.test(s), { message: "one line, no control characters" })
+      // If the desk answered the prompt while hc held the send (R6), the text lands in the composer, where these
+      // start a shell command (!), a slash command (/) or a memory note (#). Refused, so that can only be a message.
+      .refine((s) => !PROMPT_OTHER_COMMAND.test(s), { message: "an Other answer does not start with !, / or #" }),
+  })
+  .strict();
+/** One question's answer inside `{answers}`: as for a one-question card. */
+export const PromptQuestionAnswer = z.union([OptionChoice, PicksChoice, OtherChoice]);
+export type PromptQuestionAnswer = z.infer<typeof PromptQuestionAnswer>;
+
 /**
  * The answer:
  * - `{option: i}`: the i-th entry of the card's `options` (0-based; a permission, plan or generic card, or a
  *   single-select question);
  * - `{picks: [i…]}`: a multi-select question's options to tick (0-based into `questions[0].options`, at least one,
  *   no repeats);
- * - `{other: text}`: a single-select question's Other field (only when `questions[0].other` is true).
+ * - `{other: text}`: a single-select question's Other field (only when `questions[0].other` is true);
+ * - `{answers: [a…]}` (CV9): a question card with several `questions`, one answer per question in their order, each
+ *   `{option: i}` (into that question's `options`, single-select), `{picks: […]}` (multi-select) or `{other: text}`
+ *   (only when that question's `other` is true).
  */
 export const PromptChoice = z.union([
-  z.object({ option: z.number().int().min(0).max(19) }).strict(),
-  z
-    .object({ picks: z.array(z.number().int().min(0).max(19)).min(1).max(20) })
-    .strict()
-    .refine((c) => new Set(c.picks).size === c.picks.length, { message: "picks are distinct" }),
-  z
-    .object({
-      other: z
-        .string()
-        .refine((s) => s.trim().length > 0, { message: "an Other answer is not empty" })
-        .refine((s) => [...s].length <= PROMPT_OTHER_MAX_CHARS, { message: `at most ${PROMPT_OTHER_MAX_CHARS} characters` })
-        .refine((s) => !PROMPT_OTHER_UNSAFE.test(s), { message: "one line, no control characters" })
-        // If the desk answered the prompt while hc held the send (R6), the text lands in the composer, where these
-        // start a shell command (!), a slash command (/) or a memory note (#). Refused, so that can only be a message.
-        .refine((s) => !PROMPT_OTHER_COMMAND.test(s), { message: "an Other answer does not start with !, / or #" }),
-    })
-    .strict(),
+  OptionChoice,
+  PicksChoice,
+  OtherChoice,
+  z.object({ answers: z.array(PromptQuestionAnswer).min(2).max(4) }).strict(),
 ]);
 export type PromptChoice = z.infer<typeof PromptChoice>;
 
@@ -980,6 +991,10 @@ export type PromptAnswerArgs = z.infer<typeof PromptAnswerArgs>;
  * - `prompt_moved`: the same, found after phase A already pressed keys (arrows, multi-select ticks, the Enter that
  *   opens the review step), so the desk's prompt may show them, but nothing was answered ("The prompt changed. Look
  *   again." / "Nothing was answered.");
+ * - `prompt_partial` (CV9): a card with several questions stopped after answering some of them on the desk, before
+ *   "Submit answers": nothing was submitted, and the desk keeps those picks. `message` says how far it got ("Stopped
+ *   after 1 of 3 answers. Nothing was submitted."); the phone adds "Those answers stay picked in Agent 1's terminal.
+ *   Finish it there.";
  * - `prompt_gone`: the prompt is no longer on the screen ("Already answered on desk-1.");
  * - `busy`: another answer runs for this terminal, or hc refused because the terminal is busy ("desk-1 is typing.
  *   Try again in a moment.");
@@ -989,7 +1004,7 @@ export type PromptAnswerArgs = z.infer<typeof PromptAnswerArgs>;
  * With `unknown_effect: true` (code `unknown_effect`, `timeout` or `cancelled`) Enter or the Other text may have
  * reached the agent ("Agent 1 may have got your answer. Look before you answer again."). The phone never retries.
  */
-export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_moved", "prompt_gone", "busy", "bad_choice", "forbidden", "audit_unavailable", "unknown_effect"] as const;
+export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_moved", "prompt_partial", "prompt_gone", "busy", "bad_choice", "forbidden", "audit_unavailable", "unknown_effect"] as const;
 
 // ---- Stop (CV8): `agent.stop` (docs/chatview.md §3a.6) ----
 //

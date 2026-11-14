@@ -1,6 +1,6 @@
 # Stop (CV8): what Esc does in the pinned claude (recorded), and the bridge's real agent.stop actor against it
 # (agent-stop-harness.mjs). Fake data only; the operator's Claude config is hidden by run.sh.
-PINNED_CLAUDE_VERSION=2.1.323
+PINNED_CLAUDE_VERSION=2.1.325
 scenario_main() {
   [ -f "$REPO/packages/bridge/dist/index.js" ] || { fail "bridge not built: run pnpm -r build first"; return 1; }
   start_stack || return 1

@@ -13,12 +13,16 @@
 //    Esc to cancel · Tab to amend            <- the footer
 //
 // AskUserQuestion rows have description lines indented under them, an Other row ("Type something."), and a rule
-// with "Chat about this" below it; multi-select rows start with "[ ]" / "[✔]" and have an unnumbered "Submit" row.
+// with "Chat about this" below it; multi-select rows start with "[ ]" / "[✔]" and have an unnumbered "Submit" row
+// ("Next" when the call asks several questions, CV9).
 //
 // Pure: no I/O. Anything that is not exactly this shape is `null` (the caller shows the screen read-only and
 // presses nothing): fail closed.
 
-/** A screen row of the option list. `n` is its number, null for the unnumbered multi-select "Submit" row. */
+/**
+ * A screen row of the option list. `n` is its number, null for the unnumbered multi-select "Submit" row (one
+ * question) or "Next" row (CV9: a multi-select question among several).
+ */
 export interface PromptRow {
   n: number | null;
   /** The label as the screen shows it, without the cursor, the number or a multi-select box. */
@@ -52,8 +56,8 @@ export type ScreenRead = { ok: true; prompt: ScreenPrompt } | { ok: false; lines
 const RULE = /^ *─{20,} *$/;
 /** An option row: optional cursor, a number, ". ", the label. */
 const OPTION = /^( *)(❯)?( *)(\d{1,2})\. (\S.*)$/;
-/** The multi-select Submit row: unnumbered. */
-const SUBMIT = /^( *)(❯)?( *)Submit$/;
+/** The multi-select Submit row (one question) or Next row (several questions, CV9): unnumbered. */
+const SUBMIT = /^( *)(❯)?( *)(Submit|Next)$/;
 /** A multi-select box at the start of a label. */
 const BOX = /^\[( |✔)\] (\S.*)$/;
 /** The most lines between the opening rule and option 1 (a long command, a wrapped question). */
@@ -146,13 +150,13 @@ export function parseScreen(text: string): ScreenRead {
       continue;
     }
     const s = SUBMIT.exec(line);
-    // "Submit" comes only after boxed rows, and only once.
+    // "Submit" (or "Next") comes only after boxed rows, and only once.
     if (s && rows.length > 0 && rows.every((r) => r.check !== null) && !belowRule) {
       if (s[2] !== undefined) {
         if (cursor >= 0) return fail();
         cursor = rows.length;
       }
-      rows.push({ n: null, label: "Submit", check: null, desc: [], belowRule });
+      rows.push({ n: null, label: s[4]!, check: null, desc: [], belowRule });
       continue;
     }
     // A description: indented deeper than the last row's number, under a numbered row.

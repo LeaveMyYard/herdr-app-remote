@@ -12,6 +12,12 @@
 //      `hc send --force` the bridge has;
 //   6. post-check for 2 s: the prompt left the screen, or the call got its result: `ok`; else `unknown_effect`.
 //
+// A card with several questions (CV9, `{answers}`) walks Claude Code's tabs one press at a time, each checked on a
+// fresh screen against the H0 CV9 recordings before the next: back to question 1 with `left` (phase A), then per
+// question its option (arrows, then Enter alone), its ticks (arrows and space, then Enter alone on "Next"/"Submit")
+// or its Other text (the confirmed forced send, other.ts); each must show the next tab with this one answered. Then
+// the review must list exactly the answers given, and Enter alone on "Submit answers" answers the call.
+//
 // Nothing is ever pressed again by itself. Digits are never pressed. Residual risk R6 (§3a.5): `hc keys` and
 // `hc send` wait for the desk to be quiet (up to 15 s), so the screen can change between the phase B read and Enter.
 import { bridgeApi } from "@herdr-remote/protocol";
@@ -20,7 +26,7 @@ import type { Actor } from "../app/act.js";
 import { DEFAULT_BINARIES, type Binaries } from "../plugins/detect.js";
 import type { Runner, RunResult } from "../plugins/exec.js";
 import { readHc } from "../terminal/hc-act.js";
-import { isReview, matchPrompt, REVIEW_TITLE, type Match, type PendingTool } from "./match.js";
+import { isReview, isSeveralReviewOf, matchPrompt, REVIEW_TITLE, type Match, type PendingTool, type Several } from "./match.js";
 import { TerminalLocks } from "./lock.js";
 import { confirmOtherField, otherSendArgs } from "./other.js";
 import { parseScreen, PROMPT_READ_LINES } from "./screen.js";
@@ -40,8 +46,11 @@ export const HELD_MS = 1_000;
 /** How long to wait for a redraw after a press before reading again. */
 export const SETTLE_MS = 150;
 
-/** The only keys this module presses: arrows and space in phase A, enter in phase B. */
-const PHASE_A_KEYS: ReadonlySet<string> = new Set(["up", "down", "space"]);
+/**
+ * The only keys this module presses: arrows and space in phase A, enter in phase B. `left` (CV9) only moves to the
+ * previous tab of a card with several questions, from a tab whose cursor is on row 1 or from the review (recorded).
+ */
+const PHASE_A_KEYS: ReadonlySet<string> = new Set(["up", "down", "space", "left"]);
 
 /** The card published for a terminal now, as matched (prompt/match.ts). */
 export interface PublishedPrompt {
@@ -110,6 +119,16 @@ function shownLabel(m: Match, row: number): string {
   return cut.split(" · ")[0]!.trim();
 }
 
+/** Activity words for one answer of a card with several questions: no labels (Activity keeps 80 characters). */
+function answerWords(x: bridgeApi.PromptQuestionAnswer, n: number): string {
+  if ("option" in x) return `option ${x.option + 1} of ${n}`;
+  if ("picks" in x) return `options ${[...x.picks].sort((a, b) => a - b).map((i) => i + 1).join(", ")} of ${n}`;
+  return `own answer (${[...x.other].length} chars)`;
+}
+
+/** The phone's first line for `prompt_partial` (`res.message`; COPY.md "Prompt: stopped partway"). */
+export const partialWords = (done: number, n: number): string => `Stopped after ${done} of ${n} answers. Nothing was submitted.`;
+
 /** The arrow keys from row `from` to row `to`. */
 const arrows = (from: number, to: number): string[] => Array.from({ length: Math.abs(to - from) }, () => (to > from ? "down" : "up"));
 
@@ -173,8 +192,13 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
   async function keys(t: string, ks: readonly string[], phase: "A" | "B", signal: AbortSignal): Promise<RunResult> {
     if (phase === "A" ? !ks.every((k) => PHASE_A_KEYS.has(k)) : !(ks.length === 1 && ks[0] === "enter")) throw new Error(`prompt: bad keys for phase ${phase}`);
     check(signal);
+    const was = pressed.has(signal);
     pressed.add(signal);
-    return o.run(bin(), ["keys", "--json", "--", t, ...ks], { timeoutMs: o.pressTimeoutMs ?? PRESS_TIMEOUT_MS, signal });
+    const r = await o.run(bin(), ["keys", "--json", "--", t, ...ks], { timeoutMs: o.pressTimeoutMs ?? PRESS_TIMEOUT_MS, signal });
+    // hc refused before pressing anything: still nothing pressed, if nothing was before.
+    const res = readHc(r, KEYS_REFUSED, "unknown_effect");
+    if (!was && !res.ok && !res.unknown_effect) pressed.delete(signal);
+    return r;
   }
 
   /** The prompt on a fresh screen, matched against the pending calls the card was matched with. */
@@ -239,12 +263,219 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     return { ok: false, code: "unknown_effect", unknown_effect: true, audit_label: label };
   }
 
-  /** Phase A keys whose own failure leaves nothing decided: hc's code, or `busy` when the desk kept it waiting. */
-  function phaseAFailed(r: RunResult, label: string): ActResult | null {
+  /**
+   * Phase A keys whose own failure leaves nothing decided: hc's code, or `busy` when the desk kept it waiting. Once
+   * keys went (`pressed`), "nothing was pressed" (`prompt_changed`) and "already answered" (`prompt_gone`) would not be
+   * true: `prompt_moved` (CV9 review H1).
+   */
+  function phaseAFailed(r: RunResult, label: string, signal: AbortSignal): ActResult | null {
     const res = readHc(r, KEYS_REFUSED, "prompt_changed");
     if (res.ok) return null;
     if (r.error === "aborted") throw new Aborted();
-    return { ok: false, code: r.error === "timeout" ? "busy" : res.unknown_effect ? "prompt_changed" : (res.code ?? "prompt_changed"), audit_label: label };
+    const code = r.error === "timeout" ? "busy" : res.unknown_effect ? "prompt_changed" : (res.code ?? "prompt_changed");
+    return { ok: false, code: afterPresses(code, signal), audit_label: label };
+  }
+  const afterPresses = (code: string, signal: AbortSignal) => (pressed.has(signal) && (code === "prompt_changed" || code === "prompt_gone") ? "prompt_moved" : code);
+
+  /** The same card on a fresh screen, showing tab `tab` (the review: `questions.length`). */
+  const onTab = (v: { m: Match } | null, id: string, tab: number): v is { text: string; m: Match & { several: Several } } =>
+    v !== null && v.m.promptId === id && v.m.several !== null && v.m.prompt !== null && v.m.several.tab === tab;
+
+  /**
+   * After a press that moves on from question `k` (Enter on an option, on Next/Submit, or the Other send): the screen
+   * must show tab `k + 1` with question `k` marked answered. Read until it does, or the post-check window ends.
+   * Still on tab `k`: nothing moved on, nothing was answered (`prompt_moved`). Anything else: unknown.
+   */
+  async function nextTab(t: string, card: Match, k: number, pending: readonly PendingTool[], label: string, refuse: () => ActResult, signal: AbortSignal): Promise<{ text: string; m: Match & { several: Several } } | ActResult> {
+    const end = now() + (o.postCheckMs ?? POST_CHECK_MS);
+    let last: { text: string; m: Match } | null = null;
+    for (;;) {
+      await sleep(SETTLE_MS);
+      const v = await look(t, pending, signal);
+      if (v !== null) last = v;
+      if (onTab(v, card.promptId, k + 1) && v.m.several.marks[k] === true) return v;
+      if (now() >= end) break;
+    }
+    if (onTab(last, card.promptId, k)) return refuse();
+    return { ok: false, code: "unknown_effect", unknown_effect: true, audit_label: label };
+  }
+
+  /** A phase B press of a step that is not the last (it moves to the next tab): hc's refusal, or a hold, ends the answer. */
+  function stepFailed(p: { r: RunResult; held: boolean; ms: number }, refused: Readonly<Record<string, string>>, label: string, signal: AbortSignal): ActResult | null {
+    const res = readHc(p.r, refused, "unknown_effect");
+    if (!res.ok) return res.unknown_effect ? { ok: false, code: res.code ?? "unknown_effect", unknown_effect: true, audit_label: label } : { ok: false, code: afterPresses(res.code ?? "prompt_changed", signal), audit_label: label };
+    // Held by the desk: the press may have landed elsewhere (the review's Submit answers among them); stop here.
+    if (p.held) return { ok: false, code: "unknown_effect", unknown_effect: true, audit_label: heldLabel(label, p.ms) };
+    return null;
+  }
+
+  /** Phase A presses, then a fresh read that must be `ok`. */
+  async function moveA(t: string, ks: readonly string[], pending: readonly PendingTool[], label: string, signal: AbortSignal): Promise<{ text: string; m: Match } | null | ActResult> {
+    if (ks.length > 0) {
+      const fail = phaseAFailed(await keys(t, ks, "A", signal), label, signal);
+      if (fail) return fail;
+      await sleep(SETTLE_MS);
+    }
+    return look(t, pending, signal);
+  }
+  const isResult = (x: unknown): x is ActResult => x !== null && typeof x === "object" && "ok" in x;
+
+  /**
+   * The Other send of one question of several, timed by its effect. hc pastes and presses Enter at once and then waits
+   * about 5 s for a turn that an answer to one question never starts (rig CV9, manifest `multiQuestion.sendWait`), so
+   * hc's own time says nothing about the desk. The screen is read while hc runs: the send counts as held (R6) when the
+   * next tab, with this question answered, showed later than {@link HELD_MS} after it started, or never while hc ran.
+   */
+  async function sendWatched(t: string, argv: string[], card: Match, k: number, pending: readonly PendingTool[], signal: AbortSignal): Promise<{ r: RunResult; held: boolean; ms: number }> {
+    const t0 = now();
+    let done = false;
+    pressed.add(signal);
+    const send = o.run(bin(), argv, { timeoutMs: o.pressTimeoutMs ?? PRESS_TIMEOUT_MS, signal }).finally(() => {
+      done = true;
+    });
+    let seen: number | null = null;
+    while (!done && seen === null && now() - t0 <= (o.pressTimeoutMs ?? PRESS_TIMEOUT_MS)) {
+      await sleep(SETTLE_MS);
+      if (done) break;
+      const v = await look(t, pending, signal).catch((e: unknown) => {
+        if (e instanceof Aborted) return null;
+        throw e;
+      });
+      if (onTab(v, card.promptId, k + 1) && v.m.several.marks[k] === true) seen = Math.max(0, now() - t0);
+    }
+    const r = await send;
+    const ms = seen ?? Math.max(0, now() - t0);
+    return { r, held: ms > (o.heldMs ?? HELD_MS), ms };
+  }
+
+  /**
+   * CV9: answers a card with several questions (see the head of this file). A walk that stops after answering some
+   * questions on the desk says so (review H1): `prompt_partial` with "Stopped after k of n answers. Nothing was
+   * submitted." (the desk keeps those k picks), and Activity's words start "stopped after k of n". An unknown effect
+   * stays one, with the same Activity words.
+   */
+  async function answerSeveral(
+    t: string,
+    card: Match,
+    v0: { text: string; m: Match },
+    answers: readonly bridgeApi.PromptQuestionAnswer[],
+    pending: readonly PendingTool[],
+    words: string,
+    refuse: () => ActResult,
+    signal: AbortSignal,
+  ): Promise<ActResult> {
+    const n = card.several!.questions.length;
+    const label = auditLabel(card, `${n} questions: ${words}`);
+    const progress = { done: 0, submitted: false };
+    const r = await walkSeveral(t, card, v0, answers, pending, label, refuse, signal, progress);
+    // Enter on "Submit answers" went: its result (ok, or an unknown effect) is the whole call's, as for CV7. A plain
+    // refusal there is hc's before it pressed: still stopped partway.
+    if (r.ok || progress.done === 0 || (progress.submitted && r.unknown_effect === true)) return r;
+    const held = /, held \d+ s while the desk was typing$/.exec(r.audit_label ?? "")?.[0] ?? "";
+    const audit_label = auditLabel(card, `stopped after ${progress.done} of ${n}${held}: ${words}`);
+    if (r.unknown_effect) return { ...r, audit_label };
+    return { ok: false, code: "prompt_partial", message: partialWords(progress.done, n), audit_label };
+  }
+
+  /** One checked step at a time; `progress.done` counts the questions the desk shows answered by this walk. */
+  async function walkSeveral(
+    t: string,
+    card: Match,
+    v0: { text: string; m: Match },
+    answers: readonly bridgeApi.PromptQuestionAnswer[],
+    pending: readonly PendingTool[],
+    label: string,
+    refuse: () => ActResult,
+    signal: AbortSignal,
+    progress: { done: number; submitted: boolean },
+  ): Promise<ActResult> {
+    const id = card.promptId;
+    const qs = card.several!.questions;
+    let v = v0;
+    // Back to question 1, one tab at a time. On a question tab the cursor first goes to row 1 (left was recorded from
+    // there; on an Other row it would move inside the text field instead).
+    while (true) {
+      if (!onTab(v, id, v.m.several?.tab ?? -1)) return refuse();
+      const tab = v.m.several!.tab;
+      if (tab === 0) break;
+      if (tab < qs.length && v.m.prompt!.cursor !== 0) {
+        const w = await moveA(t, arrows(v.m.prompt!.cursor, 0), pending, label, signal);
+        if (isResult(w)) return w;
+        if (!onTab(w, id, tab) || w.m.prompt!.cursor !== 0) return refuse();
+        v = w;
+      }
+      const w = await moveA(t, ["left"], pending, label, signal);
+      if (isResult(w)) return w;
+      if (!onTab(w, id, tab - 1)) return refuse();
+      v = w;
+    }
+    const shown: string[] = [];
+    for (let k = 0; k < qs.length; k++) {
+      const q = qs[k]!;
+      const x = answers[k]!;
+      // `v` shows tab k here: the loop above stops on tab 0, and nextTab returns only tab k + 1.
+      const p = v.m.prompt!;
+      let pressed: { r: RunResult; held: boolean; ms: number };
+      let refusedBy: Readonly<Record<string, string>> = KEYS_REFUSED;
+      if ("option" in x) {
+        // Arrows to the option, check, then Enter alone: picks it and shows the next tab.
+        const w = await moveA(t, arrows(p.cursor, x.option), pending, label, signal);
+        if (isResult(w)) return w;
+        if (!onTab(w, id, k) || w.m.prompt!.cursor !== x.option) return refuse();
+        shown.push(q.options[x.option]!);
+        pressed = await timed(() => keys(t, ["enter"], "B", signal));
+      } else if ("picks" in x) {
+        const want = new Set(x.picks);
+        let cur = p.cursor;
+        let rows = p.rows;
+        // One row at a time: move, tick, and check the cursor and the box.
+        for (let i = 0; i < q.options.length; i++) {
+          if ((rows[i]!.check === true) === want.has(i)) continue;
+          const w = await moveA(t, [...arrows(cur, i), "space"], pending, label, signal);
+          if (isResult(w)) return w;
+          if (!onTab(w, id, k) || w.m.prompt!.cursor !== i || w.m.prompt!.rows[i]!.check !== want.has(i)) return refuse();
+          cur = i;
+          rows = w.m.prompt!.rows;
+        }
+        // Then to "Next" ("Submit" on the last question): every box as wanted (the matcher requires the Other box empty).
+        const next = q.options.length + 1;
+        const w = await moveA(t, arrows(cur, next), pending, label, signal);
+        if (isResult(w)) return w;
+        if (!onTab(w, id, k) || w.m.prompt!.cursor !== next) return refuse();
+        const r = w.m.prompt!.rows;
+        if (!q.options.every((_, i) => r[i]!.check === want.has(i))) return refuse();
+        shown.push(q.options.filter((_, i) => want.has(i)).join(", "));
+        pressed = await timed(() => keys(t, ["enter"], "B", signal));
+      } else {
+        // Other: to this question's Other row, a fresh read that confirms it (other.ts), then the one forced send.
+        const ks = arrows(p.cursor, q.options.length);
+        if (ks.length > 0) {
+          const fail = phaseAFailed(await keys(t, ks, "A", signal), label, signal);
+          if (fail) return fail;
+          await sleep(SETTLE_MS);
+        }
+        const fresh = await read(t, signal);
+        const conf = fresh === null ? null : confirmOtherField(t, fresh, { promptId: id, toolUseId: card.toolUseId!, pending, question: k }, now());
+        if (conf === null) return refuse();
+        check(signal);
+        const argv = otherSendArgs(conf, t, id, x.other, now(), k);
+        shown.push(x.other);
+        refusedBy = SEND_REFUSED;
+        pressed = await sendWatched(t, argv, card, k, pending, signal);
+      }
+      const fail = stepFailed(pressed, refusedBy, label, signal);
+      if (fail) return fail;
+      const w = await nextTab(t, card, k, pending, label, refuse, signal);
+      if (isResult(w)) return w;
+      progress.done = k + 1;
+      v = w;
+    }
+    // The review: exactly these answers, every question answered, the cursor on "Submit answers".
+    if (!onTab(v, id, qs.length) || v.m.prompt!.cursor !== 0 || !isSeveralReviewOf(v.m.prompt!, v.m.several, shown)) return refuse();
+    pendingFor.set(v.m, [...pending]);
+    // Phase B: Enter alone on "Submit answers".
+    progress.submitted = true;
+    return settle(t, v.m, await timed(() => keys(t, ["enter"], "B", signal)), KEYS_REFUSED, label, signal);
   }
 
   async function answer(a: bridgeApi.PromptAnswerArgs, signal: AbortSignal): Promise<ActResult> {
@@ -261,6 +492,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     const c = a.choice;
     // The choice fits the card.
     let label: string;
+    let severalWords = "";
     if ("option" in c) {
       if (card.multi || c.option >= card.buttons.length) return { ok: false, code: "bad_choice" };
       label = auditLabel(card, `option ${c.option + 1} of ${card.buttons.length} (${shownLabel(card, card.buttons[c.option]!)})`);
@@ -268,6 +500,17 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
       if (!card.multi || card.submitRow === null || c.picks.some((i) => i >= card.buttons.length)) return { ok: false, code: "bad_choice" };
       const sorted = [...c.picks].sort((x, y) => x - y);
       label = auditLabel(card, `options ${sorted.map((i) => i + 1).join(", ")} of ${card.buttons.length} (${sorted.map((i) => shownLabel(card, card.buttons[i]!)).join(", ")})`);
+    } else if ("answers" in c) {
+      const sv = card.several;
+      if (sv === null || card.toolUseId === null || c.answers.length !== sv.questions.length) return { ok: false, code: "bad_choice" };
+      for (let i = 0; i < c.answers.length; i++) {
+        const q = sv.questions[i]!;
+        const x = c.answers[i]!;
+        const fits = "option" in x ? !q.multi && x.option < q.options.length : "picks" in x ? q.multi && x.picks.every((j) => j < q.options.length) : !q.multi;
+        if (!fits) return { ok: false, code: "bad_choice" };
+      }
+      severalWords = c.answers.map((x, i) => answerWords(x, sv.questions[i]!.options.length)).join("; ");
+      label = auditLabel(card, `${c.answers.length} questions: ${severalWords}`);
     } else {
       if (card.otherRow === null || card.toolUseId === null) return { ok: false, code: "bad_choice" };
       label = auditLabel(card, `own answer (${[...c.other].length} chars)`);
@@ -288,12 +531,14 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     const m = v0.m;
     pendingFor.set(m, pending);
 
+    if ("answers" in c) return answerSeveral(t, card, { text: v0.text, m }, c.answers, pending, severalWords, refuse, signal);
+
     if ("option" in c) {
       const row = m.buttons[c.option]!;
       // Phase A: arrows only, then the cursor must be on that row of the same prompt.
       const ks = arrows(p.cursor, row);
       if (ks.length > 0) {
-        const fail = phaseAFailed(await keys(t, ks, "A", signal), label);
+        const fail = phaseAFailed(await keys(t, ks, "A", signal), label, signal);
         if (fail) return fail;
         await sleep(SETTLE_MS);
         if (!at(await look(t, pending, signal), card.promptId, row)) return refuse();
@@ -311,7 +556,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
       // Phase A, one row at a time: move, tick, and verify the cursor and the box.
       for (const row of m.buttons) {
         if ((marks[row] === true) === want.has(row)) continue;
-        const fail = phaseAFailed(await keys(t, [...arrows(cur, row), "space"], "A", signal), label);
+        const fail = phaseAFailed(await keys(t, [...arrows(cur, row), "space"], "A", signal), label, signal);
         if (fail) return fail;
         await sleep(SETTLE_MS);
         const v = await look(t, pending, signal);
@@ -323,7 +568,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
       const submit = m.submitRow!;
       const toSubmit = arrows(cur, submit);
       if (toSubmit.length > 0) {
-        const fail = phaseAFailed(await keys(t, toSubmit, "A", signal), label);
+        const fail = phaseAFailed(await keys(t, toSubmit, "A", signal), label, signal);
         if (fail) return fail;
         await sleep(SETTLE_MS);
       }
@@ -377,7 +622,7 @@ export function promptAnswerActor(o: PromptAnswerOptions): PromptAnswerActor {
     const row = m.otherRow!;
     const ks = arrows(p.cursor, row);
     if (ks.length > 0) {
-      const fail = phaseAFailed(await keys(t, ks, "A", signal), label);
+      const fail = phaseAFailed(await keys(t, ks, "A", signal), label, signal);
       if (fail) return fail;
       await sleep(SETTLE_MS);
     }

@@ -41,6 +41,9 @@
 .pc-step{padding:3px 8px;border-radius:5px;color:var(--t-muted)}
 .pc-step[data-on]{background:var(--t-selected);color:var(--t-foreground)}
 .pc-step-n{color:var(--t-dim)}
+/* CV9: one block per question on a card with several; blocks after the first open with a rule. */
+.pc-q{gap:10px}
+.pc-q[data-next]{padding-top:12px;border-top:1px solid var(--t-border)}
 .pc-plan{max-height:132px;overflow:hidden;padding:10px 12px;border-radius:8px;background:var(--t-chrome);border:1px solid var(--t-border);font-size:13.5px;line-height:1.5;overflow-wrap:anywhere}
 .pc-plan[data-open]{max-height:none}
 .pc-plan p{margin:0}

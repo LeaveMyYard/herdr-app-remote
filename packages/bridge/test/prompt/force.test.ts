@@ -15,6 +15,7 @@ import { terminalKeysActor } from "../../src/terminal/keys.js";
 import { routeActs } from "../../src/app/act.js";
 import type { Runner } from "../../src/plugins/exec.js";
 import { ASK1, ASKM, BASH, CLIENT, FakeTerm, moveCursor, screen, source, type Screen } from "./helpers.js";
+import { ASKQ, ASKR, FakeSeveral } from "./several.js";
 import type { PendingTool } from "../../src/prompt/match.js";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "../../src");
@@ -212,5 +213,57 @@ describe("the confirm footer (review L3)", () => {
     // A field being edited shows another footer: not the recorded shape.
     const editing = other.replace(/^Enter to select .*$/m, "Esc to cancel · ctrl+g to edit in VS Code");
     expect(confirmOtherField("t3", editing, exp, 1000)).toBeNull();
+  });
+});
+
+describe("CV9: several questions", () => {
+  /** The answer actor over the fake tabbed UI, every argv recorded. */
+  function several(call: PendingTool) {
+    const f = new FakeSeveral(call);
+    const card = matchPrompt([call], f.screen);
+    const src = {
+      current: () => ({ match: card, rev: "rev-1" }),
+      fresh: async () => ({ pending: f.answered !== null ? [] : [call], blocked: f.answered === null }),
+      answered: () => undefined,
+      isAnswered: () => false,
+    };
+    const actor = promptAnswerActor({ run: f.runner, source: src, binaries: { hc: "hc" } as never, sleep: async () => {}, postCheckMs: 30 });
+    const answer = async (choice: unknown) => (await actor(CLIENT() as never, "prompt.answer", { terminal: "t3", prompt_id: card.promptId, rev: "rev-1", choice }))!;
+    return { f, answer };
+  }
+
+  it("options and ticks only: answered with no forced send and no send at all", async () => {
+    for (const [call, choice] of [
+      [ASKQ, { answers: [{ option: 2 }, { picks: [0, 1] }, { option: 1 }] }],
+      [ASKR, { answers: [{ option: 1 }, { picks: [0] }] }],
+    ] as const) {
+      const { f, answer } = several(call);
+      expect((await answer(choice)).ok).toBe(true);
+      expect(f.answered).not.toBeNull();
+      expect(f.calls.some((a) => a[0] === "send")).toBe(false);
+    }
+  });
+
+  it("each Other text is one forced send, after its own question's field was confirmed on a fresh read", async () => {
+    const { f, answer } = several(ASKQ);
+    expect((await answer({ answers: [{ other: "Project Alpha answer 1" }, { picks: [0] }, { other: "Project Alpha answer 3" }] })).ok).toBe(true);
+    expect(f.answered).toEqual(["Project Alpha answer 1", "Lint", "Project Alpha answer 3"]);
+    const forcedAt = f.calls.flatMap((a, i) => (a.includes("--force") ? [i] : []));
+    expect(forcedAt.length).toBe(2);
+    // Right before each: a read (the confirmation), and before that the arrows to the Other row.
+    for (const i of forcedAt) expect(f.calls[i - 1]![0]).toBe("read");
+  });
+
+  it("an Other text on a multi-select question is refused before anything runs", async () => {
+    const { f, answer } = several(ASKQ);
+    expect((await answer({ answers: [{ option: 0 }, { other: "Lint please" }, { option: 0 }] })).code).toBe("bad_choice");
+    expect(f.calls).toEqual([]);
+  });
+
+  it("the one-question confirmation never confirms a several card's field, nor the reverse", () => {
+    const card = matchPrompt([ASKQ], screen("askq-q3-on-other"));
+    expect(confirmOtherField("t3", screen("askq-q3-on-other"), { promptId: card.promptId, toolUseId: ASKQ.id, pending: [ASKQ] }, 1000)).toBeNull();
+    const one = matchPrompt([ASK1], screen("ask-other"));
+    expect(confirmOtherField("t3", screen("ask-other"), { promptId: one.promptId, toolUseId: ASK1.id, pending: [ASK1], question: 0 }, 1000)).toBeNull();
   });
 });

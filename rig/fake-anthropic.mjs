@@ -1,7 +1,8 @@
 // Scripted fake Anthropic Messages API for the rig (H0). Listens on the rig's loopback only; Claude Code is pointed at
 // it with ANTHROPIC_BASE_URL and a fake key. No network, no credentials. Fake data only.
 //   node fake-anthropic.mjs <port> <request log>
-// The scenario is chosen by a trigger word in the newest user text ("H0-PERM", "H0-ASK1", "H0-ASKM", "H0-PLAN").
+// The scenario is chosen by a trigger word in the newest user text ("H0-PERM", "H0-ASK1", "H0-ASKM", "H0-PLAN"; CV9:
+// "H0-ASKQ" and "H0-ASKR", AskUserQuestion with several questions).
 // CV8 (Stop): "H0-SLOW" streams one text delta and then holds the stream open (the agent is working until it is
 // interrupted or HOLD_MS passes); "H0-TOOL" asks for a long Bash call (`timeout 40 tail -f notes.txt`, allowed by the harness; a bare `sleep` is refused by Claude Code, and /dev asks).
 // A request whose last message holds a tool_result gets a closing text reply. Requests without tools (Claude Code's
@@ -42,6 +43,69 @@ const SCRIPTS = {
           { label: 'Unit tests', description: 'Run cargo test' },
         ],
       }],
+    },
+  },
+  // CV9: three questions in one call (Claude Code's tabbed question UI): single, multi-select, single.
+  'H0-ASKQ': {
+    name: 'AskUserQuestion',
+    input: {
+      questions: [
+        {
+          question: 'Question Title 123: which approach should Agent 1 take?',
+          header: 'Approach',
+          multiSelect: false,
+          options: [
+            { label: 'Option A', description: 'Rewrite the parser in Project Alpha' },
+            { label: 'Option B', description: 'Patch the existing parser' },
+            { label: 'Option C', description: 'Leave it as it is' },
+          ],
+        },
+        {
+          question: 'Question Title 456: which checks should Agent 1 run?',
+          header: 'Checks',
+          multiSelect: true,
+          options: [
+            { label: 'Lint', description: 'Run the linter' },
+            { label: 'Typecheck', description: 'Run the type checker' },
+            { label: 'Unit tests', description: 'Run cargo test' },
+          ],
+        },
+        {
+          question: 'Question Title 789: where should Agent 1 deploy?',
+          header: 'Target',
+          multiSelect: false,
+          options: [
+            { label: 'Staging', description: 'The Project Alpha staging box' },
+            { label: 'Nowhere', description: 'Do not deploy yet' },
+          ],
+        },
+      ],
+    },
+  },
+  // CV9: two questions, the multi-select one last (what its last row is, and where Enter on it goes).
+  'H0-ASKR': {
+    name: 'AskUserQuestion',
+    input: {
+      questions: [
+        {
+          question: 'Question Title 321: which branch should Agent 1 use?',
+          header: 'Branch',
+          multiSelect: false,
+          options: [
+            { label: 'main', description: 'The Project Alpha main branch' },
+            { label: 'next', description: 'The Project Alpha next branch' },
+          ],
+        },
+        {
+          question: 'Question Title 654: which docs should Agent 1 update?',
+          header: 'Docs',
+          multiSelect: true,
+          options: [
+            { label: 'README', description: 'The top README' },
+            { label: 'CHANGELOG', description: 'The change log' },
+          ],
+        },
+      ],
     },
   },
   'H0-TOOL': { name: 'Bash', input: { command: 'timeout 40 tail -f notes.txt', description: 'Wait for the Project Alpha build' } },

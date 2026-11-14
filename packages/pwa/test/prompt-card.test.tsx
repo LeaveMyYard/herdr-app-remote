@@ -1,4 +1,4 @@
-import { act as rtlAct, render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { act as rtlAct, render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bridgeApi } from "@herdr-remote/protocol";
 import { hasOpenPrompt, PromptCard, PromptTail, resetPromptTails, type PromptAct, type PromptItem } from "../src/chatview/prompt/PromptCard";
@@ -12,6 +12,7 @@ afterEach(() => {
 const perm = PROMPT_FIXTURES.perm!.item;
 const ask1 = PROMPT_FIXTURES.ask1!.item;
 const plan = PROMPT_FIXTURES.plan!.item;
+const several = PROMPT_FIXTURES.several!.item;
 
 function mount(item: PromptItem, reply: Awaited<ReturnType<PromptAct>> = { ok: true }) {
   const act = vi.fn<PromptAct>(() => Promise.resolve(reply));
@@ -109,16 +110,74 @@ describe("PromptCard", () => {
     expect(act.mock.calls[0]![1]).toMatchObject({ choice: { picks: [0, 2] } });
   });
 
-  it("several questions step with Next and Skip, and never send (not answerable yet)", async () => {
-    const { act } = mount(PROMPT_FIXTURES.askm!.item);
-    expect(screen.getByText("1 of 2")).toBeTruthy();
-    await click(screen.getByRole("button", { name: /^Option A/ }));
-    expect(screen.getByRole("button", { name: "Next: 1 picked" })).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Skip" }));
-    expect(screen.getByText("2 of 2")).toBeTruthy();
-    await click(screen.getByRole("button", { name: /^Option A/ }));
-    expect((screen.getByRole("button", { name: "Answer" }) as HTMLButtonElement).disabled).toBe(true);
+  it("several questions (CV9): one block each, Submit once every one is answered, all answers in one act", async () => {
+    const { act, container } = mount(several);
+    expect(container.querySelectorAll(".pc-q").length).toBe(3);
+    expect(screen.getByText("1 · Approach")).toBeTruthy();
+    expect(screen.getByText("3 of 3")).toBeTruthy();
+    // Other only on the single-select questions.
+    expect(screen.getAllByPlaceholderText("Other: type your own answer…").length).toBe(2);
+    expect(screen.queryByText("Skip")).toBeNull();
+    const submit = () => screen.getByRole("button", { name: /^(Submit|\d of 3 answered)$/ }) as HTMLButtonElement;
+    expect(submit().textContent).toBe("0 of 3 answered");
+    expect(submit().disabled).toBe(true);
+    const groups = screen.getAllByRole("radiogroup").concat(screen.getAllByRole("group"));
+    const [q1, q3, q2] = groups as [HTMLElement, HTMLElement, HTMLElement];
+    await click(within(q1).getByRole("button", { name: /^Option B/ }));
+    await click(within(q2).getByRole("button", { name: /^Unit tests/ }));
+    await click(within(q2).getByRole("button", { name: /^Lint/ }));
+    expect(submit().textContent).toBe("2 of 3 answered");
+    // A command-like Other text doesn't count; a plain one does.
+    const other3 = within(q3).getByPlaceholderText("Other: type your own answer…");
+    fireEvent.change(other3, { target: { value: "/deploy" } });
+    expect(submit().disabled).toBe(true);
+    fireEvent.change(other3, { target: { value: "  Project Alpha answer 3 " } });
+    expect(submit().textContent).toBe("Submit");
     expect(act).not.toHaveBeenCalled();
+    await click(submit());
+    expect(act).toHaveBeenCalledTimes(1);
+    expect(act.mock.calls[0]![1]).toEqual({ terminal: "t1", prompt_id: several.prompt_id, rev: several.rev, choice: { answers: [{ option: 1 }, { picks: [0, 2] }, { other: "Project Alpha answer 3" }] } });
+    expect(bridgeApi.PromptAnswerArgs.safeParse(act.mock.calls[0]![1]).success).toBe(true);
+    await click(submit());
+    expect(act).toHaveBeenCalledTimes(1);
+  });
+
+  it("several questions: picking an option clears that question's Other text, and typing clears its pick", async () => {
+    const { act } = mount(several);
+    const [q1] = screen.getAllByRole("radiogroup") as [HTMLElement];
+    const other1 = within(q1).getByPlaceholderText("Other: type your own answer…") as HTMLInputElement;
+    fireEvent.change(other1, { target: { value: "Project Alpha" } });
+    await click(within(q1).getByRole("button", { name: /^Option A/ }));
+    expect(other1.value).toBe("");
+    fireEvent.change(other1, { target: { value: "Project Alpha" } });
+    expect(within(q1).getByRole("button", { name: /^Option A/ }).getAttribute("aria-pressed")).toBe("false");
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("several questions: a refusal dims the card and shows why", async () => {
+    mount(several, { ok: false, code: "prompt_moved" });
+    const [q1, q3] = screen.getAllByRole("radiogroup") as [HTMLElement, HTMLElement];
+    const [q2] = screen.getAllByRole("group") as [HTMLElement];
+    await click(within(q1).getByRole("button", { name: /^Option A/ }));
+    await click(within(q2).getByRole("button", { name: /^Lint/ }));
+    await click(within(q3).getByRole("button", { name: /^Staging/ }));
+    await click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.getByText("The prompt changed. Look again.")).toBeTruthy();
+    expect(screen.getByText("Nothing was answered.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("several questions: a walk stopped partway says how far, where the picks are, and dims the card", async () => {
+    mount(several, { ok: false, code: "prompt_partial", message: "Stopped after 1 of 3 answers. Nothing was submitted." });
+    const [q1, q3] = screen.getAllByRole("radiogroup") as [HTMLElement, HTMLElement];
+    const [q2] = screen.getAllByRole("group") as [HTMLElement];
+    await click(within(q1).getByRole("button", { name: /^Option A/ }));
+    await click(within(q2).getByRole("button", { name: /^Lint/ }));
+    await click(within(q3).getByRole("button", { name: /^Staging/ }));
+    await click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.getByText("Stopped after 1 of 3 answers. Nothing was submitted.")).toBeTruthy();
+    expect(screen.getByText("Those answers stay picked in Agent 1's terminal. Finish it there.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("plan: the plan as text, collapsed until asked", async () => {

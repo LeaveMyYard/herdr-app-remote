@@ -1,6 +1,6 @@
 # Prompt answering (CV7): the bridge's real prompt.answer actor against the real pinned claude in the rig's hc terminals
 # and the scripted fake API (prompt-answer-harness.mjs). Fake data only; the operator's Claude config is hidden.
-PINNED_CLAUDE_VERSION=2.1.323
+PINNED_CLAUDE_VERSION=2.1.325
 scenario_main() {
   [ -f "$REPO/packages/bridge/dist/index.js" ] || { fail "bridge not built: run pnpm -r build first"; return 1; }
   start_stack || return 1
