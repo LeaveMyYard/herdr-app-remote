@@ -991,6 +991,10 @@ export type PromptAnswerArgs = z.infer<typeof PromptAnswerArgs>;
  * - `prompt_moved`: the same, found after phase A already pressed keys (arrows, multi-select ticks, the Enter that
  *   opens the review step), so the desk's prompt may show them, but nothing was answered ("The prompt changed. Look
  *   again." / "Nothing was answered.");
+ * - `prompt_partial` (CV9): a card with several questions stopped after answering some of them on the desk, before
+ *   "Submit answers": nothing was submitted, and the desk keeps those picks. `message` says how far it got ("Stopped
+ *   after 1 of 3 answers. Nothing was submitted."); the phone adds "Those answers stay picked in Agent 1's terminal.
+ *   Finish it there.";
  * - `prompt_gone`: the prompt is no longer on the screen ("Already answered on desk-1.");
  * - `busy`: another answer runs for this terminal, or hc refused because the terminal is busy ("desk-1 is typing.
  *   Try again in a moment.");
@@ -1000,7 +1004,7 @@ export type PromptAnswerArgs = z.infer<typeof PromptAnswerArgs>;
  * With `unknown_effect: true` (code `unknown_effect`, `timeout` or `cancelled`) Enter or the Other text may have
  * reached the agent ("Agent 1 may have got your answer. Look before you answer again."). The phone never retries.
  */
-export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_moved", "prompt_gone", "busy", "bad_choice", "forbidden", "audit_unavailable", "unknown_effect"] as const;
+export const PROMPT_ANSWER_CODES = ["prompt_changed", "prompt_moved", "prompt_partial", "prompt_gone", "busy", "bad_choice", "forbidden", "audit_unavailable", "unknown_effect"] as const;
 
 // ---- Stop (CV8): `agent.stop` (docs/chatview.md §3a.6) ----
 //

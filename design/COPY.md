@@ -78,6 +78,7 @@ Rows for the Claude Code chat view, from `docs/chatview.md` §11. These rows are
 | ● | Card: locked composer | `new (CV7)` | - | Answer the prompt above first | CV7 | - |
 | ● | Prompt: changed | `new (CV7, prompt_changed)` | - | The prompt changed. Look again. / Nothing was pressed. | CV7 | no key was sent |
 | ● | Prompt: changed after keys | `new (CV7, prompt_moved)` | - | The prompt changed. Look again. / Nothing was answered. | CV7 | phase A keys were sent (main, 2026-11-13, review round 1) |
+| ● | Prompt: stopped partway | `new (CV9, prompt_partial)` | - | Stopped after 1 of 3 answers. Nothing was submitted. / Those answers stay picked in Agent 1's terminal. Finish it there. | CV9 | a several-question walk stopped after answering some questions on the desk; the first line is the bridge's `message` (cv9-author, operator-delegated copy, 2026-11-14) |
 | ● | Prompt: gone | `new (CV7, prompt_gone)` | - | Already answered on desk-1. | CV7 | - |
 | ● | Prompt: desk busy | `new (CV7, busy)` | - | desk-1 is typing. Try again in a moment. | CV7 | - |
 | ● | Prompt: unknown effect | `new (CV7, unknown_effect)` | - | Agent 1 may have got your answer. Look before you answer again. | CV7 | never invites a second press |

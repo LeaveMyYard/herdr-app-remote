@@ -18,6 +18,8 @@ export interface PromptActResult {
   ok: boolean;
   code?: string;
   unknown_effect?: boolean;
+  /** The bridge's own words (CV9 `prompt_partial`: how far a walk got). */
+  message?: string;
 }
 /** Sends one `prompt.answer` and resolves with the bridge's `res`. Never retried. */
 export type PromptAct = (kind: "prompt.answer", args: Record<string, unknown>) => Promise<PromptActResult>;
@@ -43,6 +45,7 @@ interface Kept {
   item: PromptItem;
   code: string | undefined;
   unknown: boolean;
+  message?: string | undefined;
 }
 const kept = new Map<string, Kept>();
 const listeners = new Set<() => void>();
@@ -72,7 +75,7 @@ export function PromptTail({ terminal, items, agent, desk }: { terminal: string;
   return (
     <>
       <Card item={k.item} agent={agent} desk={desk} dim pending={false} onAnswer={() => {}} />
-      <Refusal code={k.code} unknown={k.unknown} agent={agent} desk={desk} />
+      <Refusal code={k.code} unknown={k.unknown} message={k.message} agent={agent} desk={desk} />
     </>
   );
 }
@@ -114,21 +117,21 @@ export function PromptCard({ item, terminal, agent, desk, act }: PromptCardProps
     // A refusal that leaves the card live (busy, rate limited, forbidden…) lets the person try again by hand.
     if (!r.ok && !r.unknown_effect && !DIMS(r.code)) sent.current = null;
     setRes({ id: item.prompt_id, r });
-    if (!r.ok && (r.unknown_effect === true || DIMS(r.code))) keep(terminal, { item, code: r.code, unknown: r.unknown_effect === true });
+    if (!r.ok && (r.unknown_effect === true || DIMS(r.code))) keep(terminal, { item, code: r.code, unknown: r.unknown_effect === true, message: r.message });
   };
 
   return (
     <>
       <Card item={item} agent={agent} desk={desk} dim={dim} pending={pending || done} onAnswer={(c) => void answer(c)} />
-      {mine && !mine.ok ? <Refusal code={mine.code} unknown={mine.unknown_effect === true} agent={agent} desk={desk} /> : null}
+      {mine && !mine.ok ? <Refusal code={mine.code} unknown={mine.unknown_effect === true} message={mine.message} agent={agent} desk={desk} /> : null}
     </>
   );
 }
 
 const DIMS = (code: string | undefined) => code !== undefined && W.DIMS.has(code);
 
-function Refusal({ code, unknown, agent, desk }: { code: string | undefined; unknown: boolean; agent: string; desk: string }) {
-  const [a, b] = W.refusal(code, unknown, { agent, desk });
+function Refusal({ code, unknown, message, agent, desk }: { code: string | undefined; unknown: boolean; message?: string | undefined; agent: string; desk: string }) {
+  const [a, b] = W.refusal(code, unknown, { agent, desk, message });
   return (
     <div role="alert" className="row pc-refusal">
       <span className="nf pc-refusal-dot" aria-hidden="true" />

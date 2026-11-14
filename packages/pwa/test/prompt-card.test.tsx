@@ -167,6 +167,19 @@ describe("PromptCard", () => {
     expect((screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("several questions: a walk stopped partway says how far, where the picks are, and dims the card", async () => {
+    mount(several, { ok: false, code: "prompt_partial", message: "Stopped after 1 of 3 answers. Nothing was submitted." });
+    const [q1, q3] = screen.getAllByRole("radiogroup") as [HTMLElement, HTMLElement];
+    const [q2] = screen.getAllByRole("group") as [HTMLElement];
+    await click(within(q1).getByRole("button", { name: /^Option A/ }));
+    await click(within(q2).getByRole("button", { name: /^Lint/ }));
+    await click(within(q3).getByRole("button", { name: /^Staging/ }));
+    await click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.getByText("Stopped after 1 of 3 answers. Nothing was submitted.")).toBeTruthy();
+    expect(screen.getByText("Those answers stay picked in Agent 1's terminal. Finish it there.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("plan: the plan as text, collapsed until asked", async () => {
     const { container } = mount(plan);
     expect(screen.getByText("PLAN")).toBeTruthy();

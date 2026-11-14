@@ -5,7 +5,7 @@ import { promptAnswerActor } from "../../src/prompt/answer.js";
 import { isSeveralReviewOf, matchPrompt, tabMarks, type PendingTool } from "../../src/prompt/match.js";
 import { confirmOtherField, otherSendArgs } from "../../src/prompt/other.js";
 import { parseScreen } from "../../src/prompt/screen.js";
-import { CLIENT, screen, ASK1, type Screen } from "./helpers.js";
+import { ASK1, ASKM, CLIENT, FakeTerm, screen, source, type Screen } from "./helpers.js";
 import { ASKQ, ASKR, blockOf, FakeSeveral } from "./several.js";
 import type { PromptSource, PublishedPrompt } from "../../src/prompt/answer.js";
 
@@ -267,12 +267,12 @@ describe("answering a card with several questions", () => {
     expect(f.keys.filter((k) => k[0] === "enter").length).toBe(1);
   });
 
-  it("a review that lists something else: prompt_moved, Submit answers never pressed", async () => {
+  it("a review that lists something else: stopped after 3 of 3, Submit answers never pressed", async () => {
     const { f, answer } = rig();
     f.beforeRead = () => {
       if (f.tab === 3 && f.ticks[1]![1] === false) f.ticks[1]![1] = true; // the desk ticks Typecheck on the way
     };
-    expect((await answer({ answers: [{ option: 1 }, { picks: [0] }, { option: 0 }] })).code).toBe("prompt_moved");
+    expect((await answer({ answers: [{ option: 1 }, { picks: [0] }, { option: 0 }] })).code).toBe("prompt_partial");
     expect(f.answered).toBeNull();
     expect(f.tab).toBe(3);
   });
@@ -373,7 +373,7 @@ describe("answering a card with several questions", () => {
       }
       return undefined;
     };
-    expect((await answer({ answers: [{ option: 0 }, { picks: [0, 2] }, { option: 0 }] })).code).toBe("prompt_moved");
+    expect((await answer({ answers: [{ option: 0 }, { picks: [0, 2] }, { option: 0 }] })).code).toBe("prompt_partial");
     expect(f.keys.filter((k) => k.includes("space")).length).toBe(1);
   });
 
@@ -388,7 +388,7 @@ describe("answering a card with several questions", () => {
       }
       return undefined;
     };
-    expect((await answer({ answers: [{ option: 0 }, { picks: [0, 2] }, { option: 0 }] })).code).toBe("prompt_moved");
+    expect((await answer({ answers: [{ option: 0 }, { picks: [0, 2] }, { option: 0 }] })).code).toBe("prompt_partial");
     expect(f.keys.filter((k) => k[0] === "enter").length).toBe(1);
   });
 
@@ -397,7 +397,7 @@ describe("answering a card with several questions", () => {
     f.beforeRead = () => {
       if (f.tab === 3) f.cursor = 1;
     };
-    expect((await answer({ answers: [{ option: 0 }, { picks: [0] }, { option: 0 }] })).code).toBe("prompt_moved");
+    expect((await answer({ answers: [{ option: 0 }, { picks: [0] }, { option: 0 }] })).code).toBe("prompt_partial");
     expect(f.answered).toBeNull();
     expect(f.keys.filter((k) => k[0] === "enter").length).toBe(3);
   });
@@ -430,6 +430,154 @@ describe("answering a card with several questions", () => {
     f.reply = (a) => (a[0] === "keys" ? { code: 1, stdout: "", stderr: "", error: "timeout" } : undefined);
     expect((await answer({ answers: [{ option: 1 }, { picks: [0] }, { option: 0 }] })).code).toBe("busy");
     expect(f.answered).toBeNull();
+  });
+});
+
+describe("every step's own check (review M2)", () => {
+  const ANS = { answers: [{ option: 1 }, { picks: [0, 2] }, { option: 0 }] };
+
+  it("the desk switches tab while the cursor lands on the same row number: no Enter on the other question", async () => {
+    const { f, answer } = rig();
+    f.reply = (a) => {
+      if (a[0] === "keys" && f.tab === 0 && a.includes("down")) {
+        f.press("right");
+        f.cursor = 1;
+        return { code: 0, stdout: "{}", stderr: "" };
+      }
+      return undefined;
+    };
+    expect((await answer(ANS)).code).toBe("prompt_moved");
+    expect(f.keys.some((k) => k.includes("enter"))).toBe(false);
+  });
+
+  it("the cursor is not on Next after the move there (the desk moved it): no Enter", async () => {
+    const { f, answer } = rig();
+    f.reply = (a) => {
+      const ks = a.slice(a.indexOf("--") + 2);
+      if (a[0] === "keys" && f.tab === 1 && ks.every((k) => k === "down") && f.cursor + ks.length === 4) {
+        ks.forEach((k) => f.press(k));
+        f.press("up");
+        return { code: 0, stdout: "{}", stderr: "" };
+      }
+      return undefined;
+    };
+    expect((await answer(ANS)).code).toBe("prompt_partial");
+    expect(f.keys.filter((k) => k.includes("enter")).length).toBe(1);
+  });
+
+  it("a left that skips a tab: refused, nothing picked", async () => {
+    const { f, answer } = rig(ASKQ, { prep: (x) => ["right", "right"].forEach((k) => x.press(k)) });
+    f.reply = (a) => {
+      if (a[0] === "keys" && a.includes("left")) {
+        f.press("left");
+        f.press("left");
+        return { code: 0, stdout: "{}", stderr: "" };
+      }
+      return undefined;
+    };
+    expect((await answer(ANS)).code).toBe("prompt_moved");
+    expect(f.keys).toEqual([["left"]]);
+  });
+
+  it("the final Enter on Submit answers held by the desk: unknown_effect, held in Activity", async () => {
+    let t = 0;
+    const { f, answer } = rig(ASKQ, { now: () => t, heldMs: 1000 });
+    f.reply = (a) => {
+      if (a[0] === "keys" && a.includes("enter") && f.tab === 3) t += 3000;
+      return undefined;
+    };
+    const r = await answer(ANS);
+    expect(r).toMatchObject({ ok: false, code: "unknown_effect", unknown_effect: true });
+    expect(r.audit_label).toMatch(/held 3 s while the desk was typing$/);
+    expect(f.answered).not.toBeNull();
+  });
+
+  it("a header line between the tab line and the question: read-only", () => {
+    // Its own paragraph, so the title (the last paragraph) is still the question's.
+    const text = screen("askq-q1").replace("\nQuestion Title 123", "\nNote from Agent 1\n\nQuestion Title 123");
+    const p = parseScreen(text);
+    expect(p.ok && p.prompt.title).toBe("Question Title 123: which approach should Agent 1 take?");
+    expect(matchPrompt([ASKQ], text).kind).toBe("unparsed");
+  });
+});
+
+describe("a walk that stops partway says how far it got (review H1)", () => {
+  const ANS = { answers: [{ option: 1 }, { picks: [0, 2] }, { option: 0 }] };
+  const refusedKeys = (kind: string) => ({ code: 1, stdout: "", stderr: `{"error":{"kind":"${kind}"}}` });
+
+  it("hc refuses a tick after question 1 was answered: prompt_partial 1 of 3, never 'nothing was pressed'", async () => {
+    const { f, answer } = rig();
+    f.reply = (a) => (a[0] === "keys" && a.includes("space") ? refusedKeys("usage") : undefined);
+    const r = await answer(ANS);
+    expect(r).toMatchObject({ ok: false, code: "prompt_partial", message: "Stopped after 1 of 3 answers. Nothing was submitted." });
+    expect(r.audit_label).toBe("a question\nstopped after 1 of 3: option 2 of 3; options 1, 3 of 3; option 1 of 2");
+    expect(f.picked[0]).toBe(1);
+  });
+
+  it("hc says the terminal is gone on question 2's Enter: prompt_partial 1 of 3, not 'already answered'", async () => {
+    const { answer, f } = rig();
+    let enters = 0;
+    f.reply = (a) => (a[0] === "keys" && a.includes("enter") && ++enters === 2 ? refusedKeys("not_found") : undefined);
+    expect(await answer(ANS)).toMatchObject({ code: "prompt_partial", message: "Stopped after 1 of 3 answers. Nothing was submitted." });
+  });
+
+  it("a phase A timeout after question 1: prompt_partial, not 'desk is typing, try again' alone", async () => {
+    const { answer, f } = rig();
+    f.reply = (a) => (a[0] === "keys" && a.includes("space") ? { code: null, stdout: "", stderr: "", error: "timeout" } : undefined);
+    expect((await answer(ANS)).code).toBe("prompt_partial");
+  });
+
+  it("question 3's Enter that doesn't move on: prompt_partial 2 of 3", async () => {
+    const { answer, f } = rig();
+    f.reply = (a) => (a[0] === "keys" && a.includes("enter") && f.tab === 2 ? { code: 0, stdout: "{}", stderr: "" } : undefined);
+    expect(await answer(ANS)).toMatchObject({ code: "prompt_partial", message: "Stopped after 2 of 3 answers. Nothing was submitted." });
+  });
+
+  it("an unknown effect partway stays one, and Activity says how far it got and that it was held", async () => {
+    let t = 0;
+    const { f, answer } = rig(ASKQ, { now: () => t, heldMs: 1000 });
+    let enters = 0;
+    f.reply = (a) => {
+      if (a[0] === "keys" && a.includes("enter") && ++enters === 2) t += 2000;
+      return undefined;
+    };
+    const r = await answer(ANS);
+    expect(r).toMatchObject({ ok: false, code: "unknown_effect", unknown_effect: true });
+    expect(r.audit_label).toBe("a question\nstopped after 1 of 3, held 2 s while the desk was typing: option 2 of 3; options 1, 3 of 3; option 1 of 2");
+  });
+
+  it("an Other send that doesn't move on, with no key pressed before it: prompt_moved (the text went), not 'nothing pressed'", async () => {
+    const { answer, f } = rig(ASKQ, { prep: (x) => ["down", "down", "down"].forEach((k) => x.press(k)) });
+    f.reply = (a) => (a[0] === "send" ? { code: 0, stdout: "{}", stderr: "" } : undefined);
+    const r = await answer({ answers: [{ other: "Project Alpha answer 1" }, { picks: [0] }, { option: 0 }] });
+    expect(r.code).toBe("prompt_moved");
+    expect(f.calls.some((a) => a.includes("--force"))).toBe(true);
+  });
+
+  it("hc refuses the final Enter before pressing it: prompt_partial 3 of 3 (nothing submitted)", async () => {
+    const { answer, f } = rig();
+    f.reply = (a) => (a[0] === "keys" && a.includes("enter") && f.tab === 3 ? refusedKeys("not_found") : undefined);
+    expect(await answer(ANS)).toMatchObject({ code: "prompt_partial", message: "Stopped after 3 of 3 answers. Nothing was submitted." });
+  });
+
+  it("a stop before any question was answered: the CV7 codes (nothing pressed / nothing answered)", async () => {
+    const first = rig();
+    first.f.reply = (a) => (a[0] === "keys" ? refusedKeys("usage") : undefined);
+    expect((await first.answer(ANS)).code).toBe("prompt_changed");
+    const second = rig();
+    let n = 0;
+    second.f.reply = (a) => (a[0] === "keys" && ++n === 2 ? refusedKeys("usage") : undefined);
+    expect((await second.answer(ANS)).code).toBe("prompt_moved");
+  });
+
+  it("the one-question multi-select (CV7): a refused tick after an earlier one is prompt_moved, not 'nothing was pressed'", async () => {
+    const f = new FakeTerm(screen("ask-multi"));
+    const s = source(f, [ASKM]);
+    let n = 0;
+    f.keysReply = () => (++n === 2 ? refusedKeys("usage") : undefined);
+    const actor = promptAnswerActor({ run: f.runner, source: s.src, binaries: { hc: "hc" } as never, sleep: async () => {}, postCheckMs: 30 });
+    const r = await actor(CLIENT() as never, "prompt.answer", { terminal: T, prompt_id: s.card.promptId, rev: "rev-1", choice: { picks: [0, 2] } });
+    expect(r?.code).toBe("prompt_moved");
   });
 });
 

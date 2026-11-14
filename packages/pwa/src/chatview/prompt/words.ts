@@ -21,9 +21,13 @@ export const answerOnDesk = (desk: string): string => `Answer it on ${desk}.`;
 export const LOCKED = "Answer the prompt above first";
 
 /** What the phone says for a refused or unknown answer: a line, and an optional second one. */
-export function refusal(code: string | undefined, unknown: boolean, o: { agent: string; desk: string }): [string, string?] {
+export function refusal(code: string | undefined, unknown: boolean, o: { agent: string; desk: string; message?: string | undefined }): [string, string?] {
   if (unknown) return [`${o.agent} may have got your answer. Look before you answer again.`];
   switch (code) {
+    case "prompt_partial":
+      // CV9 (review H1/M3): a card with several questions stopped after answering some on the desk. The bridge says
+      // how far (`res.message`, "Stopped after 1 of 3 answers. Nothing was submitted.").
+      return [o.message ?? "Stopped partway. Nothing was submitted.", partialRest(o.agent)];
     case "prompt_changed":
     case "bad_choice":
       return ["The prompt changed. Look again.", "Nothing was pressed."];
@@ -47,5 +51,8 @@ export function refusal(code: string | undefined, unknown: boolean, o: { agent: 
   }
 }
 
+/** The second line after a walk stopped partway (CV9): where the picks are and where to finish. */
+export const partialRest = (agent: string): string => `Those answers stay picked in ${agent}'s terminal. Finish it there.`;
+
 /** Results after which the card is dimmed and never offers a second press (§3a.4: nothing is pressed again by itself). */
-export const DIMS: ReadonlySet<string> = new Set(["prompt_changed", "prompt_moved", "prompt_gone", "bad_choice"]);
+export const DIMS: ReadonlySet<string> = new Set(["prompt_changed", "prompt_moved", "prompt_partial", "prompt_gone", "bad_choice"]);
