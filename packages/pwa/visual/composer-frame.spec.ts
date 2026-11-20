@@ -77,3 +77,27 @@ test("agents, old translucent install: the tab bar and its labels end inside the
   expect(m.labels).toHaveLength(5);
   for (const b of m.labels) expect(b).toBeLessThanOrEqual(m.h);
 });
+
+// Keyboard open (src/ios-keyboard.ts): the frame is pinned to the visible area above the keyboard (numbers from the
+// iOS 26.5 Simulator: 460 tall at 413), the header stays at its top, and the composer ends at its bottom with no
+// home-indicator inset (the keyboard covers the home indicator).
+for (const [name, url] of CHATS) {
+  test(`${name}, keyboard open: the frame is the visible area, header on top, composer at its bottom`, async ({ page }) => {
+    await open(page, url, "inset-top=0&inset-bottom=34", 0, ".chat-form");
+    await page.evaluate(() => {
+      const root = document.documentElement;
+      root.style.setProperty("--kb-top", "413px");
+      root.style.setProperty("--kb-h", "460px");
+      root.dataset.kb = "";
+    });
+    const m = await page.evaluate(() => {
+      const box = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+      return { ph: box(".ph"), head: box(".chat-head"), form: box(".chat-form").bottom, send: box(".chat-send").bottom };
+    });
+    expect(m.ph.top).toBe(413);
+    expect(m.ph.height).toBe(460);
+    expect(m.head.top).toBe(413);
+    expect(m.form).toBe(873);
+    expect(m.send).toBe(873 - 4);
+  });
+}

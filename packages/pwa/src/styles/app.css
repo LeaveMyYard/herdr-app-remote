@@ -7,13 +7,21 @@
      status bar and home indicator. --inset-top/--inset-bottom are set only by the test harness (main.tsx, ?fixture=),
      because the design boards draw a fake 50 px status bar and 30 px home indicator and no test browser has real ones.
      --ios-vp-deficit (src/ios-vp-fix.ts) is non-zero only on iOS 26 Home Screen apps added with the old translucent
-     status bar, whose window ends that far above the screen bottom, so above the home indicator: the bottom inset
-     shrinks by it, never below 0. */
+     status bar whose window still ends that far above the screen bottom (the html rule below normally gives them the
+     whole screen), so above the home indicator: the bottom inset shrinks by it, never below 0. */
   --sat:var(--inset-top,env(safe-area-inset-top,0px));
   --sab:max(0px,calc(var(--inset-bottom,env(safe-area-inset-bottom,0px)) - var(--ios-vp-deficit,0px)));
 }
 html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);overscroll-behavior:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 #root{height:100%}
+/* iOS 26 Home Screen app added with the translucent status bar (WebKit bug 301108): while the page is no taller than
+   its window, iOS makes the window inset-top (59 pt) short of the screen and paints nothing below it. A root at least
+   the window plus inset-top tall gets the whole screen instead: in the iOS 26.5 Simulator innerHeight went 873 -> 932
+   and the composer and the tab bar were drawn and tappable to the bottom, keyboard included. 100lvh caps it at the
+   screen, so the page never scrolls once WebKit fixes the bug. With the black status bar and in Safari the top inset
+   is 0, so this is 100%: no change. If it does not take, src/ios-vp-fix.ts still keeps everything in the short window.
+   The rule is from frappe/frappe-ui#1284. */
+@media (display-mode: standalone){html{min-height:min(100lvh,calc(100% + env(safe-area-inset-top,0px)))}}
 .hd{font-family:Inter,system-ui,sans-serif;font-optical-sizing:none /* the boards use the text cut at every size */;color:var(--t-foreground);-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01" 0;-webkit-tap-highlight-color:transparent}
 .hd a{color:inherit;text-decoration:none}
 .hd button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0;margin:0}
@@ -33,8 +41,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);oversc
    and the other inner lists do (overflow:hidden + overscroll-behavior:none above stop the iOS rubber band). */
 /* Nothing extends past the window. On iOS 26 with the translucent status bar the window is 59 pt short of the screen
    and iOS paints nothing below it (src/ios-vp-fix.ts): the frame stretched down there drew the tab bar without its
-   labels and cut the chat composer in half. index.html asks for the `black` status bar, which does not have the bug. */
+   labels and cut the chat composer in half. index.html asks for the `black` status bar, which does not have the bug,
+   and the html rule above gives apps added with the old one the whole screen. */
 .ph{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
+/* Keyboard open (src/ios-keyboard.ts, Home Screen app): the frame is the visible area above the keyboard, and the
+   keyboard covers the home indicator, so no bottom inset. */
+:root[data-kb]{--sab:0px}
+:root[data-kb] .ph{top:var(--kb-top,0px);bottom:auto;height:var(--kb-h,100%)}
 .screen{min-height:0;overflow:hidden auto}
 .app-header{padding:var(--sat) 8px 0 16px;gap:8px;height:calc(var(--sat) + 44px)}
 .app-logo{width:24px;height:24px;border-radius:6px}

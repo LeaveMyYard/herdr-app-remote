@@ -63,6 +63,18 @@ describe("iOS 26: nothing extends past the window", () => {
     for (const n of styles) expect(css(n), n).not.toMatch(/calc\(-1 \* var\(--ios-vp/);
   });
 
+  it("while the keyboard is open the frame is the visible area and there is no bottom inset (src/ios-keyboard.ts)", () => {
+    const app = css("app.css");
+    expect(app).toContain(":root[data-kb]{--sab:0px}");
+    expect(app).toContain(":root[data-kb] .ph{top:var(--kb-top,0px);bottom:auto;height:var(--kb-h,100%)}");
+  });
+
+  it("an installed app's root is the window plus inset-top tall, capped at the screen (WebKit bug 301108)", () => {
+    // In the iOS 26.5 Simulator this gave an app added with the translucent status bar the whole screen (innerHeight
+    // 873 -> 932, composer and tab bar drawn to the bottom). Standalone only; inset-top is 0 with the black status bar.
+    expect(css("app.css")).toContain("@media (display-mode: standalone){html{min-height:min(100lvh,calc(100% + env(safe-area-inset-top,0px)))}}");
+  });
+
   it("the bottom inset shrinks by the iOS deficit and never goes below 0 (the status bar style is in shell.test.ts)", () => {
     expect(css("app.css")).toContain("--sab:max(0px,calc(var(--inset-bottom,env(safe-area-inset-bottom,0px)) - var(--ios-vp-deficit,0px)));");
   });

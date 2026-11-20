@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useFollowOnResize } from "./follow-on-resize";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import type { OlderResult } from "../bridge/chatview";
 import { useHostName } from "../bridge/host-name";
@@ -161,6 +162,7 @@ export function ChatView({ agent, topic, loadOlder, onForbidden, input, terminal
 
   // Follow the end, unless the reader has scrolled up.
   const pinned = useRef(true);
+  useFollowOnResize(view, pinned);
   const lastSeen = useRef<string | null>(null);
   const [away, setAway] = useState(false);
   const [fresh, setFresh] = useState(0);

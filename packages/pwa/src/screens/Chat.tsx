@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useFollowOnResize } from "./follow-on-resize";
 import type { bridgeApi } from "@herdr-remote/protocol";
 import claudeIcon from "../assets/claude.svg";
 import codexIcon from "../assets/codex.svg";
@@ -226,6 +227,7 @@ export function Chat({ agent, topic, stale, question, backHref = "#/agents", inp
   // Follow the end of the output, unless the reader has scrolled up.
   const view = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  useFollowOnResize(view, pinned);
   const onScroll = () => {
     const el = view.current;
     if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;

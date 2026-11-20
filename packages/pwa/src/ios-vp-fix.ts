@@ -5,7 +5,9 @@
    but is 59 pt short, and iOS paints nothing below it: content laid out there is not drawn and cannot be tapped (the
    Agents tab bar lost its labels, the chat composer was cut in half). So nothing may extend past the window; instead the
    bottom inset shrinks by the deficit (--ios-vp-deficit, used by --sab in app.css), since the short viewport already
-   ends above the home indicator. screen.height - innerHeight equals inset-top; we detect exactly that. */
+   ends above the home indicator. screen.height - innerHeight equals inset-top; we detect exactly that.
+   app.css now gives such apps the whole screen (an html min-height of the window plus inset-top, WebKit bug 301108),
+   so the deficit is normally 0; this stays as the fallback should iOS not honour that rule. */
 
 export interface VpInput {
   standalone: boolean;

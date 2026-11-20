@@ -5,7 +5,10 @@ import { expect, test } from "@playwright/test";
  * screen height less the top inset, so a full-height frame sized in viewport-height units ends short of the bottom and
  * leaves an empty band under the tab bar. No test browser reproduces that, so this guards the cause instead: no
  * stylesheet rule may use a viewport-height unit, and the frame must fill the window with a body that does not scroll.
+ * One exception: app.css caps the root's iOS 26 min-height at 100lvh (the screen), inside min(), on html only; it never
+ * sizes the frame.
  */
+const allowed = (o: string) => o.replace(/\s/g, "").startsWith("html{min-height:min(100lvh,");
 test("no rule uses a viewport-height unit", async ({ page }) => {
   await page.goto("/?fixture=agents#/agents");
   await page.waitForSelector(".tabbar");
@@ -25,7 +28,7 @@ test("no rule uses a viewport-height unit", async ({ page }) => {
     for (const sheet of Array.from(document.styleSheets)) walk(sheet.cssRules);
     return out;
   });
-  expect(offenders).toEqual([]);
+  expect(offenders.filter((o) => !allowed(o))).toEqual([]);
 });
 
 test("the frame fills the window and the body does not scroll", async ({ page }) => {
