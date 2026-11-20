@@ -32,6 +32,7 @@ First release candidate: phone access to herdr-app over Tailscale. Nothing here 
 
 ### Fixed
 
+- iOS 26 Home Screen app: the chat composer was cut in half and the tab bar had no labels. With the translucent status bar, iOS 26 gives the Home Screen app a window 59 pt short of the screen and paints nothing below it, and the earlier workaround stretched the app frame down into that unpainted band. Nothing reaches past the window now; on such an app the bottom inset shrinks by the shortfall (the window already ends above the home indicator), so it shows a wider band under the tab bar and composer. `index.html` asks for the `black` status bar, which does not have the bug and gives the full-height layout, with the status bar in the app's own colour. iOS keeps the style an app was added with: remove the Herdr Home Screen app and add it again from Safari (which pairs it again) to get it. Reproduced and checked in the iOS 26.5 Simulator; RECIPE.md has the steps.
 - Chat no longer loads forever: the bridge read `hc ls --json` with a guessed shape and never found hc 0.1.20's `address`, so every chat was `terminal_not_found` and never read. Every chat failure (hc missing, `hc ls` or `hc read` failing, an unknown terminal, a timeout) is now a visible message on the phone within seconds, and hc is found in `~/.local/bin` when herdr-app's PATH lacks it (`hc_missing` otherwise, also in the panel's Setup).
 
 ### Changed

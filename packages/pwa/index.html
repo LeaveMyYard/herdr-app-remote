@@ -7,7 +7,10 @@
     <meta name="color-scheme" content="dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Not black-translucent: on iOS 26 that leaves the Home Screen app a window 59 pt short of the screen with nothing
+         painted below it (src/ios-vp-fix.ts). With `black` the page starts under the status bar, which iOS paints in the
+         page colour. iOS keeps the style an app was added with, so only apps added after this change get it. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="Herdr" />
     <!-- With credentials: the bridge serves each paired device its own manifest (S5b Home Screen transfer). -->
     <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials" />

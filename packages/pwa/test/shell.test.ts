@@ -32,7 +32,9 @@ describe("manifest and icons", () => {
     expect(html).toContain("viewport-fit=cover");
     expect(html).toContain('rel="apple-touch-icon"');
     expect(html).toContain('name="apple-mobile-web-app-capable"');
-    expect(html).toContain("black-translucent");
+    // `black`, not `black-translucent`: on iOS 26 the translucent one leaves the Home Screen app a short window (src/ios-vp-fix.ts).
+    expect(html).toContain('<meta name="apple-mobile-web-app-status-bar-style" content="black" />');
+    expect(html).not.toContain('content="black-translucent"');
     expect(existsSync(resolve(pwa, "public/icons/apple-touch-icon.png"))).toBe(true);
   });
 });
@@ -41,7 +43,8 @@ describe("safe areas", () => {
   const css = read("src/styles/app.css");
   it("uses the device insets in every mode, with no floor, and a harness-only override", () => {
     expect(css).toMatch(/--sat:var\(--inset-top,env\(safe-area-inset-top,0px\)\)/);
-    expect(css).toMatch(/--sab:var\(--inset-bottom,env\(safe-area-inset-bottom,0px\)\)/);
+    // The bottom inset less the iOS 26 short-window deficit (0 everywhere else), clamped at 0: not a floor on the inset.
+    expect(css).toContain("--sab:max(0px,calc(var(--inset-bottom,env(safe-area-inset-bottom,0px)) - var(--ios-vp-deficit,0px)));");
     expect(css).not.toMatch(/max\(env\(/);
     expect(css).not.toMatch(/--sa[tb]:\d+px/);
     expect(css).toMatch(/\.app-header\{[^}]*var\(--sat\)/);
