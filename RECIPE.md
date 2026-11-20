@@ -58,6 +58,16 @@ pnpm --filter @herdr-remote/pwa visual   # Playwright visual tests against desig
 
 CI runs the same two groups (`check` and `visual`, the latter in the Playwright container whose tag must equal the `@playwright/test` version).
 
+### Phone layout in the iOS Simulator
+
+Layout bugs that only a Home Screen app has (the iOS 26 short window in `packages/pwa/src/ios-vp-fix.ts`) need the iOS Simulator: no test browser has a status bar or a home indicator. This needs no bridge; it runs the fixtures.
+
+1. Xcode with an iOS 26 Simulator runtime: `xcodebuild -downloadPlatform iOS` (add `-architectureVariant universal` on an Intel Mac). A 430x932 iPhone (iPhone 15 Pro Max, 16 Plus) is the size the bug was measured on.
+2. `pnpm --filter @herdr-remote/protocol build`, then `pnpm --filter @herdr-remote/pwa dev --host 127.0.0.1`. The Simulator reaches the Mac's `127.0.0.1`.
+3. The Home Screen app opens the manifest's `start_url`, not the page it was added from. For a fixture, set `start_url` in `packages/pwa/public/manifest.webmanifest` to `./?fixture=chatview&view=chat&inset=device#/chat/a-1` for the check, and do not commit it. `&inset=device` keeps the Simulator's own safe areas instead of the boards' fake 50/30 px.
+4. In the Simulator's Safari open that URL, then Share, View More, Add to Home Screen with "Open as Web App" on, and open it from the Home Screen. iOS keeps the status bar style an app was added with: after changing it in `index.html`, add the app again.
+5. Five taps on the chat or Agents title open the viewport readings (innerHeight, insets, `--ios-vp-deficit`, the frame and composer boxes).
+
 ## 2. Verify on a real tailnet and iPhone
 
 Do this once before relying on it, on a machine where you accept the risk, and only after the rig is green. The rig uses a fake `tailscale` and a stand-in for serve, so the real serve and the real iPhone are checked here.
@@ -85,6 +95,7 @@ These could not be verified inside the rig and are still open. Tick them off her
 - [ ] **A real iPhone, end to end.** Pairing, approval, the Home Screen install, and storage: the Home Screen app's storage is separate from Safari's.
 - [ ] **Push on a real iPhone** (iOS 16.4 or newer): permission from a tap inside the Home Screen app, a delivered notification for a new question, a blocked agent and an alert, a tap opening the right screen, and a lapsed subscription. Push has no rig scenario; it is tested against a loopback fake push service only.
 - [ ] **Pairing transfer (S5b).** OPEN, not verified on a real iPhone. Whether Safari re-reads the manifest after the code is minted and keeps the `start_url` fragment (`/pair#t=`) on "Add to Home Screen"; if not, the Home Screen app opens unpaired and pairing must be repeated from Safari. Also confirm the Home Screen app gets a second token for the same device (Safari's keeps working, revoke removes both), and that a spent or expired code shows the "Each Home Screen setup works once, within 10 minutes." wording. Record the result here.
+- [ ] **iOS 26 status bar on a real iPhone.** The `black` status bar (full-height window, no deficit) and the shrunk bottom inset of an app added with the old translucent one were checked in the iOS 26.5 Simulator only. Check both on the iPhone (iOS 26.6.1): the old Home Screen app first, then removed and added again from Safari. Record the result here.
 - [ ] **Special keys (S16b).** Each default key in the Keys sheet on a real iPhone against a real terminal, the typing-time lines, and the "Special keys" desktop switch. The rig has pressed every allowed token through the real `hc keys` (scenario terminal-keys); the phone has not.
 - [ ] **`hc send` against a program on a dialog.** The `blocked` refusal kind was read from `hc schema` and has not been seen in the rig.
 - [ ] **`hc events`** against a live core (chat polls once a second until then).

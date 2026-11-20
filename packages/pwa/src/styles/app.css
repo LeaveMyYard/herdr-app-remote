@@ -5,9 +5,12 @@
   /* Safe areas: the device's own insets, applied exactly once per screen (top by the first row, bottom by the last).
      In Safari the browser chrome already takes both, so env() is 0 there; installed to the Home Screen it is the
      status bar and home indicator. --inset-top/--inset-bottom are set only by the test harness (main.tsx, ?fixture=),
-     because the design boards draw a fake 50 px status bar and 30 px home indicator and no test browser has real ones. */
+     because the design boards draw a fake 50 px status bar and 30 px home indicator and no test browser has real ones.
+     --ios-vp-deficit (src/ios-vp-fix.ts) is non-zero only on iOS 26 Home Screen apps added with the old translucent
+     status bar, whose window ends that far above the screen bottom, so above the home indicator: the bottom inset
+     shrinks by it, never below 0. */
   --sat:var(--inset-top,env(safe-area-inset-top,0px));
-  --sab:var(--inset-bottom,env(safe-area-inset-bottom,0px));
+  --sab:max(0px,calc(var(--inset-bottom,env(safe-area-inset-bottom,0px)) - var(--ios-vp-deficit,0px)));
 }
 html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);overscroll-behavior:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 #root{height:100%}
@@ -28,10 +31,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);oversc
    viewport-fit=cover and a translucent status bar reports 100vh/100dvh as the screen less the top inset, which left an
    empty band under the tab bar. position:fixed + inset:0 follows the real window. The body never scrolls; only .screen
    and the other inner lists do (overflow:hidden + overscroll-behavior:none above stop the iOS rubber band). */
-/* iOS 26 standalone only (src/ios-vp-fix.ts sets --ios-vp-fix, otherwise 0): the layout viewport is short by exactly
-   the top inset. Measured on iOS 26.6.1: screen 430x932, innerHeight/visualViewport 873, inset-top 59, inset-bottom 34,
-   .ph y 0 h 873 (bottom 59 pt of the screen outside it). Extending .ph downward puts the tab bar at the screen bottom. */
-.ph{position:fixed;inset:0 0 calc(-1 * var(--ios-vp-fix, 0px)) 0;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
+/* Nothing extends past the window. On iOS 26 with the translucent status bar the window is 59 pt short of the screen
+   and iOS paints nothing below it (src/ios-vp-fix.ts): the frame stretched down there drew the tab bar without its
+   labels and cut the chat composer in half. index.html asks for the `black` status bar, which does not have the bug. */
+.ph{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
 .screen{min-height:0;overflow:hidden auto}
 .app-header{padding:var(--sat) 8px 0 16px;gap:8px;height:calc(var(--sat) + 44px)}
 .app-logo{width:24px;height:24px;border-radius:6px}
@@ -118,7 +121,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);oversc
 @keyframes hd-breathe{0%,100%{opacity:.7}50%{opacity:1}}
 
 /* Hidden viewport diagnostics overlay (see Diagnostics.tsx) */
-.diag{position:fixed;inset:0 0 calc(-1 * var(--ios-vp-fix, 0px)) 0;z-index:100;overflow:auto;background:var(--t-chrome);color:var(--t-foreground,inherit);padding:calc(var(--sat) + 12px) max(12px,env(safe-area-inset-right)) calc(var(--sab) + 12px) max(12px,env(safe-area-inset-left));font:12px/1.4 ui-monospace,monospace}
+.diag{position:fixed;inset:0;z-index:100;overflow:auto;background:var(--t-chrome);color:var(--t-foreground,inherit);padding:calc(var(--sat) + 12px) max(12px,env(safe-area-inset-right)) calc(var(--sab) + 12px) max(12px,env(safe-area-inset-left));font:12px/1.4 ui-monospace,monospace}
 .diag-bar{display:flex;gap:8px;margin-bottom:8px}
 .diag-bar button{min-height:44px;padding:0 16px}
 .diag-list>div{padding:4px 0;border-bottom:1px solid var(--t-border)}

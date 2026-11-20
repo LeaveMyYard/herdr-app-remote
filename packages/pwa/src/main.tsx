@@ -18,6 +18,7 @@ import { HostNameProvider } from "./bridge/host-name";
 import { boardData, host as demoHost } from "./fixtures";
 import { registerServiceWorker } from "./sw-register";
 import { installIosVpFix } from "./ios-vp-fix";
+import { installStatusBarTint } from "./status-bar-tint";
 import { PromptCardsBoard } from "./chatview/prompt/fixtures";
 import { TimelineBoard } from "./timeline/TimelineBoard";
 
@@ -50,12 +51,13 @@ const params = new URLSearchParams(window.location.search);
 const fixture = params.get("fixture");
 const host = hostNameFrom(window.location.hostname);
 // Test hook: the boards draw a 50 px status bar and 30 px home indicator, so the harness stands them in for the
-// device's safe areas; `&inset-top=` and `&inset-bottom=` (px) override them (the WebKit safe-area test).
+// device's safe areas; `&inset-top=` and `&inset-bottom=` (px) override them (the WebKit safe-area test), and
+// `&inset=device` keeps the device's own (a fixture on a real iPhone or in the iOS Simulator, see RECIPE.md).
 const inset = (key: string, fallback: number) => {
   const n = Number(params.get(key));
   return params.get(key) !== null && Number.isFinite(n) ? n : fallback;
 };
-if (fixture !== null) {
+if (fixture !== null && params.get("inset") !== "device") {
   document.documentElement.style.setProperty("--inset-top", `${inset("inset-top", 50)}px`);
   document.documentElement.style.setProperty("--inset-bottom", `${inset("inset-bottom", 30)}px`);
 }
@@ -88,4 +90,5 @@ if (fixture === "pair") {
 }
 createRoot(root).render(<StrictMode>{app}</StrictMode>);
 installIosVpFix();
+installStatusBarTint();
 registerServiceWorker();

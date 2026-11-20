@@ -1,12 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { boardData, swarmTopic } from "../src/fixtures";
 import { nodeUid } from "../src/panorama/select";
 import { Chat } from "../src/screens/Chat";
-import { installIosVpFix } from "../src/ios-vp-fix";
 
 const dir = join(process.cwd(), "src/styles");
 const css = (n: string) => readFileSync(join(dir, n), "utf8");
@@ -16,7 +15,7 @@ beforeEach(() => {
   window.location.hash = "";
 });
 
-describe("every route renders inside the one app frame (.ph, extended by --ios-vp-fix)", () => {
+describe("every route renders inside the one app frame (.ph, pinned to the window)", () => {
   const routes: [string, string, () => React.ReactElement][] = [
     ["a tab", "#/agents", () => <App />],
     ["chat", "#/chat/a-1", () => <App />],
@@ -36,7 +35,7 @@ describe("every route renders inside the one app frame (.ph, extended by --ios-v
 
   it("chat has no frame-level height of its own and its read-only footer is not a fixed slot", () => {
     const app = css("app.css");
-    expect(app).toContain(".ph{position:fixed;inset:0 0 calc(-1 * var(--ios-vp-fix, 0px)) 0;");
+    expect(app).toContain(".ph{position:fixed;inset:0;");
     const foot = css("chat.css").match(/^\.chat-foot\{([^}]*)\}/m)?.[1] ?? "";
     expect(foot).not.toMatch(/(^|;)\s*height:/);
     expect(foot).toContain("calc(var(--sab) + 8px)");
@@ -54,45 +53,17 @@ describe("every route renders inside the one app frame (.ph, extended by --ios-v
   });
 });
 
-describe("the iOS 26 viewport fix on the chat route (no tab bar)", () => {
-  let cleanup: () => void = () => undefined;
-  const fakeWin = () =>
-    ({
-      navigator: { standalone: true },
-      screen: { width: 430, height: 932 },
-      innerWidth: 430,
-      innerHeight: 873,
-      visualViewport: null,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      requestAnimationFrame: (f: () => void) => (f(), 1),
-      cancelAnimationFrame: () => undefined,
-    }) as unknown as Window;
-  beforeEach(() => {
-    document.elementFromPoint = () => null;
+describe("iOS 26: nothing extends past the window", () => {
+  // On iOS 26 with the translucent status bar the Home Screen app's window is 59 pt short of the screen and iOS paints
+  // nothing below it (src/ios-vp-fix.ts): a frame stretched down there drew the tab bar without its labels and cut the
+  // chat composer in half. Reproduced in the iOS 26.5 Simulator (RECIPE.md).
+  const styles = ["app.css", "chat.css", "inbox.css", "pair.css", "panorama.css", "usage.css", "prompt-card.css"];
+
+  it("no stylesheet pushes anything below the window's bottom edge", () => {
+    for (const n of styles) expect(css(n), n).not.toMatch(/calc\(-1 \* var\(--ios-vp/);
   });
-  afterEach(() => {
-    cleanup();
-    delete (document as { elementFromPoint?: unknown }).elementFromPoint;
-    document.body.innerHTML = "";
-    vi.restoreAllMocks();
-  });
-  const chatDom = () => {
-    document.body.innerHTML = '<div class="hd ph"><header></header><main></main><footer class="chat-foot"></footer></div>';
-    const foot = document.querySelector("footer")!;
-    foot.getBoundingClientRect = () => ({ x: 0, y: 790, width: 430, height: 143 }) as DOMRect;
-    return foot;
-  };
-  it("applies and keeps the fix while the chat footer is hit", () => {
-    const foot = chatDom();
-    vi.spyOn(document, "elementFromPoint").mockReturnValue(foot);
-    cleanup = installIosVpFix(fakeWin(), document, () => 59);
-    expect(document.documentElement.style.getPropertyValue("--ios-vp-fix")).toBe("59px");
-  });
-  it("drops it when nothing is hit at the chat footer's top edge", () => {
-    chatDom();
-    vi.spyOn(document, "elementFromPoint").mockReturnValue(null);
-    cleanup = installIosVpFix(fakeWin(), document, () => 59);
-    expect(document.documentElement.style.getPropertyValue("--ios-vp-fix")).toBe("0px");
+
+  it("the bottom inset shrinks by the iOS deficit and never goes below 0 (the status bar style is in shell.test.ts)", () => {
+    expect(css("app.css")).toContain("--sab:max(0px,calc(var(--inset-bottom,env(safe-area-inset-bottom,0px)) - var(--ios-vp-deficit,0px)));");
   });
 });
