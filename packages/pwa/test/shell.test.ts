@@ -46,7 +46,9 @@ describe("safe areas", () => {
     // The bottom inset less the iOS 26 short-window deficit (0 everywhere else), clamped at 0: not a floor on the inset.
     expect(css).toContain("--sab:max(0px,calc(var(--inset-bottom,env(safe-area-inset-bottom,0px)) - var(--ios-vp-deficit,0px)));");
     expect(css).not.toMatch(/max\(env\(/);
-    expect(css).not.toMatch(/--sa[tb]:\d+px/);
+    // The one fixed value: 0 while the keyboard is open (src/ios-keyboard.ts), which covers the home indicator.
+    expect(css).toContain(":root[data-kb]{--sab:0px}");
+    expect(css.replace(":root[data-kb]{--sab:0px}", "")).not.toMatch(/--sa[tb]:\d+px/);
     expect(css).toMatch(/\.app-header\{[^}]*var\(--sat\)/);
     expect(css).toMatch(/\.status-spacer\{[^}]*var\(--sat\)/);
     expect(css).toMatch(/\.tabbar\{[^}]*var\(--sab\)/);

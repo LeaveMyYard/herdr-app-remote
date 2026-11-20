@@ -35,6 +35,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--t-chrome);oversc
    and iOS paints nothing below it (src/ios-vp-fix.ts): the frame stretched down there drew the tab bar without its
    labels and cut the chat composer in half. index.html asks for the `black` status bar, which does not have the bug. */
 .ph{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--t-chrome);overflow:hidden;font-size:14px;line-height:1.4}
+/* Keyboard open (src/ios-keyboard.ts, Home Screen app): the frame is the visible area above the keyboard, and the
+   keyboard covers the home indicator, so no bottom inset. */
+:root[data-kb]{--sab:0px}
+:root[data-kb] .ph{top:var(--kb-top,0px);bottom:auto;height:var(--kb-h,100%)}
 .screen{min-height:0;overflow:hidden auto}
 .app-header{padding:var(--sat) 8px 0 16px;gap:8px;height:calc(var(--sat) + 44px)}
 .app-logo{width:24px;height:24px;border-radius:6px}
