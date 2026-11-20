@@ -6,7 +6,7 @@ import { chatAgent, chatTopic } from "../src/chat-fixtures";
 import { fetchTerminalInput, terminalInputOf } from "../src/bridge/me";
 import { HostNameProvider } from "../src/bridge/host-name";
 import { Chat } from "../src/screens/Chat";
-import { forgetConfirmations, sendWords, textProblem, type ChatInput, type SendOutcome } from "../src/screens/ChatComposer";
+import { ChatComposer, forgetConfirmations, sendWords, textProblem, type ChatInput, type SendOutcome } from "../src/screens/ChatComposer";
 
 /** Every chat here is on "desk-1", the board's computer. */
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ({ children }: { children: ReactNode }) => <HostNameProvider name="desk-1">{children}</HostNameProvider> });
@@ -44,6 +44,19 @@ describe("Chat composer (terminal.input)", () => {
     expect([...keys.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["Enter", "Type a slash", "Keys: open the special keys menu"]);
     for (const k of ["Esc", "Tab", "⇧Tab", "Ctrl-C", "↑", "↓"]) expect(screen.queryByRole("button", { name: k })).toBeNull();
     expect(screen.queryByText(/Read-only here/)).toBeNull();
+  });
+
+  it("types exactly into a terminal (no autocorrect), but keeps iOS predictive text for a message to the agent", () => {
+    // autocorrect="off" also hides iOS's predictive bar: right for terminal input, wrong for the chat view's prose.
+    const { unmount } = render(<Chat {...props} input={input().input} />);
+    expect(box()).toHaveAttribute("autocorrect", "off");
+    expect(box()).toHaveAttribute("autocapitalize", "off");
+    expect(box()).toHaveAttribute("spellcheck", "false");
+    unmount();
+    render(<ChatComposer variant="chat" terminal="t3" agentName="Agent 1" input={input().input} />);
+    expect(box()).toHaveAttribute("autocorrect", "on");
+    expect(box()).toHaveAttribute("autocapitalize", "sentences");
+    expect(box()).toHaveAttribute("spellcheck", "true");
   });
 
   it("asks before the first send to a terminal; Cancel sends nothing", async () => {

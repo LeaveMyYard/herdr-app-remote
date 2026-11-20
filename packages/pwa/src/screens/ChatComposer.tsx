@@ -310,9 +310,11 @@ export function ChatComposer({ terminal, agentName, input, now = Date.now, demoS
           onChange={(e) => {
             if (!busy) setText(e.target.value);
           }}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
+          // Typing into a terminal wants exactly the keys pressed. A message to the agent (chat view) is prose: iOS's
+          // predictive bar, autocorrect and sentence capitals stay on (autocorrect="off" also hides the predictive bar).
+          autoCapitalize={variant === "chat" ? "sentences" : "off"}
+          autoCorrect={variant === "chat" ? "on" : "off"}
+          spellCheck={variant === "chat"}
         />
         {stoppable || stopping ? (
           <button type="button" aria-label={stopLabel(agentName)} className="row nf chat-send chat-stop" disabled={stopping} onClick={() => void onStop()}>

@@ -18,6 +18,7 @@ import { HostNameProvider } from "./bridge/host-name";
 import { boardData, host as demoHost } from "./fixtures";
 import { registerServiceWorker } from "./sw-register";
 import { installIosVpFix } from "./ios-vp-fix";
+import { installStatusBarTint } from "./status-bar-tint";
 import { PromptCardsBoard } from "./chatview/prompt/fixtures";
 import { TimelineBoard } from "./timeline/TimelineBoard";
 
@@ -89,4 +90,5 @@ if (fixture === "pair") {
 }
 createRoot(root).render(<StrictMode>{app}</StrictMode>);
 installIosVpFix();
+installStatusBarTint();
 registerServiceWorker();
